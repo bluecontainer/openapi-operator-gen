@@ -1,0 +1,230 @@
+openapi: "3.0.0"
+info:
+  title: Petstore API
+  version: "1.0.0"
+  description: A sample API for managing pets
+
+servers:
+  - url: https://api.petstore.example.com/v1
+
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List all pets
+      responses:
+        '200':
+          description: A list of pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+    post:
+      operationId: createPet
+      summary: Create a new pet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+      responses:
+        '201':
+          description: Pet created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      summary: Get a pet by ID
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+    put:
+      operationId: updatePet
+      summary: Update a pet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+      responses:
+        '200':
+          description: Pet updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+    delete:
+      operationId: deletePet
+      summary: Delete a pet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Pet deleted
+
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List all orders
+      responses:
+        '200':
+          description: A list of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+    post:
+      operationId: createOrder
+      summary: Create a new order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Order'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Get an order by ID
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: An order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+    delete:
+      operationId: deleteOrder
+      summary: Delete an order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Order deleted
+
+components:
+  schemas:
+    Pet:
+      type: object
+      required:
+        - name
+        - species
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the pet
+        name:
+          type: string
+          description: Name of the pet
+          minLength: 1
+          maxLength: 100
+        species:
+          type: string
+          description: Species of the pet
+          enum:
+            - dog
+            - cat
+            - bird
+            - fish
+            - other
+        breed:
+          type: string
+          description: Breed of the pet
+        age:
+          type: integer
+          description: Age of the pet in years
+          minimum: 0
+          maximum: 100
+        weight:
+          type: number
+          format: float
+          description: Weight of the pet in kg
+        vaccinated:
+          type: boolean
+          description: Whether the pet is vaccinated
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags for the pet
+
+    Order:
+      type: object
+      required:
+        - petId
+        - quantity
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the order
+        petId:
+          type: string
+          description: ID of the pet being ordered
+        quantity:
+          type: integer
+          description: Quantity of pets
+          minimum: 1
+        status:
+          type: string
+          description: Order status
+          enum:
+            - pending
+            - approved
+            - shipped
+            - delivered
+            - cancelled
+        shipDate:
+          type: string
+          format: date-time
+          description: Expected ship date
+        complete:
+          type: boolean
+          description: Whether the order is complete

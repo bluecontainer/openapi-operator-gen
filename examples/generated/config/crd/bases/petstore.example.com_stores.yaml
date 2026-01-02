@@ -1,0 +1,113 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: (unknown)
+  name: stores.petstore.example.com
+spec:
+  group: petstore.example.com
+  names:
+    kind: Store
+    listKind: StoreList
+    plural: stores
+    shortNames:
+    - st
+    - sto
+    singular: store
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.externalID
+      name: External-ID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Store is the Schema for the stores API
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: StoreSpec defines the desired state of Store
+            type: object
+            properties:
+              complete:
+                type: boolean
+              id:
+                type: integer
+              petId:
+                type: integer
+              quantity:
+                type: integer
+              shipDate:
+                type: string
+              status:
+                description: Order Status
+                type: string
+                enum:
+                - placed
+                - approved
+                - delivered
+          status:
+            description: StoreStatus defines the observed state of Store
+            type: object
+            properties:
+              state:
+                description: Current state of the resource
+                type: string
+                enum:
+                - Pending
+                - Syncing
+                - Synced
+                - Failed
+              lastSyncTime:
+                description: Last time the resource was synced
+                type: string
+                format: date-time
+              externalID:
+                description: ID in the external REST API
+                type: string
+              message:
+                description: Human-readable status message
+                type: string
+              observedGeneration:
+                description: Last observed generation
+                type: integer
+                format: int64
+              conditions:
+                description: Conditions
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+              response:
+                description: Last API response
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
