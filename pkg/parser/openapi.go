@@ -22,14 +22,14 @@ type Resource struct {
 
 // Operation represents an HTTP operation on a resource
 type Operation struct {
-	Method        string
-	Path          string
-	OperationID   string
-	Summary       string
-	RequestBody   *Schema
-	ResponseBody  *Schema
-	PathParams    []Parameter
-	QueryParams   []Parameter
+	Method       string
+	Path         string
+	OperationID  string
+	Summary      string
+	RequestBody  *Schema
+	ResponseBody *Schema
+	PathParams   []Parameter
+	QueryParams  []Parameter
 }
 
 // Parameter represents an API parameter
@@ -59,6 +59,8 @@ type Schema struct {
 	Minimum     *float64
 	Maximum     *float64
 	Pattern     string
+	MinItems    *int64
+	MaxItems    *int64
 }
 
 // ParsedSpec contains the parsed OpenAPI specification
@@ -367,6 +369,14 @@ func (p *Parser) convertSchema(name string, schema *openapi3.Schema) *Schema {
 	}
 	if schema.Max != nil {
 		s.Maximum = schema.Max
+	}
+	if schema.MinItems != 0 {
+		v := int64(schema.MinItems)
+		s.MinItems = &v
+	}
+	if schema.MaxItems != nil {
+		v := int64(*schema.MaxItems)
+		s.MaxItems = &v
 	}
 
 	// Handle enum

@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/example/openapi-operator-gen/internal/config"
-	"github.com/example/openapi-operator-gen/pkg/parser"
+	"github.com/bluecontainer/openapi-operator-gen/internal/config"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/parser"
 	"github.com/iancoleman/strcase"
 )
 
@@ -54,6 +54,8 @@ type ValidationRules struct {
 	Maximum   *float64
 	Pattern   string
 	Enum      []string
+	MinItems  *int64
+	MaxItems  *int64
 }
 
 // Mapper maps REST resources to Kubernetes CRD definitions
@@ -238,13 +240,16 @@ func (m *Mapper) schemaToFieldDefinition(name string, schema *parser.Schema, isR
 
 	// Handle validation
 	if schema.MinLength != nil || schema.MaxLength != nil || schema.Minimum != nil ||
-		schema.Maximum != nil || schema.Pattern != "" || len(schema.Enum) > 0 {
+		schema.Maximum != nil || schema.Pattern != "" || len(schema.Enum) > 0 ||
+		schema.MinItems != nil || schema.MaxItems != nil {
 		field.Validation = &ValidationRules{
 			MinLength: schema.MinLength,
 			MaxLength: schema.MaxLength,
 			Minimum:   schema.Minimum,
 			Maximum:   schema.Maximum,
 			Pattern:   schema.Pattern,
+			MinItems:  schema.MinItems,
+			MaxItems:  schema.MaxItems,
 		}
 		for _, e := range schema.Enum {
 			if s, ok := e.(string); ok {

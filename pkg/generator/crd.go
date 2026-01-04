@@ -7,9 +7,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/example/openapi-operator-gen/internal/config"
-	"github.com/example/openapi-operator-gen/pkg/mapper"
-	"github.com/example/openapi-operator-gen/pkg/templates"
+	"github.com/bluecontainer/openapi-operator-gen/internal/config"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/templates"
 )
 
 // CRDGenerator generates CRD YAML manifests

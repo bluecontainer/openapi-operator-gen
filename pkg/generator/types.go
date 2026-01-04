@@ -9,9 +9,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/example/openapi-operator-gen/internal/config"
-	"github.com/example/openapi-operator-gen/pkg/mapper"
-	"github.com/example/openapi-operator-gen/pkg/templates"
+	"github.com/bluecontainer/openapi-operator-gen/internal/config"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/templates"
 )
 
 // TypesGenerator generates Go type definitions for CRDs
@@ -56,8 +56,8 @@ type FieldData struct {
 	Required    bool
 	Validation  *mapper.ValidationRules
 	Enum        []string
-	Fields      []FieldData  // nested fields for struct types
-	ItemType    *FieldData   // item type for array types
+	Fields      []FieldData // nested fields for struct types
+	ItemType    *FieldData  // item type for array types
 }
 
 // NestedTypeData holds information about a nested type to generate

@@ -652,11 +652,11 @@ func TestGetDeploymentName(t *testing.T) {
 
 func TestGetServiceName(t *testing.T) {
 	tests := []struct {
-		name            string
-		config          Config
-		discoveredSvc   string
-		discoveredSts   string
-		expected        string
+		name          string
+		config        Config
+		discoveredSvc string
+		discoveredSts string
+		expected      string
 	}{
 		{"configured service", Config{ServiceName: "my-svc", StatefulSetName: "my-sts"}, "", "", "my-svc"},
 		{"discovered service", Config{StatefulSetName: "my-sts"}, "discovered-svc", "", "discovered-svc"},

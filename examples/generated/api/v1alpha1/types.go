@@ -17,13 +17,17 @@ import (
 
 // PetCategory is a nested type used by CRD specs
 type PetCategory struct {
-	Id   *int64 `json:"id,omitempty"`
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+	// +optional
 	Name string `json:"name,omitempty"`
 }
 
 // PetTagsItem is a nested type used by CRD specs
 type PetTagsItem struct {
-	Id   *int64 `json:"id,omitempty"`
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+	// +optional
 	Name string `json:"name,omitempty"`
 }
 
@@ -32,8 +36,10 @@ type PetSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	// +optional
 	Category PetCategory `json:"category,omitempty"`
 
+	// +optional
 	Id *int64 `json:"id,omitempty"`
 
 	// +kubebuilder:validation:Required
@@ -43,10 +49,12 @@ type PetSpec struct {
 	PhotoUrls []string `json:"photoUrls"`
 
 	// pet status in the store
+	// +optional
 	// +kubebuilder:validation:Enum=available;pending;sold
 	// +kubebuilder:validation:Enum=available;pending;sold
 	Status string `json:"status,omitempty"`
 
+	// +optional
 	Tags []PetTagsItem `json:"tags,omitempty"`
 
 	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
@@ -84,24 +92,35 @@ type PetStatus struct {
 
 	// State represents the current state of the resource
 	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +optional
 	State string `json:"state,omitempty"`
 
 	// LastSyncTime is the last time the resource was synced with the REST API
+	// +optional
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
 	// ExternalID is the ID of the resource in the external REST API
+	// +optional
 	ExternalID string `json:"externalID,omitempty"`
 
 	// Message is a human-readable message about the current state
+	// +optional
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of an object's state
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
 	// ObservedGeneration is the last observed generation
+	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Response contains the last response from the REST API
+	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Response *runtime.RawExtension `json:"response,omitempty"`
 }
@@ -140,17 +159,23 @@ type StoreSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	// +optional
 	Complete bool `json:"complete,omitempty"`
 
+	// +optional
 	Id *int64 `json:"id,omitempty"`
 
+	// +optional
 	PetId *int64 `json:"petId,omitempty"`
 
+	// +optional
 	Quantity *int32 `json:"quantity,omitempty"`
 
+	// +optional
 	ShipDate *metav1.Time `json:"shipDate,omitempty"`
 
 	// Order Status
+	// +optional
 	// +kubebuilder:validation:Enum=placed;approved;delivered
 	// +kubebuilder:validation:Enum=placed;approved;delivered
 	Status string `json:"status,omitempty"`
@@ -190,24 +215,35 @@ type StoreStatus struct {
 
 	// State represents the current state of the resource
 	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +optional
 	State string `json:"state,omitempty"`
 
 	// LastSyncTime is the last time the resource was synced with the REST API
+	// +optional
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
 	// ExternalID is the ID of the resource in the external REST API
+	// +optional
 	ExternalID string `json:"externalID,omitempty"`
 
 	// Message is a human-readable message about the current state
+	// +optional
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of an object's state
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
 	// ObservedGeneration is the last observed generation
+	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Response contains the last response from the REST API
+	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Response *runtime.RawExtension `json:"response,omitempty"`
 }
@@ -246,21 +282,29 @@ type UserSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	// +optional
 	Email string `json:"email,omitempty"`
 
+	// +optional
 	FirstName string `json:"firstName,omitempty"`
 
+	// +optional
 	Id *int64 `json:"id,omitempty"`
 
+	// +optional
 	LastName string `json:"lastName,omitempty"`
 
+	// +optional
 	Password string `json:"password,omitempty"`
 
+	// +optional
 	Phone string `json:"phone,omitempty"`
 
 	// User Status
+	// +optional
 	UserStatus *int32 `json:"userStatus,omitempty"`
 
+	// +optional
 	Username string `json:"username,omitempty"`
 
 	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
@@ -298,24 +342,35 @@ type UserStatus struct {
 
 	// State represents the current state of the resource
 	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +optional
 	State string `json:"state,omitempty"`
 
 	// LastSyncTime is the last time the resource was synced with the REST API
+	// +optional
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
 	// ExternalID is the ID of the resource in the external REST API
+	// +optional
 	ExternalID string `json:"externalID,omitempty"`
 
 	// Message is a human-readable message about the current state
+	// +optional
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of an object's state
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
 	// ObservedGeneration is the last observed generation
+	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Response contains the last response from the REST API
+	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Response *runtime.RawExtension `json:"response,omitempty"`
 }

@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/example/openapi-operator-gen/internal/config"
-	"github.com/example/openapi-operator-gen/pkg/generator"
-	"github.com/example/openapi-operator-gen/pkg/mapper"
-	"github.com/example/openapi-operator-gen/pkg/parser"
+	"github.com/bluecontainer/openapi-operator-gen/internal/config"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/generator"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/parser"
 )
 
 var (
@@ -66,7 +66,8 @@ func init() {
 	generateCmd.Flags().StringVarP(&cfg.APIGroup, "group", "g", "", "Kubernetes API group (e.g., myapp.example.com) (required)")
 	generateCmd.Flags().StringVarP(&cfg.APIVersion, "version", "v", "v1alpha1", "Kubernetes API version")
 	generateCmd.Flags().StringVarP((*string)(&cfg.MappingMode), "mapping", "m", "per-resource", "Resource mapping mode: per-resource or single-crd")
-	generateCmd.Flags().StringVar(&cfg.ModuleName, "module", "github.com/example/generated-operator", "Go module name for generated code")
+	generateCmd.Flags().StringVar(&cfg.ModuleName, "module", "github.com/bluecontainer/generated-operator", "Go module name for generated code")
+	generateCmd.Flags().BoolVar(&cfg.GenerateCRDs, "generate-crds", false, "Generate CRD YAML manifests directly (default: use controller-gen)")
 
 	generateCmd.MarkFlagRequired("spec")
 	generateCmd.MarkFlagRequired("group")
@@ -121,14 +122,19 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Println("  Generated api/<version>/groupversion_info.go")
 	fmt.Println()
 
-	// Generate CRD YAML
-	fmt.Println("Generating CRD YAML manifests...")
-	crdGen := generator.NewCRDGenerator(cfg)
-	if err := crdGen.Generate(crds); err != nil {
-		return fmt.Errorf("failed to generate CRD YAML: %w", err)
+	// Generate CRD YAML (optional - controller-gen is recommended)
+	if cfg.GenerateCRDs {
+		fmt.Println("Generating CRD YAML manifests...")
+		crdGen := generator.NewCRDGenerator(cfg)
+		if err := crdGen.Generate(crds); err != nil {
+			return fmt.Errorf("failed to generate CRD YAML: %w", err)
+		}
+		fmt.Println("  Generated config/crd/bases/*.yaml")
+		fmt.Println()
+	} else {
+		fmt.Println("Skipping CRD YAML generation (use 'make generate' to generate with controller-gen)")
+		fmt.Println()
 	}
-	fmt.Println("  Generated config/crd/bases/*.yaml")
-	fmt.Println()
 
 	// Generate controllers
 	fmt.Println("Generating controller reconciliation logic...")

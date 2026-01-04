@@ -17,6 +17,179 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - Multiple endpoint selection strategies
 - Per-CR workload targeting for multi-tenant scenarios
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                           OPENAPI-OPERATOR-GEN ARCHITECTURE                         │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+                              ┌─────────────────────┐
+                              │   OpenAPI Spec      │
+                              │  (YAML/JSON)        │
+                              │                     │
+                              │  paths:             │
+                              │    /pets:           │
+                              │    /users:          │
+                              │    /stores:         │
+                              └──────────┬──────────┘
+                                         │
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              CODE GENERATOR (CLI)                                   │
+│  cmd/openapi-operator-gen                                                           │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                     │
+│   ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐            │
+│   │     Parser      │      │     Mapper      │      │    Generator    │            │
+│   │  pkg/parser/    │─────▶│  pkg/mapper/    │─────▶│  pkg/generator/ │            │
+│   │                 │      │                 │      │                 │            │
+│   │ • Load spec     │      │ • REST → CRD    │      │ • types.go      │            │
+│   │ • Extract paths │      │ • Schema map    │      │ • controllers   │            │
+│   │ • Parse schemas │      │ • Field types   │      │ • CRD YAML      │            │
+│   └─────────────────┘      └─────────────────┘      │ • main.go       │            │
+│                                                      │ • Dockerfile    │            │
+│                                      ┌───────────────┴─────────────────┘            │
+│                                      │                                              │
+│                                      ▼                                              │
+│                            ┌─────────────────┐                                      │
+│                            │    Templates    │                                      │
+│                            │ pkg/templates/  │                                      │
+│                            │                 │                                      │
+│                            │ • types.go.tmpl │                                      │
+│                            │ • controller.go │                                      │
+│                            │ • main.go.tmpl  │                                      │
+│                            │ • crd.yaml.tmpl │                                      │
+│                            └─────────────────┘                                      │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                                         │ generates
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              GENERATED OPERATOR                                     │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                     │
+│   api/v1alpha1/              internal/controller/           config/crd/bases/       │
+│   ┌──────────────┐           ┌──────────────────┐          ┌──────────────────┐    │
+│   │  types.go    │           │ pet_controller   │          │  pets.yaml       │    │
+│   │  • PetSpec   │           │ user_controller  │          │  users.yaml      │    │
+│   │  • PetStatus │           │ store_controller │          │  stores.yaml     │    │
+│   └──────────────┘           └────────┬─────────┘          └──────────────────┘    │
+│                                       │                                             │
+│                                       │ imports                                     │
+│                                       ▼                                             │
+│                    ┌──────────────────────────────────────┐                        │
+│                    │      Endpoint Resolver Library       │                        │
+│                    │   pkg/endpoint/resolver.go           │◀───── SHARED LIBRARY   │
+│                    │                                      │                        │
+│                    │  • StatefulSet discovery             │                        │
+│                    │  • Deployment discovery              │                        │
+│                    │  • Helm release discovery            │                        │
+│                    │  • Strategy selection                │                        │
+│                    │  • Health checking                   │                        │
+│                    └──────────────────────────────────────┘                        │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                                         │ at runtime
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                           KUBERNETES CLUSTER (RUNTIME)                              │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                     │
+│  ┌─────────────────┐         ┌─────────────────────────────────────────┐           │
+│  │  Custom         │         │         Generated Operator              │           │
+│  │  Resources      │────────▶│                                         │           │
+│  │                 │ watch   │  ┌───────────────────────────────────┐  │           │
+│  │  Pet CR         │         │  │       Controller Reconcile        │  │           │
+│  │  User CR        │         │  │                                   │  │           │
+│  │  Store CR       │         │  │  1. Get CR spec                   │  │           │
+│  └─────────────────┘         │  │  2. Resolve endpoint              │  │           │
+│                              │  │  3. Call REST API                 │  │           │
+│                              │  │  4. Update CR status              │  │           │
+│                              │  └───────────────┬───────────────────┘  │           │
+│                              └──────────────────│──────────────────────┘           │
+│                                                 │                                   │
+│                                                 │ HTTP                              │
+│                                                 ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                    REST API Workload                                        │   │
+│  │                                                                             │   │
+│  │   StatefulSet / Deployment / Helm Release                                   │   │
+│  │   ┌─────────┐  ┌─────────┐  ┌─────────┐                                    │   │
+│  │   │  Pod 0  │  │  Pod 1  │  │  Pod 2  │                                    │   │
+│  │   │ :8080   │  │ :8080   │  │ :8080   │                                    │   │
+│  │   └─────────┘  └─────────┘  └─────────┘                                    │   │
+│  │        ▲            ▲            ▲                                          │   │
+│  │        └────────────┼────────────┘                                          │   │
+│  │                     │                                                       │   │
+│  │              Endpoint Resolver selects pod(s) based on strategy:            │   │
+│  │              • round-robin  → distribute across pods                        │   │
+│  │              • leader-only  → always pod-0                                  │   │
+│  │              • any-healthy  → first healthy pod                             │   │
+│  │              • all-healthy  → fan-out to all                                │   │
+│  │              • by-ordinal   → specific pod index                            │   │
+│  │                                                                             │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+
+ENDPOINT DISCOVERY MODES
+========================
+
+DNS Mode (StatefulSet)                    Pod IP Mode (Deployment/StatefulSet)
+┌─────────────────────────────┐          ┌─────────────────────────────┐
+│                             │          │                             │
+│  pod-0.svc.ns.svc.cluster   │          │  Query K8s API for pods     │
+│  pod-1.svc.ns.svc.cluster   │          │  Use pod.status.podIP       │
+│  pod-2.svc.ns.svc.cluster   │          │  10.0.0.1, 10.0.0.2, ...    │
+│                             │          │                             │
+└─────────────────────────────┘          └─────────────────────────────┘
+
+
+PROJECT STRUCTURE
+=================
+
+openapi-operator-gen/
+│
+├── cmd/openapi-operator-gen/      ◀── CLI entry point
+│   └── main.go
+│
+├── pkg/
+│   ├── parser/                    ◀── OpenAPI spec parser
+│   │   └── openapi.go
+│   │
+│   ├── mapper/                    ◀── REST → CRD mapping
+│   │   └── resource.go
+│   │
+│   ├── generator/                 ◀── Code generation
+│   │   ├── types.go
+│   │   ├── crd.go
+│   │   └── controller.go
+│   │
+│   ├── templates/                 ◀── Go templates
+│   │   ├── types.go.tmpl
+│   │   ├── controller.go.tmpl
+│   │   ├── main.go.tmpl
+│   │   └── crd.yaml.tmpl
+│   │
+│   └── endpoint/                  ◀── SHARED LIBRARY (imported by operators)
+│       ├── resolver.go
+│       └── resolver_test.go           57 unit tests
+│
+├── internal/config/               ◀── Configuration
+│   └── config.go
+│
+├── examples/
+│   ├── petstore.1.0.27.yaml       ◀── Sample OpenAPI spec
+│   └── generated/                 ◀── Generated operator output
+│
+└── scripts/
+    └── build-example.sh           ◀── Build script
+```
+
 ## Requirements
 
 - Go 1.21+ (tested with Go 1.25)
@@ -62,7 +235,7 @@ openapi-operator-gen generate \
   --output examples/generated \
   --group petstore.example.com \
   --version v1alpha1 \
-  --module github.com/example/petstore-operator
+  --module github.com/bluecontainer/petstore-operator
 ```
 
 ## OpenAPI Schema Support

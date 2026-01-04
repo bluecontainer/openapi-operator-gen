@@ -24,6 +24,40 @@ type {{ .Name }} struct {
 {{- if .Description }}
 	// {{ .Description }}
 {{- end }}
+{{- if .Required }}
+	// +kubebuilder:validation:Required
+{{- else }}
+	// +optional
+{{- end }}
+{{- if .Validation }}
+{{- if .Validation.MinLength }}
+	// +kubebuilder:validation:MinLength={{ .Validation.MinLength }}
+{{- end }}
+{{- if .Validation.MaxLength }}
+	// +kubebuilder:validation:MaxLength={{ .Validation.MaxLength }}
+{{- end }}
+{{- if .Validation.Minimum }}
+	// +kubebuilder:validation:Minimum={{ .Validation.Minimum }}
+{{- end }}
+{{- if .Validation.Maximum }}
+	// +kubebuilder:validation:Maximum={{ .Validation.Maximum }}
+{{- end }}
+{{- if .Validation.Pattern }}
+	// +kubebuilder:validation:Pattern={{ printf "%q" .Validation.Pattern }}
+{{- end }}
+{{- if .Validation.Enum }}
+	// +kubebuilder:validation:Enum={{ range $i, $e := .Validation.Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}
+{{- end }}
+{{- if .Validation.MinItems }}
+	// +kubebuilder:validation:MinItems={{ .Validation.MinItems }}
+{{- end }}
+{{- if .Validation.MaxItems }}
+	// +kubebuilder:validation:MaxItems={{ .Validation.MaxItems }}
+{{- end }}
+{{- end }}
+{{- if .Enum }}
+	// +kubebuilder:validation:Enum={{ range $i, $e := .Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}
+{{- end }}
 	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
 {{- end }}
 }
@@ -41,17 +75,38 @@ type {{ .Kind }}Spec struct {
 {{- end }}
 {{- if .Required }}
 	// +kubebuilder:validation:Required
+{{- else }}
+	// +optional
 {{- end }}
-{{- if .Validation }}{{ if .Validation.MinLength }}
-	// +kubebuilder:validation:MinLength={{ .Validation.MinLength }}{{ end }}{{ end }}
-{{- if .Validation }}{{ if .Validation.MaxLength }}
-	// +kubebuilder:validation:MaxLength={{ .Validation.MaxLength }}{{ end }}{{ end }}
-{{- if .Validation }}{{ if .Validation.Pattern }}
-	// +kubebuilder:validation:Pattern={{ printf "%q" .Validation.Pattern }}{{ end }}{{ end }}
-{{- if .Validation }}{{ if .Validation.Enum }}
-	// +kubebuilder:validation:Enum={{ range $i, $e := .Validation.Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}{{ end }}{{ end }}
+{{- if .Validation }}
+{{- if .Validation.MinLength }}
+	// +kubebuilder:validation:MinLength={{ .Validation.MinLength }}
+{{- end }}
+{{- if .Validation.MaxLength }}
+	// +kubebuilder:validation:MaxLength={{ .Validation.MaxLength }}
+{{- end }}
+{{- if .Validation.Minimum }}
+	// +kubebuilder:validation:Minimum={{ .Validation.Minimum }}
+{{- end }}
+{{- if .Validation.Maximum }}
+	// +kubebuilder:validation:Maximum={{ .Validation.Maximum }}
+{{- end }}
+{{- if .Validation.Pattern }}
+	// +kubebuilder:validation:Pattern={{ printf "%q" .Validation.Pattern }}
+{{- end }}
+{{- if .Validation.Enum }}
+	// +kubebuilder:validation:Enum={{ range $i, $e := .Validation.Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}
+{{- end }}
+{{- if .Validation.MinItems }}
+	// +kubebuilder:validation:MinItems={{ .Validation.MinItems }}
+{{- end }}
+{{- if .Validation.MaxItems }}
+	// +kubebuilder:validation:MaxItems={{ .Validation.MaxItems }}
+{{- end }}
+{{- end }}
 {{- if .Enum }}
-	// +kubebuilder:validation:Enum={{ range $i, $e := .Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}{{ end }}
+	// +kubebuilder:validation:Enum={{ range $i, $e := .Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}
+{{- end }}
 	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
 {{ end }}
 	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
@@ -89,24 +144,35 @@ type {{ .Kind }}Status struct {
 
 	// State represents the current state of the resource
 	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +optional
 	State string `json:"state,omitempty"`
 
 	// LastSyncTime is the last time the resource was synced with the REST API
+	// +optional
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
 	// ExternalID is the ID of the resource in the external REST API
+	// +optional
 	ExternalID string `json:"externalID,omitempty"`
 
 	// Message is a human-readable message about the current state
+	// +optional
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of an object's state
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
 	// ObservedGeneration is the last observed generation
+	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Response contains the last response from the REST API
+	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Response *runtime.RawExtension `json:"response,omitempty"`
 }

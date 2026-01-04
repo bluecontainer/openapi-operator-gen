@@ -21,9 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/example/openapi-operator-gen/pkg/endpoint"
-	v1alpha1 "github.com/example/petstore-operator/api/v1alpha1"
-	"github.com/example/petstore-operator/internal/controller"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
+	"github.com/bluecontainer/petstore-operator/internal/controller"
 )
 
 var (

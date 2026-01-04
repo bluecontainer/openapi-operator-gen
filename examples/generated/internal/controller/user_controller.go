@@ -25,8 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/example/openapi-operator-gen/pkg/endpoint"
-	v1alpha1 "github.com/example/petstore-operator/api/v1alpha1"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
 const (

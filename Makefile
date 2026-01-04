@@ -41,11 +41,13 @@ clean:
 ## Run with example
 example: build
 	./bin/$(BINARY_NAME) generate \
-		--spec examples/petstore.yaml \
+		--spec examples/petstore.1.0.27.yaml \
 		--output examples/generated \
 		--group petstore.example.com \
 		--version v1alpha1 \
-		--module github.com/example/petstore-operator
+		--module github.com/bluecontainer/petstore-operator
+	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
+
 
 ## Download dependencies
 deps:

@@ -24,6 +24,9 @@ type Config struct {
 	MappingMode MappingMode
 	// ModuleName is the Go module name for generated code
 	ModuleName string
+	// GenerateCRDs controls whether to generate CRD YAML manifests directly.
+	// When false (default), CRDs should be generated using controller-gen.
+	GenerateCRDs bool
 }
 
 // Validate checks if the configuration is valid
@@ -44,7 +47,7 @@ func (c *Config) Validate() error {
 		c.MappingMode = PerResource
 	}
 	if c.ModuleName == "" {
-		c.ModuleName = "github.com/example/generated-operator"
+		c.ModuleName = "github.com/bluecontainer/generated-operator"
 	}
 	return nil
 }

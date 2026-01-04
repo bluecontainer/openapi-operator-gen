@@ -1,4 +1,4 @@
-module github.com/example/openapi-operator-gen
+module github.com/bluecontainer/openapi-operator-gen
 
 go 1.25
 
