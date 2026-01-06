@@ -11,6 +11,7 @@ import (
 	"github.com/bluecontainer/openapi-operator-gen/internal/config"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/templates"
+	"github.com/iancoleman/strcase"
 )
 
 // ControllerGenerator generates controller reconciliation logic
@@ -25,14 +26,46 @@ func NewControllerGenerator(cfg *config.Config) *ControllerGenerator {
 
 // ControllerTemplateData holds data for controller template
 type ControllerTemplateData struct {
-	Year       int
-	APIGroup   string
-	APIVersion string
-	ModuleName string
-	Kind       string
-	KindLower  string
-	Plural     string
-	BasePath   string
+	Year            int
+	APIGroup        string
+	APIVersion      string
+	ModuleName      string
+	Kind            string
+	KindLower       string
+	Plural          string
+	BasePath        string
+	IsQuery         bool                     // True if this is a query CRD
+	QueryPath       string                   // Full query path for query CRDs
+	QueryParams     []mapper.QueryParamField // Query parameters for building URL
+	ResponseType    string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
+	ResponseIsArray bool                     // True if response is an array
+	ResultItemType  string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
+	HasTypedResults bool                     // True if we have typed results (not raw extension)
+	UsesSharedType  bool                     // True if ResultItemType is a shared type from another CRD
+
+	// Action endpoint fields
+	IsAction          bool                     // True if this is an action CRD
+	ActionPath        string                   // Full action path (e.g., /pet/{petId}/uploadImage)
+	ActionMethod      string                   // HTTP method (POST or PUT)
+	ParentResource    string                   // Parent resource kind (e.g., "Pet")
+	ParentIDParam     string                   // Parent ID parameter name (e.g., "petId")
+	ParentIDField     string                   // Go field name for parent ID (e.g., "PetId")
+	ActionName        string                   // Action name (e.g., "uploadImage")
+	PathParams        []ActionPathParam        // Path parameters other than parent ID
+	RequestBodyFields []ActionRequestBodyField // Request body fields
+	HasRequestBody    bool                     // True if there are request body fields
+}
+
+// ActionPathParam represents a path parameter in action templates
+type ActionPathParam struct {
+	Name   string // Parameter name (e.g., "userId")
+	GoName string // Go field name (e.g., "UserId")
+}
+
+// ActionRequestBodyField represents a request body field in action templates
+type ActionRequestBodyField struct {
+	JSONName string // JSON field name (e.g., "additionalMetadata")
+	GoName   string // Go field name (e.g., "AdditionalMetadata")
 }
 
 // MainTemplateData holds data for main.go template
@@ -45,7 +78,9 @@ type MainTemplateData struct {
 
 // CRDMainData holds CRD data for main.go
 type CRDMainData struct {
-	Kind string
+	Kind     string
+	IsQuery  bool
+	IsAction bool
 }
 
 // Generate generates controller files
@@ -92,25 +127,81 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.CRDDefinition) error {
 	data := ControllerTemplateData{
-		Year:       time.Now().Year(),
-		APIGroup:   crd.APIGroup,
-		APIVersion: crd.APIVersion,
-		ModuleName: g.config.ModuleName,
-		Kind:       crd.Kind,
-		KindLower:  strings.ToLower(crd.Kind),
-		Plural:     crd.Plural,
-		BasePath:   crd.BasePath,
+		Year:            time.Now().Year(),
+		APIGroup:        crd.APIGroup,
+		APIVersion:      crd.APIVersion,
+		ModuleName:      g.config.ModuleName,
+		Kind:            crd.Kind,
+		KindLower:       strings.ToLower(crd.Kind),
+		Plural:          crd.Plural,
+		BasePath:        crd.BasePath,
+		IsQuery:         crd.IsQuery,
+		QueryPath:       crd.QueryPath,
+		QueryParams:     crd.QueryParams,
+		ResponseType:    crd.ResponseType,
+		ResponseIsArray: crd.ResponseIsArray,
+		ResultItemType:  crd.ResultItemType,
+		HasTypedResults: len(crd.ResultFields) > 0 || crd.UsesSharedType,
+		UsesSharedType:  crd.UsesSharedType,
+		// Action fields
+		IsAction:       crd.IsAction,
+		ActionPath:     crd.ActionPath,
+		ActionMethod:   crd.ActionMethod,
+		ParentResource: crd.ParentResource,
+		ParentIDParam:  crd.ParentIDParam,
+		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
+		ActionName:     crd.ActionName,
+	}
+
+	// Populate path params (excluding parent ID)
+	if crd.IsAction && crd.Spec != nil {
+		for _, field := range crd.Spec.Fields {
+			// Skip the parent ID field - already handled separately
+			if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(crd.ParentIDParam)) {
+				continue
+			}
+			// Skip targeting fields
+			if field.JSONName == "targetPodOrdinal" || field.JSONName == "targetHelmRelease" ||
+				field.JSONName == "targetStatefulSet" || field.JSONName == "targetDeployment" ||
+				field.JSONName == "targetNamespace" {
+				continue
+			}
+			// Check if this is a path param by looking at the action path
+			if strings.Contains(crd.ActionPath, "{"+field.JSONName+"}") {
+				data.PathParams = append(data.PathParams, ActionPathParam{
+					Name:   field.JSONName,
+					GoName: field.Name,
+				})
+			} else {
+				// It's a request body field
+				data.RequestBodyFields = append(data.RequestBodyFields, ActionRequestBodyField{
+					JSONName: field.JSONName,
+					GoName:   field.Name,
+				})
+			}
+		}
+		data.HasRequestBody = len(data.RequestBodyFields) > 0
 	}
 
 	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(crd.Kind))
-	filepath := filepath.Join(outputDir, filename)
+	fp := filepath.Join(outputDir, filename)
 
-	tmpl, err := template.New("controller").Parse(templates.ControllerTemplate)
+	// Choose appropriate template based on CRD type
+	var tmplContent string
+	if crd.IsQuery {
+		tmplContent = templates.QueryControllerTemplate
+	} else if crd.IsAction {
+		tmplContent = templates.ActionControllerTemplate
+	} else {
+		tmplContent = templates.ControllerTemplate
+	}
+
+	tmpl, err := template.New("controller").Parse(tmplContent)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	file, err := os.Create(filepath)
+	file, err := os.Create(fp)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
@@ -137,7 +228,7 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 	}
 
 	for _, crd := range crds {
-		data.CRDs = append(data.CRDs, CRDMainData{Kind: crd.Kind})
+		data.CRDs = append(data.CRDs, CRDMainData{Kind: crd.Kind, IsQuery: crd.IsQuery, IsAction: crd.IsAction})
 	}
 
 	filepath := filepath.Join(cmdDir, "main.go")
@@ -166,7 +257,7 @@ func (g *ControllerGenerator) generateGoMod() error {
 go 1.25
 
 require (
-	github.com/bluecontainer/openapi-operator-gen v0.0.0
+	github.com/bluecontainer/openapi-operator-gen v0.0.1
 	k8s.io/api v0.32.0
 	k8s.io/apimachinery v0.32.0
 	k8s.io/client-go v0.32.0

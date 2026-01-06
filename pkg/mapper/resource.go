@@ -22,6 +22,35 @@ type CRDDefinition struct {
 	Status      *FieldDefinition
 	Operations  []OperationMapping
 	BasePath    string
+
+	// Query endpoint fields
+	IsQuery         bool               // True if this is a query/action CRD
+	QueryPath       string             // Full query path (e.g., /pet/findByTags)
+	QueryParams     []QueryParamField  // Query parameters for building URL
+	ResponseType    string             // Go type for response (e.g., "[]Pet", "Pet")
+	ResponseIsArray bool               // True if response is an array
+	ResultItemType  string             // Item type if ResponseIsArray (e.g., "Pet")
+	ResultFields    []*FieldDefinition // Fields for the result type (used to generate result struct)
+	UsesSharedType  bool               // True if ResultItemType is a shared type from another CRD
+
+	// Action endpoint fields
+	IsAction       bool   // True if this is an action CRD (one-shot operation)
+	ActionPath     string // Full action path (e.g., /pet/{petId}/uploadImage)
+	ActionMethod   string // HTTP method (POST or PUT)
+	ParentResource string // Parent resource kind (e.g., "Pet")
+	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
+	ActionName     string // Action name (e.g., "uploadImage")
+}
+
+// QueryParamField represents a query parameter as a spec field
+type QueryParamField struct {
+	Name        string
+	JSONName    string
+	GoType      string
+	Description string
+	Required    bool
+	IsArray     bool   // True if this is an array parameter (e.g., tags[])
+	ItemType    string // Type of array items if IsArray is true
 }
 
 // OperationMapping maps a CRD operation to a REST API call
@@ -70,11 +99,580 @@ func NewMapper(cfg *config.Config) *Mapper {
 
 // MapResources converts parsed OpenAPI resources to CRD definitions
 func (m *Mapper) MapResources(spec *parser.ParsedSpec) ([]*CRDDefinition, error) {
+	var crds []*CRDDefinition
+
 	switch m.config.MappingMode {
 	case config.SingleCRD:
-		return m.mapSingleCRD(spec)
+		crds, _ = m.mapSingleCRD(spec)
 	default:
-		return m.mapPerResource(spec)
+		crds, _ = m.mapPerResource(spec)
+	}
+
+	// Collect known resource kinds for type reuse in query endpoints
+	knownKinds := make(map[string]bool)
+	for _, crd := range crds {
+		knownKinds[crd.Kind] = true
+	}
+
+	// Also map query endpoints to CRDs
+	queryCRDs := m.mapQueryEndpoints(spec.QueryEndpoints, knownKinds)
+	crds = append(crds, queryCRDs...)
+
+	// Also map action endpoints to CRDs
+	actionCRDs := m.mapActionEndpoints(spec.ActionEndpoints, knownKinds)
+	crds = append(crds, actionCRDs...)
+
+	return crds, nil
+}
+
+// mapQueryEndpoints converts query endpoints to CRD definitions
+func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, knownKinds map[string]bool) []*CRDDefinition {
+	crds := make([]*CRDDefinition, 0, len(queryEndpoints))
+
+	for _, qe := range queryEndpoints {
+		crd := &CRDDefinition{
+			APIGroup:    m.config.APIGroup,
+			APIVersion:  m.config.APIVersion,
+			Kind:        qe.Name,
+			Plural:      strings.ToLower(qe.Name) + "s",
+			ShortNames:  m.generateShortNames(qe.Name),
+			Scope:       "Namespaced",
+			Description: qe.Summary,
+			BasePath:    qe.BasePath,
+			IsQuery:     true,
+			QueryPath:   qe.Path,
+			QueryParams: m.mapQueryParams(qe.QueryParams),
+		}
+
+		// Generate spec fields from query parameters
+		crd.Spec = m.createQuerySpec(qe)
+
+		// Map response schema to typed result fields
+		m.mapResponseSchema(crd, qe, knownKinds)
+
+		// Generate status fields (includes results)
+		crd.Status = m.createQueryStatusDefinition()
+
+		// Add a single GET operation
+		crd.Operations = []OperationMapping{
+			{
+				CRDAction:  "Query",
+				HTTPMethod: "GET",
+				Path:       qe.Path,
+			},
+		}
+
+		crds = append(crds, crd)
+	}
+
+	return crds
+}
+
+// mapActionEndpoints converts action endpoints to CRD definitions
+func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, knownKinds map[string]bool) []*CRDDefinition {
+	crds := make([]*CRDDefinition, 0, len(actionEndpoints))
+
+	for _, ae := range actionEndpoints {
+		crd := &CRDDefinition{
+			APIGroup:       m.config.APIGroup,
+			APIVersion:     m.config.APIVersion,
+			Kind:           ae.Name,
+			Plural:         strings.ToLower(ae.Name) + "s",
+			ShortNames:     m.generateShortNames(ae.Name),
+			Scope:          "Namespaced",
+			Description:    ae.Summary,
+			IsAction:       true,
+			ActionPath:     ae.Path,
+			ActionMethod:   ae.HTTPMethod,
+			ParentResource: ae.ParentResource,
+			ParentIDParam:  ae.ParentIDParam,
+			ActionName:     ae.ActionName,
+		}
+
+		// Generate spec fields from request schema and path params
+		crd.Spec = m.createActionSpec(ae)
+
+		// Map response schema
+		m.mapActionResponseSchema(crd, ae, knownKinds)
+
+		// Generate status fields
+		crd.Status = m.createActionStatusDefinition()
+
+		// Add single operation for the action
+		crd.Operations = []OperationMapping{
+			{
+				CRDAction:  "Execute",
+				HTTPMethod: ae.HTTPMethod,
+				Path:       ae.Path,
+			},
+		}
+
+		crds = append(crds, crd)
+	}
+
+	return crds
+}
+
+// createActionSpec creates the spec definition for an action CRD
+func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
+	spec := &FieldDefinition{
+		Name:     "Spec",
+		JSONName: "spec",
+		GoType:   "struct",
+		Fields:   make([]*FieldDefinition, 0),
+	}
+
+	// Add parent resource ID field (required)
+	parentIDField := &FieldDefinition{
+		Name:        strcase.ToCamel(ae.ParentIDParam),
+		JSONName:    strcase.ToLowerCamel(ae.ParentIDParam),
+		GoType:      "string",
+		Description: "ID of the parent " + ae.ParentResource + " resource",
+		Required:    true,
+	}
+	spec.Fields = append(spec.Fields, parentIDField)
+
+	// Add re-execution interval field (optional)
+	reExecuteIntervalField := &FieldDefinition{
+		Name:        "ReExecuteInterval",
+		JSONName:    "reExecuteInterval",
+		GoType:      "*metav1.Duration",
+		Description: "Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.",
+		Required:    false,
+	}
+	spec.Fields = append(spec.Fields, reExecuteIntervalField)
+
+	// Add path parameters (excluding parent ID which is already added)
+	for _, param := range ae.PathParams {
+		if param.Name == ae.ParentIDParam {
+			continue
+		}
+		field := &FieldDefinition{
+			Name:        strcase.ToCamel(param.Name),
+			JSONName:    strcase.ToLowerCamel(param.Name),
+			GoType:      m.mapParamType(param.Type),
+			Description: param.Description,
+			Required:    param.Required,
+		}
+		spec.Fields = append(spec.Fields, field)
+	}
+
+	// Add query parameters
+	for _, param := range ae.QueryParams {
+		goType := m.mapParamType(param.Type)
+		isArray := false
+
+		if strings.HasPrefix(param.Type, "array:") {
+			isArray = true
+			itemType := strings.TrimPrefix(param.Type, "array:")
+			goType = "[]" + m.mapParamType(itemType)
+		}
+
+		field := &FieldDefinition{
+			Name:        strcase.ToCamel(param.Name),
+			JSONName:    strcase.ToLowerCamel(param.Name),
+			GoType:      goType,
+			Description: param.Description,
+			Required:    param.Required,
+		}
+
+		if isArray {
+			field.ItemType = &FieldDefinition{
+				GoType: m.mapParamType(strings.TrimPrefix(param.Type, "array:")),
+			}
+		}
+
+		spec.Fields = append(spec.Fields, field)
+	}
+
+	// Add request body fields if present
+	if ae.RequestSchema != nil && len(ae.RequestSchema.Properties) > 0 {
+		// Sort property names for deterministic output
+		propNames := make([]string, 0, len(ae.RequestSchema.Properties))
+		for propName := range ae.RequestSchema.Properties {
+			propNames = append(propNames, propName)
+		}
+		sort.Strings(propNames)
+
+		for _, propName := range propNames {
+			propSchema := ae.RequestSchema.Properties[propName]
+			propField := m.schemaToFieldDefinition(propName, propSchema, false)
+			// Check if property is required
+			for _, req := range ae.RequestSchema.Required {
+				if req == propName {
+					propField.Required = true
+					break
+				}
+			}
+			spec.Fields = append(spec.Fields, propField)
+		}
+	}
+
+	return spec
+}
+
+// mapActionResponseSchema maps the response schema for action CRDs
+func (m *Mapper) mapActionResponseSchema(crd *CRDDefinition, ae *parser.ActionEndpoint, knownKinds map[string]bool) {
+	if ae.ResponseSchema == nil {
+		crd.ResponseType = "*runtime.RawExtension"
+		return
+	}
+
+	schema := ae.ResponseSchema
+
+	// Check if response is an array
+	if schema.Type == "array" && schema.Items != nil {
+		itemSchema := schema.Items
+		crd.ResponseIsArray = true
+		crd.ResultItemType = crd.Kind + "Result"
+
+		if itemSchema.Type == "object" && len(itemSchema.Properties) > 0 {
+			crd.ResultFields = m.schemaToResultFields(itemSchema)
+			crd.ResponseType = "[]" + crd.ResultItemType
+		} else {
+			crd.ResponseType = "[]" + m.mapType(itemSchema)
+			crd.ResultFields = nil
+		}
+	} else if schema.Type == "object" && len(schema.Properties) > 0 {
+		crd.ResultItemType = crd.Kind + "Result"
+		crd.ResultFields = m.schemaToResultFields(schema)
+		crd.ResponseType = "*" + crd.ResultItemType
+	} else {
+		crd.ResponseType = "*runtime.RawExtension"
+	}
+}
+
+// createActionStatusDefinition creates status fields for action CRDs
+func (m *Mapper) createActionStatusDefinition() *FieldDefinition {
+	return &FieldDefinition{
+		Name:     "Status",
+		JSONName: "status",
+		GoType:   "struct",
+		Fields: []*FieldDefinition{
+			{
+				Name:        "State",
+				JSONName:    "state",
+				GoType:      "string",
+				Description: "Current state of the action (Pending, Executing, Completed, Failed)",
+			},
+			{
+				Name:        "ExecutedAt",
+				JSONName:    "executedAt",
+				GoType:      "metav1.Time",
+				Description: "Time when the action was first executed",
+			},
+			{
+				Name:        "CompletedAt",
+				JSONName:    "completedAt",
+				GoType:      "metav1.Time",
+				Description: "Time when the action completed",
+			},
+			{
+				Name:        "LastExecutionTime",
+				JSONName:    "lastExecutionTime",
+				GoType:      "*metav1.Time",
+				Description: "Time of the last execution (used to calculate next re-execution time)",
+			},
+			{
+				Name:        "NextExecutionTime",
+				JSONName:    "nextExecutionTime",
+				GoType:      "*metav1.Time",
+				Description: "Calculated time when the next re-execution will occur (if reExecuteInterval is set)",
+			},
+			{
+				Name:        "ExecutionCount",
+				JSONName:    "executionCount",
+				GoType:      "int",
+				Description: "Number of times the action has been executed",
+			},
+			{
+				Name:        "Message",
+				JSONName:    "message",
+				GoType:      "string",
+				Description: "Human-readable message about the current state",
+			},
+			{
+				Name:        "HTTPStatusCode",
+				JSONName:    "httpStatusCode",
+				GoType:      "int",
+				Description: "HTTP status code from the action response",
+			},
+			{
+				Name:        "Conditions",
+				JSONName:    "conditions",
+				GoType:      "[]metav1.Condition",
+				Description: "Conditions representing the current state",
+			},
+			{
+				Name:        "ObservedGeneration",
+				JSONName:    "observedGeneration",
+				GoType:      "int64",
+				Description: "Last observed generation of the resource",
+			},
+			{
+				Name:        "Response",
+				JSONName:    "response",
+				GoType:      "runtime.RawExtension",
+				Description: "Response from the action execution",
+			},
+		},
+	}
+}
+
+// mapResponseSchema maps the response schema to typed result fields
+func (m *Mapper) mapResponseSchema(crd *CRDDefinition, qe *parser.QueryEndpoint, knownKinds map[string]bool) {
+	if qe.ResponseSchema == nil {
+		// No response schema - use raw extension fallback
+		crd.ResponseType = "*runtime.RawExtension"
+		return
+	}
+
+	schema := qe.ResponseSchema
+	crd.ResponseIsArray = qe.ResponseIsArray
+
+	// Check if response references a known resource type (e.g., Pet)
+	if qe.ResponseSchemaRef != "" {
+		// Convert schema ref to PascalCase Kind (e.g., "Pet" -> "Pet")
+		refKind := m.singularize(m.toPascalCase(qe.ResponseSchemaRef))
+
+		if knownKinds[refKind] {
+			// Use the existing resource type
+			crd.UsesSharedType = true
+			crd.ResultItemType = refKind
+			crd.ResultFields = nil // Don't generate fields, use shared type
+
+			if qe.ResponseIsArray {
+				crd.ResponseType = "[]" + refKind
+			} else {
+				crd.ResponseType = "*" + refKind
+			}
+			return
+		}
+	}
+
+	// Check if response is an array
+	if schema.Type == "array" && schema.Items != nil {
+		itemSchema := schema.Items
+
+		// Generate the item type name based on the query name
+		// e.g., PetFindByTags -> PetFindByTagsResult
+		crd.ResultItemType = crd.Kind + "Result"
+
+		// If item is an object with properties, extract fields
+		if itemSchema.Type == "object" && len(itemSchema.Properties) > 0 {
+			crd.ResultFields = m.schemaToResultFields(itemSchema)
+			crd.ResponseType = "[]" + crd.ResultItemType
+		} else {
+			// Simple array type (e.g., []string)
+			crd.ResponseType = "[]" + m.mapType(itemSchema)
+			crd.ResultFields = nil
+		}
+	} else if schema.Type == "object" && len(schema.Properties) > 0 {
+		// Single object response
+		crd.ResultItemType = crd.Kind + "Result"
+		crd.ResultFields = m.schemaToResultFields(schema)
+		crd.ResponseType = "*" + crd.ResultItemType
+	} else {
+		// Fallback to raw extension for unknown types
+		crd.ResponseType = "*runtime.RawExtension"
+	}
+}
+
+// toPascalCase converts a string to PascalCase
+func (m *Mapper) toPascalCase(s string) string {
+	s = strings.ReplaceAll(s, "-", " ")
+	s = strings.ReplaceAll(s, "_", " ")
+	words := strings.Fields(s)
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(string(word[0])) + strings.ToLower(word[1:])
+		}
+	}
+	return strings.Join(words, "")
+}
+
+// singularize converts a plural word to singular
+func (m *Mapper) singularize(s string) string {
+	if strings.HasSuffix(s, "ies") {
+		return s[:len(s)-3] + "y"
+	}
+	if strings.HasSuffix(s, "es") {
+		return s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "s") && !strings.HasSuffix(s, "ss") {
+		return s[:len(s)-1]
+	}
+	return s
+}
+
+// schemaToResultFields converts a schema to field definitions for the result type
+func (m *Mapper) schemaToResultFields(schema *parser.Schema) []*FieldDefinition {
+	if schema == nil || len(schema.Properties) == 0 {
+		return nil
+	}
+
+	fields := make([]*FieldDefinition, 0, len(schema.Properties))
+
+	// Sort property names for deterministic output
+	propNames := make([]string, 0, len(schema.Properties))
+	for propName := range schema.Properties {
+		propNames = append(propNames, propName)
+	}
+	sort.Strings(propNames)
+
+	for _, propName := range propNames {
+		propSchema := schema.Properties[propName]
+		field := m.schemaToFieldDefinition(propName, propSchema, false)
+
+		// Check if property is required
+		for _, req := range schema.Required {
+			if req == propName {
+				field.Required = true
+				break
+			}
+		}
+
+		fields = append(fields, field)
+	}
+
+	return fields
+}
+
+// mapQueryParams converts parser query params to QueryParamField
+func (m *Mapper) mapQueryParams(params []parser.Parameter) []QueryParamField {
+	fields := make([]QueryParamField, 0, len(params))
+
+	for _, p := range params {
+		field := QueryParamField{
+			Name:        strcase.ToCamel(p.Name),
+			JSONName:    strcase.ToLowerCamel(p.Name),
+			Description: p.Description,
+			Required:    p.Required,
+		}
+
+		// Handle array types (e.g., "array:string")
+		if strings.HasPrefix(p.Type, "array:") {
+			field.IsArray = true
+			field.ItemType = strings.TrimPrefix(p.Type, "array:")
+			field.GoType = "[]" + m.mapParamType(field.ItemType)
+		} else {
+			field.GoType = m.mapParamType(p.Type)
+		}
+
+		fields = append(fields, field)
+	}
+
+	return fields
+}
+
+// mapParamType maps OpenAPI parameter types to Go types
+func (m *Mapper) mapParamType(t string) string {
+	switch t {
+	case "string":
+		return "string"
+	case "integer":
+		return "int64"
+	case "number":
+		return "float64"
+	case "boolean":
+		return "bool"
+	default:
+		return "string"
+	}
+}
+
+// createQuerySpec creates the spec definition for a query CRD
+func (m *Mapper) createQuerySpec(qe *parser.QueryEndpoint) *FieldDefinition {
+	spec := &FieldDefinition{
+		Name:     "Spec",
+		JSONName: "spec",
+		GoType:   "struct",
+		Fields:   make([]*FieldDefinition, 0),
+	}
+
+	// Add query parameters as spec fields
+	for _, param := range qe.QueryParams {
+		goType := m.mapParamType(param.Type)
+		isArray := false
+
+		// Handle array types
+		if strings.HasPrefix(param.Type, "array:") {
+			isArray = true
+			itemType := strings.TrimPrefix(param.Type, "array:")
+			goType = "[]" + m.mapParamType(itemType)
+		}
+
+		field := &FieldDefinition{
+			Name:        strcase.ToCamel(param.Name),
+			JSONName:    strcase.ToLowerCamel(param.Name),
+			GoType:      goType,
+			Description: param.Description,
+			Required:    param.Required,
+		}
+
+		// Add item type info for arrays
+		if isArray {
+			field.ItemType = &FieldDefinition{
+				GoType: m.mapParamType(strings.TrimPrefix(param.Type, "array:")),
+			}
+		}
+
+		spec.Fields = append(spec.Fields, field)
+	}
+
+	return spec
+}
+
+// createQueryStatusDefinition creates status fields for query CRDs
+func (m *Mapper) createQueryStatusDefinition() *FieldDefinition {
+	return &FieldDefinition{
+		Name:     "Status",
+		JSONName: "status",
+		GoType:   "struct",
+		Fields: []*FieldDefinition{
+			{
+				Name:        "State",
+				JSONName:    "state",
+				GoType:      "string",
+				Description: "Current state of the query (Pending, Queried, Failed)",
+			},
+			{
+				Name:        "LastQueryTime",
+				JSONName:    "lastQueryTime",
+				GoType:      "metav1.Time",
+				Description: "Last time the query was executed",
+			},
+			{
+				Name:        "ResultCount",
+				JSONName:    "resultCount",
+				GoType:      "int",
+				Description: "Number of results returned by the query",
+			},
+			{
+				Name:        "Message",
+				JSONName:    "message",
+				GoType:      "string",
+				Description: "Human-readable message about the current state",
+			},
+			{
+				Name:        "Conditions",
+				JSONName:    "conditions",
+				GoType:      "[]metav1.Condition",
+				Description: "Conditions representing the current state",
+			},
+			{
+				Name:        "ObservedGeneration",
+				JSONName:    "observedGeneration",
+				GoType:      "int64",
+				Description: "Last observed generation of the resource",
+			},
+			{
+				Name:        "Results",
+				JSONName:    "results",
+				GoType:      "runtime.RawExtension",
+				Description: "Query results from the REST API",
+			},
+		},
 	}
 }
 

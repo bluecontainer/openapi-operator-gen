@@ -2,6 +2,62 @@
 
 A code generator that creates Kubernetes operators from OpenAPI specifications. It maps REST API resources to Kubernetes Custom Resource Definitions (CRDs) and generates controller reconciliation logic that syncs CRs with the backing REST API.
 
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Building](#building)
+- [Usage](#usage)
+  - [Options](#options)
+  - [Example](#example)
+- [OpenAPI Schema Support](#openapi-schema-support)
+  - [Nested Objects](#nested-objects)
+  - [Supported Types](#supported-types)
+  - [Validation Markers](#validation-markers)
+- [Query Endpoint Support](#query-endpoint-support)
+  - [How Query Endpoints Are Detected](#how-query-endpoints-are-detected)
+  - [Example: Query CRD](#example-query-crd)
+  - [Typed Response Mapping](#typed-response-mapping)
+  - [Query Status Structure](#query-status-structure)
+  - [Query CRD Behavior](#query-crd-behavior)
+  - [Query Status Fields](#query-status-fields)
+  - [Accessing Results](#accessing-results)
+- [Action Endpoint Support](#action-endpoint-support)
+  - [How Action Endpoints Are Detected](#how-action-endpoints-are-detected)
+  - [Example: Action CRD](#example-action-crd)
+  - [One-Shot vs Periodic Execution](#one-shot-vs-periodic-execution)
+  - [Periodic Re-Execution](#periodic-re-execution)
+  - [Action Status Fields](#action-status-fields)
+  - [Action Status Example](#action-status-example)
+  - [Multi-Endpoint Action Execution](#multi-endpoint-action-execution)
+  - [Typed Results](#typed-results)
+  - [Action vs Resource vs Query Endpoints](#action-vs-resource-vs-query-endpoints)
+- [Generated Output](#generated-output)
+- [Building the Generated Operator](#building-the-generated-operator)
+- [Running the Operator](#running-the-operator)
+  - [1. Static URL Mode](#1-static-url-mode)
+  - [2. StatefulSet Discovery Mode](#2-statefulset-discovery-mode)
+  - [3. Deployment Discovery Mode](#3-deployment-discovery-mode)
+  - [4. Helm Release Discovery Mode](#4-helm-release-discovery-mode)
+- [Operator Configuration Flags](#operator-configuration-flags)
+- [Endpoint Selection Strategies](#endpoint-selection-strategies)
+  - [Using by-ordinal Strategy](#using-by-ordinal-strategy)
+  - [Per-CR Workload Targeting](#per-cr-workload-targeting)
+  - [Spec Fields Reference](#spec-fields-reference)
+- [Discovery Modes](#discovery-modes)
+  - [DNS Mode (default for StatefulSet)](#dns-mode-default-for-statefulset)
+  - [Pod IP Mode (default for Deployment)](#pod-ip-mode-default-for-deployment)
+- [How Reconciliation Works](#how-reconciliation-works)
+  - [Importing Existing Resources](#importing-existing-resources)
+  - [Read-Only Mode](#read-only-mode)
+  - [Multi-Endpoint Observation](#multi-endpoint-observation)
+  - [Status Fields](#status-fields)
+- [Example: Petstore Operator](#example-petstore-operator)
+  - [Sample CR](#sample-cr)
+- [Environment Variables](#environment-variables)
+- [License](#license)
+
 ## Features
 
 - Parses OpenAPI 3.0/3.1 specifications
@@ -307,6 +363,326 @@ OpenAPI validation constraints are converted to kubebuilder markers:
 - `enum` → `+kubebuilder:validation:Enum`
 - `required` → `+kubebuilder:validation:Required`
 
+## Query Endpoint Support
+
+The generator detects and maps query/search endpoints (GET-only paths with query parameters) to dedicated query CRDs. These are useful for endpoints like `/pet/findByTags` or `/pet/findByStatus` that don't follow typical REST resource patterns.
+
+### How Query Endpoints Are Detected
+
+A path is identified as a query endpoint when:
+- It only has a GET operation (no POST, PUT, PATCH, DELETE)
+- The path contains action keywords like `find`, `search`, `query`, `list`, `login`, `lookup`
+- Or it has query parameters
+
+### Example: Query CRD
+
+For an OpenAPI path like:
+```yaml
+/pet/findByTags:
+  get:
+    operationId: findPetsByTags
+    parameters:
+      - name: tags
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+    responses:
+      200:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/Pet'
+```
+
+The generator creates a `PetFindByTags` CRD:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetFindByTags
+metadata:
+  name: search-friendly-pets
+spec:
+  tags:
+    - friendly
+    - cute
+  # Optional targeting fields
+  targetHelmRelease: petstore-prod
+  targetNamespace: production
+```
+
+### Typed Response Mapping
+
+Query responses are mapped to typed Go structs. If the response schema references an existing resource type (via `$ref`), that type is reused:
+
+```go
+// Response uses existing Pet type (shared)
+type PetFindByTagsStatus struct {
+    Results   *PetFindByTagsEndpointResponse `json:"results,omitempty"`
+    Responses map[string]PetFindByTagsEndpointResponse `json:"responses,omitempty"`
+}
+
+type PetFindByTagsEndpointResponse struct {
+    Success     bool      `json:"success"`
+    StatusCode  int       `json:"statusCode,omitempty"`
+    Data        []Pet     `json:"data,omitempty"`  // Reuses Pet type
+    Error       string    `json:"error,omitempty"`
+    LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+```
+
+If the response schema doesn't match a known resource, a dedicated result type is generated (e.g., `PetFindByTagsResult`).
+
+### Query Status Structure
+
+Query CRDs use a unified response structure for both single and multi-endpoint modes:
+
+```yaml
+status:
+  state: Queried
+  resultCount: 3
+  lastQueryTime: "2026-01-05T10:00:00Z"
+  message: "Query executed successfully"
+
+  # Single endpoint result (same structure as multi-endpoint entries)
+  results:
+    success: true
+    statusCode: 200
+    data:
+      - id: 1
+        name: "Fluffy"
+        status: "available"
+      - id: 2
+        name: "Buddy"
+        status: "available"
+    lastUpdated: "2026-01-05T10:00:00Z"
+
+  # Multi-endpoint responses (only populated with all-healthy strategy)
+  responses:
+    "http://pod-0.svc:8080":
+      success: true
+      statusCode: 200
+      data: [...]
+      lastUpdated: "2026-01-05T10:00:00Z"
+    "http://pod-1.svc:8080":
+      success: true
+      statusCode: 200
+      data: [...]
+      lastUpdated: "2026-01-05T10:00:00Z"
+```
+
+### Query CRD Behavior
+
+- **Periodic execution**: Queries are re-executed on a schedule (default 30 seconds)
+- **No finalizers**: Query CRDs don't create external resources, so no cleanup is needed
+- **Multi-endpoint fan-out**: With `all-healthy` strategy, queries are sent to all healthy pods
+- **Typed results**: Response data is unmarshaled into typed Go structs for easy access
+
+### Query Status Fields
+
+| Field | Description |
+|-------|-------------|
+| `state` | Current state: `Pending`, `Querying`, `Queried`, or `Failed` |
+| `lastQueryTime` | Timestamp of the last query execution |
+| `resultCount` | Number of results returned |
+| `message` | Human-readable status message |
+| `results` | Query result from single endpoint (EndpointResponse) |
+| `responses` | Map of endpoint URL to response (multi-endpoint mode) |
+
+### Accessing Results
+
+```go
+// Single endpoint
+for _, pet := range cr.Status.Results.Data {
+    fmt.Printf("Pet: %s\n", pet.Name)
+}
+
+// Multi-endpoint
+for endpoint, resp := range cr.Status.Responses {
+    if resp.Success {
+        fmt.Printf("Endpoint %s returned %d pets\n", endpoint, len(resp.Data))
+    }
+}
+```
+
+## Action Endpoint Support
+
+The generator detects and maps action endpoints (operations on a parent resource) to dedicated action CRDs. These are useful for endpoints like `/pet/{petId}/uploadImage` that perform operations on an existing resource rather than CRUD operations.
+
+### How Action Endpoints Are Detected
+
+A path is identified as an action endpoint when:
+- It follows the pattern `/{resource}/{resourceId}/{action}` (at least 3 segments)
+- It only has POST or PUT operations (no GET, DELETE, or PATCH)
+- The last segment is an action keyword (upload, download, send, sync, reset, validate, etc.)
+- There's a path parameter in the middle (e.g., `{petId}`)
+
+### Example: Action CRD
+
+For an OpenAPI path like:
+```yaml
+/pet/{petId}/uploadImage:
+  post:
+    operationId: uploadFile
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: additionalMetadata
+        in: query
+        schema:
+          type: string
+    responses:
+      200:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiResponse'
+```
+
+The generator creates a `PetUploadImage` CRD:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetUploadImage
+metadata:
+  name: upload-fluffy-photo
+spec:
+  petId: "12345"              # Parent resource ID (required)
+  additionalMetadata: "Profile photo"
+  # Optional targeting fields
+  targetHelmRelease: petstore-prod
+```
+
+### One-Shot vs Periodic Execution
+
+By default, action CRDs implement a one-shot execution pattern:
+
+1. **First Reconcile**: Action is executed, status updated to `Completed` or `Failed`
+2. **Subsequent Reconciles**: Action is skipped if already completed and spec unchanged
+3. **Spec Change**: If spec is modified (detected via `observedGeneration`), action re-executes
+4. **No Requeue on Failure**: Failed actions stay in `Failed` state until spec is updated
+
+### Periodic Re-Execution
+
+Actions can be configured to re-execute periodically by setting `reExecuteInterval`:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetUploadImage
+metadata:
+  name: periodic-backup
+spec:
+  petId: "123"
+  reExecuteInterval: 5m    # Re-execute every 5 minutes
+```
+
+When `reExecuteInterval` is set:
+- The action executes immediately on creation
+- After completion, it automatically re-executes at the specified interval
+- Failed actions also retry at the interval
+- Spec changes trigger immediate re-execution regardless of interval
+- The `nextExecutionTime` status field shows when the next execution will occur
+
+Supported duration formats: `30s`, `5m`, `1h`, `24h`, etc.
+
+### Action Status Fields
+
+| Field | Description |
+|-------|-------------|
+| `state` | Current state: `Pending`, `Executing`, `Completed`, or `Failed` |
+| `executedAt` | Timestamp when the action was first executed |
+| `completedAt` | Timestamp when the action last completed |
+| `lastExecutionTime` | Time of the most recent execution (for interval calculation) |
+| `nextExecutionTime` | Calculated time of next re-execution (if `reExecuteInterval` is set) |
+| `executionCount` | Number of times the action has been executed |
+| `httpStatusCode` | HTTP status code from the action response |
+| `message` | Human-readable status message |
+| `observedGeneration` | Last observed spec generation (for change detection) |
+| `result` | Typed result from single endpoint execution |
+| `responses` | Map of endpoint URL to response (multi-endpoint mode) |
+| `successCount` | Number of successful endpoint executions |
+| `totalEndpoints` | Total number of endpoints targeted |
+
+### Action Status Example
+
+```yaml
+status:
+  state: Completed
+  executedAt: "2026-01-05T10:00:00Z"
+  completedAt: "2026-01-05T10:05:00Z"
+  lastExecutionTime: "2026-01-05T10:05:00Z"
+  nextExecutionTime: "2026-01-05T10:10:00Z"  # Only if reExecuteInterval is set
+  executionCount: 3
+  httpStatusCode: 200
+  message: "Action completed successfully"
+  observedGeneration: 1
+  result:
+    success: true
+    statusCode: 200
+    data:
+      code: 200
+      type: "unknown"
+      message: "additionalMetadata: Profile photo\nFile uploaded"
+    executedAt: "2026-01-05T10:05:00Z"
+```
+
+### Multi-Endpoint Action Execution
+
+With the `all-healthy` endpoint strategy, actions execute on all healthy pods:
+
+```yaml
+status:
+  state: Completed
+  message: "Action completed on 2/3 endpoints"
+  successCount: 2
+  totalEndpoints: 3
+  responses:
+    "http://pod-0.svc:8080":
+      success: true
+      statusCode: 200
+      data: { ... }
+      executedAt: "2026-01-05T10:00:01Z"
+    "http://pod-1.svc:8080":
+      success: true
+      statusCode: 200
+      data: { ... }
+      executedAt: "2026-01-05T10:00:01Z"
+    "http://pod-2.svc:8080":
+      success: false
+      statusCode: 500
+      error: "Internal server error"
+      executedAt: "2026-01-05T10:00:01Z"
+```
+
+### Typed Results
+
+Action responses are mapped to typed Go structs when the response schema is defined:
+
+```go
+type PetUploadImageResult struct {
+    Code    int    `json:"code,omitempty"`
+    Type    string `json:"type,omitempty"`
+    Message string `json:"message,omitempty"`
+}
+```
+
+### Action vs Resource vs Query Endpoints
+
+| Aspect | Resource | Query | Action |
+|--------|----------|-------|--------|
+| Pattern | `/{resource}`, `/{resource}/{id}` | `/{resource}/findBy*` | `/{parent}/{id}/{action}` |
+| Methods | GET, POST, PUT, DELETE | GET only | POST, PUT only |
+| Behavior | CRUD lifecycle | Periodic query | One-shot or periodic execution |
+| States | Pending, Syncing, Synced, Failed | Pending, Querying, Queried, Failed | Pending, Executing, Completed, Failed |
+| Re-execution | Drift detection | Scheduled interval | Spec change or `reExecuteInterval` |
+| Finalizer | Yes (cleanup) | No | Yes (but no cleanup) |
+
 ## Generated Output
 
 ```
@@ -499,6 +875,22 @@ spec:
 
 Note: `targetPodOrdinal` is ignored when targeting a Deployment.
 
+### Spec Fields Reference
+
+Every generated CR includes these controller-specific fields in the spec:
+
+| Field | Description |
+|-------|-------------|
+| `targetPodOrdinal` | StatefulSet pod ordinal to route requests to (by-ordinal strategy) |
+| `targetHelmRelease` | Helm release name for per-CR workload discovery |
+| `targetStatefulSet` | StatefulSet name for per-CR workload discovery |
+| `targetDeployment` | Deployment name for per-CR workload discovery |
+| `targetNamespace` | Namespace for target workload (defaults to CR namespace) |
+| `externalIDRef` | Reference an existing external resource by ID |
+| `readOnly` | If true, only observe the resource (no create/update/delete) |
+
+These fields are stripped from the payload when sending requests to the REST API.
+
 #### Targeting Behavior
 
 When a target is specified:
@@ -531,11 +923,91 @@ Queries the Kubernetes API for pod IPs directly. Useful when DNS is not availabl
 
 ## How Reconciliation Works
 
-1. **Create**: When a CR is created, the controller POSTs the spec to the REST API
-2. **Update**: When a CR is modified, the controller PUTs the updated spec
-3. **Delete**: When a CR is deleted, the controller DELETEs the resource from the REST API
+The controller implements a GET-first reconciliation approach with drift detection:
+
+1. **GET First**: Before any create/update, the controller GETs the current state from the REST API
+2. **Drift Detection**: Compares the CR spec with the API response to detect drift
+3. **Create**: If no external resource exists, POSTs the spec to create one
+4. **Update**: If drift is detected, PUTs the updated spec to reconcile
+5. **Skip**: If no drift is detected, skips the update (saves API calls)
+6. **Delete**: When a CR is deleted, DELETEs the resource from the REST API
 
 The controller uses finalizers to ensure external resources are cleaned up before the CR is removed.
+
+### Importing Existing Resources
+
+You can import an existing external resource by specifying its ID:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: imported-pet
+spec:
+  externalIDRef: "12345"  # References existing pet in API
+  name: Fluffy
+  status: available
+```
+
+When `externalIDRef` is set:
+- The controller GETs the resource by this ID instead of creating a new one
+- Drift detection compares your spec with the existing resource
+- Updates are applied if the spec differs from the external state
+
+### Read-Only Mode
+
+For observation-only use cases, you can create read-only CRs that never modify the external resource:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: observed-pet
+spec:
+  externalIDRef: "12345"  # Required for read-only mode
+  readOnly: true          # Only observe, never modify
+```
+
+When `readOnly: true`:
+- The controller only performs GET operations
+- No POST, PUT, or DELETE requests are made
+- No finalizer is added (CR can be deleted without affecting external resource)
+- Status is updated with the current external state
+- State will be `Observed` (success) or `NotFound` (resource doesn't exist)
+
+### Multi-Endpoint Observation
+
+When using the `all-healthy` endpoint strategy with read-only mode, the controller queries all healthy endpoints and stores responses from each:
+
+```yaml
+status:
+  state: Observed
+  message: "Successfully observed from 2/3 endpoints"
+  externalID: "12345"
+  response: { "id": "12345", "name": "Fluffy" }  # First successful response
+  responses:
+    "http://pod-0.svc:8080":
+      success: true
+      statusCode: 200
+      data: { "id": "12345", "name": "Fluffy" }
+      lastUpdated: "2026-01-05T10:30:00Z"
+    "http://pod-1.svc:8080":
+      success: true
+      statusCode: 200
+      data: { "id": "12345", "name": "Fluffy" }
+      lastUpdated: "2026-01-05T10:30:00Z"
+    "http://pod-2.svc:8080":
+      success: false
+      statusCode: 404
+      error: "resource 12345 not found"
+      lastUpdated: "2026-01-05T10:30:00Z"
+  lastGetTime: "2026-01-05T10:30:00Z"
+```
+
+This is useful for:
+- Verifying data consistency across replicas
+- Monitoring replication lag
+- Debugging data synchronization issues
 
 ### Status Fields
 
@@ -543,12 +1015,27 @@ Each CR has a status subresource with:
 
 | Field | Description |
 |-------|-------------|
-| `state` | Current state: `Pending`, `Syncing`, `Synced`, or `Failed` |
+| `state` | Current state: `Pending`, `Syncing`, `Synced`, `Failed`, `Observed`, or `NotFound` |
 | `externalID` | ID of the resource in the external REST API |
 | `lastSyncTime` | Timestamp of the last successful sync |
+| `lastGetTime` | Timestamp of the last GET request to the REST API |
 | `message` | Human-readable status message |
 | `conditions` | Standard Kubernetes conditions |
-| `response` | Last response body from the REST API |
+| `response` | Last response body from the REST API (single endpoint) |
+| `responses` | Map of endpoint URL to response (multi-endpoint mode) |
+| `driftDetected` | Whether drift was detected between spec and external state |
+
+#### EndpointResponse Structure (for multi-endpoint mode)
+
+Each CRD generates its own EndpointResponse type (e.g., `PetEndpointResponse`, `UserEndpointResponse`):
+
+| Field | Description |
+|-------|-------------|
+| `success` | Whether the request to this endpoint succeeded |
+| `statusCode` | HTTP status code returned (200, 404, etc.) |
+| `data` | Response body from the endpoint |
+| `error` | Error message if the request failed |
+| `lastUpdated` | When this endpoint was last queried |
 
 ## Example: Petstore Operator
 

@@ -64,6 +64,341 @@ type {{ .Name }} struct {
 {{- end }}
 
 {{- range .CRDs }}
+{{- if .IsQuery }}
+{{- if and .ResultFields (not .UsesSharedType) }}
+
+// {{ .ResultItemType }} represents a single result item from the {{ .Kind }} query
+type {{ .ResultItemType }} struct {
+{{- range .ResultFields }}
+{{- if .Description }}
+	// {{ .Description }}
+{{- end }}
+	// +optional
+	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }},omitempty"`
+{{- end }}
+}
+{{- end }}
+
+// {{ .Kind }}Spec defines the query parameters for {{ .Kind }}
+type {{ .Kind }}Spec struct {
+	// Query parameters for {{ .QueryPath }}
+{{ range .Spec.Fields }}
+{{- if .Description }}
+	// {{ .Description }}
+{{- end }}
+{{- if .Required }}
+	// +kubebuilder:validation:Required
+{{- else }}
+	// +optional
+{{- end }}
+	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// {{ .Kind }}Status defines the observed state of {{ .Kind }}
+type {{ .Kind }}Status struct {
+	// State represents the current state of the query
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastQueryTime is the last time the query was executed
+	// +optional
+	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// ResultCount is the number of results returned by the query
+	// +optional
+	ResultCount int `json:"resultCount,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results contains the query result from the REST API (single endpoint mode)
+	// +optional
+	Results *{{ .Kind }}EndpointResponse `json:"results,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// +optional
+	Responses map[string]{{ .Kind }}EndpointResponse `json:"responses,omitempty"`
+}
+
+// {{ .Kind }}EndpointResponse contains the response from a single endpoint for {{ .Kind }} queries
+type {{ .Kind }}EndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+{{- if or .ResultFields .UsesSharedType }}
+	Data {{ .ResponseType }} `json:"data,omitempty"`
+{{- else }}
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+{{- end }}
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName={{ range $i, $n := .ShortNames }}{{ if $i }};{{ end }}{{ $n }}{{ end }}
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// {{ .Kind }} is the Schema for the {{ .Plural }} API (Query Operation)
+type {{ .Kind }} struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   {{ .Kind }}Spec   `json:"spec,omitempty"`
+	Status {{ .Kind }}Status `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// {{ .Kind }}List contains a list of {{ .Kind }}
+type {{ .Kind }}List struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []{{ .Kind }} `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&{{ .Kind }}{}, &{{ .Kind }}List{})
+}
+{{- else if .IsAction }}
+{{- if and .ResultFields (not .UsesSharedType) }}
+
+// {{ .ResultItemType }} represents the response from the {{ .Kind }} action
+type {{ .ResultItemType }} struct {
+{{- range .ResultFields }}
+{{- if .Description }}
+	// {{ .Description }}
+{{- end }}
+	// +optional
+	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }},omitempty"`
+{{- end }}
+}
+{{- end }}
+
+// {{ .Kind }}Spec defines the parameters for the {{ .Kind }} action
+type {{ .Kind }}Spec struct {
+	// Action parameters for {{ .ActionPath }}
+{{ range .Spec.Fields }}
+{{- if .Description }}
+	// {{ .Description }}
+{{- end }}
+{{- if .Required }}
+	// +kubebuilder:validation:Required
+{{- else }}
+	// +optional
+{{- end }}
+{{- if .Validation }}
+{{- if .Validation.MinLength }}
+	// +kubebuilder:validation:MinLength={{ .Validation.MinLength }}
+{{- end }}
+{{- if .Validation.MaxLength }}
+	// +kubebuilder:validation:MaxLength={{ .Validation.MaxLength }}
+{{- end }}
+{{- if .Validation.Minimum }}
+	// +kubebuilder:validation:Minimum={{ .Validation.Minimum }}
+{{- end }}
+{{- if .Validation.Maximum }}
+	// +kubebuilder:validation:Maximum={{ .Validation.Maximum }}
+{{- end }}
+{{- if .Validation.Pattern }}
+	// +kubebuilder:validation:Pattern={{ printf "%q" .Validation.Pattern }}
+{{- end }}
+{{- if .Validation.Enum }}
+	// +kubebuilder:validation:Enum={{ range $i, $e := .Validation.Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}
+{{- end }}
+{{- if .Validation.MinItems }}
+	// +kubebuilder:validation:MinItems={{ .Validation.MinItems }}
+{{- end }}
+{{- if .Validation.MaxItems }}
+	// +kubebuilder:validation:MaxItems={{ .Validation.MaxItems }}
+{{- end }}
+{{- end }}
+{{- if .Enum }}
+	// +kubebuilder:validation:Enum={{ range $i, $e := .Enum }}{{ if $i }};{{ end }}{{ $e }}{{ end }}
+{{- end }}
+	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// {{ .Kind }}Status defines the observed state of {{ .Kind }}
+type {{ .Kind }}Status struct {
+	// State represents the current state of the action
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ExecutedAt is when the action was executed
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+
+	// CompletedAt is when the action completed (success or failure)
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
+	// +optional
+	HTTPStatusCode int `json:"httpStatusCode,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Result contains the response from the action execution (single endpoint mode)
+	// +optional
+	Result *{{ .Kind }}EndpointResponse `json:"result,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]{{ .Kind }}EndpointResponse `json:"responses,omitempty"`
+
+	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
+	// +optional
+	SuccessCount int `json:"successCount,omitempty"`
+
+	// TotalEndpoints is the total number of endpoints targeted (all-healthy strategy)
+	// +optional
+	TotalEndpoints int `json:"totalEndpoints,omitempty"`
+}
+
+// {{ .Kind }}EndpointResponse contains the response from a single endpoint for {{ .Kind }} actions
+type {{ .Kind }}EndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+{{- if or .ResultFields .UsesSharedType }}
+	Data {{ .ResponseType }} `json:"data,omitempty"`
+{{- else }}
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+{{- end }}
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// ExecutedAt is when this endpoint was called
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName={{ range $i, $n := .ShortNames }}{{ if $i }};{{ end }}{{ $n }}{{ end }}
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// {{ .Kind }} is the Schema for the {{ .Plural }} API (Action Operation)
+type {{ .Kind }} struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   {{ .Kind }}Spec   `json:"spec,omitempty"`
+	Status {{ .Kind }}Status `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// {{ .Kind }}List contains a list of {{ .Kind }}
+type {{ .Kind }}List struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []{{ .Kind }} `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&{{ .Kind }}{}, &{{ .Kind }}List{})
+}
+{{- else }}
 
 // {{ .Kind }}Spec defines the desired state of {{ .Kind }}
 type {{ .Kind }}Spec struct {
@@ -135,6 +470,19 @@ type {{ .Kind }}Spec struct {
 	// Defaults to the CR's namespace if not specified.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// ExternalIDRef references an existing resource in the external REST API by its ID.
+	// When set, the controller will GET this resource instead of creating a new one.
+	// This is useful for importing existing resources or for read-only observation.
+	// +optional
+	ExternalIDRef string `json:"externalIDRef,omitempty"`
+
+	// ReadOnly indicates that this CR is for observation only.
+	// When true, the controller will only GET the resource and update status,
+	// without performing any create, update, or delete operations.
+	// Requires ExternalIDRef to be set.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}
@@ -143,7 +491,7 @@ type {{ .Kind }}Status struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// State represents the current state of the resource
-	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
 	// +optional
 	State string `json:"state,omitempty"`
 
@@ -171,10 +519,45 @@ type {{ .Kind }}Status struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Response contains the last response from the REST API
+	// Response contains the last response from the REST API (single endpoint mode)
+	// +optional
+	Response *{{ .Kind }}EndpointResponse `json:"response,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]{{ .Kind }}EndpointResponse `json:"responses,omitempty"`
+
+	// DriftDetected indicates whether drift was detected between the spec and external resource
+	// +optional
+	DriftDetected bool `json:"driftDetected,omitempty"`
+
+	// LastGetTime is the last time the resource was fetched from the REST API via GET
+	// +optional
+	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
+}
+
+// {{ .Kind }}EndpointResponse contains the response from a single endpoint for {{ .Kind }} resources
+type {{ .Kind }}EndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
-	Response *runtime.RawExtension `json:"response,omitempty"`
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -205,4 +588,5 @@ type {{ .Kind }}List struct {
 func init() {
 	SchemeBuilder.Register(&{{ .Kind }}{}, &{{ .Kind }}List{})
 }
+{{- end }}
 {{- end }}

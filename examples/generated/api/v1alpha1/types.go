@@ -31,6 +31,331 @@ type PetTagsItem struct {
 	Name string `json:"name,omitempty"`
 }
 
+// InventorySpec defines the desired state of Inventory
+type InventorySpec struct {
+	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+
+	// Resource data as JSON
+	// +optional
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// Defaults to the CR's namespace if not specified.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// ExternalIDRef references an existing resource in the external REST API by its ID.
+	// When set, the controller will GET this resource instead of creating a new one.
+	// This is useful for importing existing resources or for read-only observation.
+	// +optional
+	ExternalIDRef string `json:"externalIDRef,omitempty"`
+
+	// ReadOnly indicates that this CR is for observation only.
+	// When true, the controller will only GET the resource and update status,
+	// without performing any create, update, or delete operations.
+	// Requires ExternalIDRef to be set.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
+}
+
+// InventoryStatus defines the observed state of Inventory
+type InventoryStatus struct {
+	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+
+	// State represents the current state of the resource
+	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastSyncTime is the last time the resource was synced with the REST API
+	// +optional
+	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+	// ExternalID is the ID of the resource in the external REST API
+	// +optional
+	ExternalID string `json:"externalID,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Response contains the last response from the REST API (single endpoint mode)
+	// +optional
+	Response *InventoryEndpointResponse `json:"response,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]InventoryEndpointResponse `json:"responses,omitempty"`
+
+	// DriftDetected indicates whether drift was detected between the spec and external resource
+	// +optional
+	DriftDetected bool `json:"driftDetected,omitempty"`
+
+	// LastGetTime is the last time the resource was fetched from the REST API via GET
+	// +optional
+	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
+}
+
+// InventoryEndpointResponse contains the response from a single endpoint for Inventory resources
+type InventoryEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=in;inv
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="External-ID",type=string,JSONPath=`.status.externalID`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// Inventory is the Schema for the inventories API
+type Inventory struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   InventorySpec   `json:"spec,omitempty"`
+	Status InventoryStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// InventoryList contains a list of Inventory
+type InventoryList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Inventory `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&Inventory{}, &InventoryList{})
+}
+
+// OrderSpec defines the desired state of Order
+type OrderSpec struct {
+	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+
+	// +optional
+	Complete bool `json:"complete,omitempty"`
+
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+
+	// +optional
+	PetId *int64 `json:"petId,omitempty"`
+
+	// +optional
+	Quantity *int32 `json:"quantity,omitempty"`
+
+	// +optional
+	ShipDate *metav1.Time `json:"shipDate,omitempty"`
+
+	// Order Status
+	// +optional
+	// +kubebuilder:validation:Enum=placed;approved;delivered
+	// +kubebuilder:validation:Enum=placed;approved;delivered
+	Status string `json:"status,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// Defaults to the CR's namespace if not specified.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// ExternalIDRef references an existing resource in the external REST API by its ID.
+	// When set, the controller will GET this resource instead of creating a new one.
+	// This is useful for importing existing resources or for read-only observation.
+	// +optional
+	ExternalIDRef string `json:"externalIDRef,omitempty"`
+
+	// ReadOnly indicates that this CR is for observation only.
+	// When true, the controller will only GET the resource and update status,
+	// without performing any create, update, or delete operations.
+	// Requires ExternalIDRef to be set.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
+}
+
+// OrderStatus defines the observed state of Order
+type OrderStatus struct {
+	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+
+	// State represents the current state of the resource
+	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastSyncTime is the last time the resource was synced with the REST API
+	// +optional
+	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+	// ExternalID is the ID of the resource in the external REST API
+	// +optional
+	ExternalID string `json:"externalID,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Response contains the last response from the REST API (single endpoint mode)
+	// +optional
+	Response *OrderEndpointResponse `json:"response,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]OrderEndpointResponse `json:"responses,omitempty"`
+
+	// DriftDetected indicates whether drift was detected between the spec and external resource
+	// +optional
+	DriftDetected bool `json:"driftDetected,omitempty"`
+
+	// LastGetTime is the last time the resource was fetched from the REST API via GET
+	// +optional
+	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
+}
+
+// OrderEndpointResponse contains the response from a single endpoint for Order resources
+type OrderEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=or;ord
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="External-ID",type=string,JSONPath=`.status.externalID`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// Order is the Schema for the orders API
+type Order struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   OrderSpec   `json:"spec,omitempty"`
+	Status OrderStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// OrderList contains a list of Order
+type OrderList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Order `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&Order{}, &OrderList{})
+}
+
 // PetSpec defines the desired state of Pet
 type PetSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
@@ -83,6 +408,19 @@ type PetSpec struct {
 	// Defaults to the CR's namespace if not specified.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// ExternalIDRef references an existing resource in the external REST API by its ID.
+	// When set, the controller will GET this resource instead of creating a new one.
+	// This is useful for importing existing resources or for read-only observation.
+	// +optional
+	ExternalIDRef string `json:"externalIDRef,omitempty"`
+
+	// ReadOnly indicates that this CR is for observation only.
+	// When true, the controller will only GET the resource and update status,
+	// without performing any create, update, or delete operations.
+	// Requires ExternalIDRef to be set.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 // PetStatus defines the observed state of Pet
@@ -91,7 +429,7 @@ type PetStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// State represents the current state of the resource
-	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
 	// +optional
 	State string `json:"state,omitempty"`
 
@@ -119,10 +457,45 @@ type PetStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Response contains the last response from the REST API
+	// Response contains the last response from the REST API (single endpoint mode)
+	// +optional
+	Response *PetEndpointResponse `json:"response,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]PetEndpointResponse `json:"responses,omitempty"`
+
+	// DriftDetected indicates whether drift was detected between the spec and external resource
+	// +optional
+	DriftDetected bool `json:"driftDetected,omitempty"`
+
+	// LastGetTime is the last time the resource was fetched from the REST API via GET
+	// +optional
+	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
+}
+
+// PetEndpointResponse contains the response from a single endpoint for Pet resources
+type PetEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
-	Response *runtime.RawExtension `json:"response,omitempty"`
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -152,129 +525,6 @@ type PetList struct {
 
 func init() {
 	SchemeBuilder.Register(&Pet{}, &PetList{})
-}
-
-// StoreSpec defines the desired state of Store
-type StoreSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// +optional
-	Complete bool `json:"complete,omitempty"`
-
-	// +optional
-	Id *int64 `json:"id,omitempty"`
-
-	// +optional
-	PetId *int64 `json:"petId,omitempty"`
-
-	// +optional
-	Quantity *int32 `json:"quantity,omitempty"`
-
-	// +optional
-	ShipDate *metav1.Time `json:"shipDate,omitempty"`
-
-	// Order Status
-	// +optional
-	// +kubebuilder:validation:Enum=placed;approved;delivered
-	// +kubebuilder:validation:Enum=placed;approved;delivered
-	Status string `json:"status,omitempty"`
-
-	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-	// +kubebuilder:validation:Minimum=0
-	// +optional
-	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
-
-	// TargetHelmRelease specifies a Helm release to discover the workload from.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-	// +optional
-	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
-
-	// TargetStatefulSet specifies a StatefulSet name to route requests to.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
-
-	// TargetDeployment specifies a Deployment name to route requests to.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetDeployment string `json:"targetDeployment,omitempty"`
-
-	// TargetNamespace specifies the namespace to look for the target workload.
-	// Defaults to the CR's namespace if not specified.
-	// +optional
-	TargetNamespace string `json:"targetNamespace,omitempty"`
-}
-
-// StoreStatus defines the observed state of Store
-type StoreStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// State represents the current state of the resource
-	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
-	// +optional
-	State string `json:"state,omitempty"`
-
-	// LastSyncTime is the last time the resource was synced with the REST API
-	// +optional
-	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
-
-	// ExternalID is the ID of the resource in the external REST API
-	// +optional
-	ExternalID string `json:"externalID,omitempty"`
-
-	// Message is a human-readable message about the current state
-	// +optional
-	Message string `json:"message,omitempty"`
-
-	// Conditions represent the latest available observations of an object's state
-	// +optional
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-
-	// ObservedGeneration is the last observed generation
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// Response contains the last response from the REST API
-	// +optional
-	// +kubebuilder:pruning:PreserveUnknownFields
-	Response *runtime.RawExtension `json:"response,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=st;sto
-// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
-// +kubebuilder:printcolumn:name="External-ID",type=string,JSONPath=`.status.externalID`
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-
-// Store is the Schema for the stores API
-type Store struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   StoreSpec   `json:"spec,omitempty"`
-	Status StoreStatus `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
-// StoreList contains a list of Store
-type StoreList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Store `json:"items"`
-}
-
-func init() {
-	SchemeBuilder.Register(&Store{}, &StoreList{})
 }
 
 // UserSpec defines the desired state of User
@@ -333,6 +583,19 @@ type UserSpec struct {
 	// Defaults to the CR's namespace if not specified.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// ExternalIDRef references an existing resource in the external REST API by its ID.
+	// When set, the controller will GET this resource instead of creating a new one.
+	// This is useful for importing existing resources or for read-only observation.
+	// +optional
+	ExternalIDRef string `json:"externalIDRef,omitempty"`
+
+	// ReadOnly indicates that this CR is for observation only.
+	// When true, the controller will only GET the resource and update status,
+	// without performing any create, update, or delete operations.
+	// Requires ExternalIDRef to be set.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 // UserStatus defines the observed state of User
@@ -341,7 +604,7 @@ type UserStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// State represents the current state of the resource
-	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed
+	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
 	// +optional
 	State string `json:"state,omitempty"`
 
@@ -369,10 +632,45 @@ type UserStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Response contains the last response from the REST API
+	// Response contains the last response from the REST API (single endpoint mode)
+	// +optional
+	Response *UserEndpointResponse `json:"response,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]UserEndpointResponse `json:"responses,omitempty"`
+
+	// DriftDetected indicates whether drift was detected between the spec and external resource
+	// +optional
+	DriftDetected bool `json:"driftDetected,omitempty"`
+
+	// LastGetTime is the last time the resource was fetched from the REST API via GET
+	// +optional
+	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
+}
+
+// UserEndpointResponse contains the response from a single endpoint for User resources
+type UserEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
-	Response *runtime.RawExtension `json:"response,omitempty"`
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -402,4 +700,638 @@ type UserList struct {
 
 func init() {
 	SchemeBuilder.Register(&User{}, &UserList{})
+}
+
+// PetFindbystatusSpec defines the query parameters for PetFindbystatus
+type PetFindbystatusSpec struct {
+	// Query parameters for /pet/findByStatus
+
+	// Status values that need to be considered for filter
+	// +kubebuilder:validation:Required
+	Status string `json:"status"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// PetFindbystatusStatus defines the observed state of PetFindbystatus
+type PetFindbystatusStatus struct {
+	// State represents the current state of the query
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastQueryTime is the last time the query was executed
+	// +optional
+	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// ResultCount is the number of results returned by the query
+	// +optional
+	ResultCount int `json:"resultCount,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results contains the query result from the REST API (single endpoint mode)
+	// +optional
+	Results *PetFindbystatusEndpointResponse `json:"results,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// +optional
+	Responses map[string]PetFindbystatusEndpointResponse `json:"responses,omitempty"`
+}
+
+// PetFindbystatusEndpointResponse contains the response from a single endpoint for PetFindbystatus queries
+type PetFindbystatusEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data []Pet `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pe;pet
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// PetFindbystatus is the Schema for the petfindbystatuss API (Query Operation)
+type PetFindbystatus struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   PetFindbystatusSpec   `json:"spec,omitempty"`
+	Status PetFindbystatusStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// PetFindbystatusList contains a list of PetFindbystatus
+type PetFindbystatusList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []PetFindbystatus `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&PetFindbystatus{}, &PetFindbystatusList{})
+}
+
+// PetFindbytagsSpec defines the query parameters for PetFindbytags
+type PetFindbytagsSpec struct {
+	// Query parameters for /pet/findByTags
+
+	// Tags to filter by
+	// +kubebuilder:validation:Required
+	Tags []string `json:"tags"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// PetFindbytagsStatus defines the observed state of PetFindbytags
+type PetFindbytagsStatus struct {
+	// State represents the current state of the query
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastQueryTime is the last time the query was executed
+	// +optional
+	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// ResultCount is the number of results returned by the query
+	// +optional
+	ResultCount int `json:"resultCount,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results contains the query result from the REST API (single endpoint mode)
+	// +optional
+	Results *PetFindbytagsEndpointResponse `json:"results,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// +optional
+	Responses map[string]PetFindbytagsEndpointResponse `json:"responses,omitempty"`
+}
+
+// PetFindbytagsEndpointResponse contains the response from a single endpoint for PetFindbytags queries
+type PetFindbytagsEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data []Pet `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pe;pet
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// PetFindbytags is the Schema for the petfindbytagss API (Query Operation)
+type PetFindbytags struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   PetFindbytagsSpec   `json:"spec,omitempty"`
+	Status PetFindbytagsStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// PetFindbytagsList contains a list of PetFindbytags
+type PetFindbytagsList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []PetFindbytags `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&PetFindbytags{}, &PetFindbytagsList{})
+}
+
+// UserLoginSpec defines the query parameters for UserLogin
+type UserLoginSpec struct {
+	// Query parameters for /user/login
+
+	// The user name for login
+	// +optional
+	Username string `json:"username,omitempty"`
+
+	// The password for login in clear text
+	// +optional
+	Password string `json:"password,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// UserLoginStatus defines the observed state of UserLogin
+type UserLoginStatus struct {
+	// State represents the current state of the query
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastQueryTime is the last time the query was executed
+	// +optional
+	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// ResultCount is the number of results returned by the query
+	// +optional
+	ResultCount int `json:"resultCount,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results contains the query result from the REST API (single endpoint mode)
+	// +optional
+	Results *UserLoginEndpointResponse `json:"results,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// +optional
+	Responses map[string]UserLoginEndpointResponse `json:"responses,omitempty"`
+}
+
+// UserLoginEndpointResponse contains the response from a single endpoint for UserLogin queries
+type UserLoginEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=us;use
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// UserLogin is the Schema for the userlogins API (Query Operation)
+type UserLogin struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   UserLoginSpec   `json:"spec,omitempty"`
+	Status UserLoginStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// UserLoginList contains a list of UserLogin
+type UserLoginList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []UserLogin `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&UserLogin{}, &UserLoginList{})
+}
+
+// UserLogoutSpec defines the query parameters for UserLogout
+type UserLogoutSpec struct {
+	// Query parameters for /user/logout
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// UserLogoutStatus defines the observed state of UserLogout
+type UserLogoutStatus struct {
+	// State represents the current state of the query
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastQueryTime is the last time the query was executed
+	// +optional
+	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// ResultCount is the number of results returned by the query
+	// +optional
+	ResultCount int `json:"resultCount,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results contains the query result from the REST API (single endpoint mode)
+	// +optional
+	Results *UserLogoutEndpointResponse `json:"results,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// +optional
+	Responses map[string]UserLogoutEndpointResponse `json:"responses,omitempty"`
+}
+
+// UserLogoutEndpointResponse contains the response from a single endpoint for UserLogout queries
+type UserLogoutEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=us;use
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// UserLogout is the Schema for the userlogouts API (Query Operation)
+type UserLogout struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   UserLogoutSpec   `json:"spec,omitempty"`
+	Status UserLogoutStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// UserLogoutList contains a list of UserLogout
+type UserLogoutList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []UserLogout `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&UserLogout{}, &UserLogoutList{})
+}
+
+// PetUploadimageResult represents the response from the PetUploadimage action
+type PetUploadimageResult struct {
+	// +optional
+	Code *int32 `json:"code,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+	// +optional
+	Type string `json:"type,omitempty"`
+}
+
+// PetUploadimageSpec defines the parameters for the PetUploadimage action
+type PetUploadimageSpec struct {
+	// Action parameters for /pet/{petId}/uploadImage
+
+	// ID of the parent Pet resource
+	// +kubebuilder:validation:Required
+	PetId string `json:"petId"`
+
+	// Additional Metadata
+	// +optional
+	AdditionalMetadata string `json:"additionalMetadata,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// PetUploadimageStatus defines the observed state of PetUploadimage
+type PetUploadimageStatus struct {
+	// State represents the current state of the action
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ExecutedAt is when the action was executed
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+
+	// CompletedAt is when the action completed (success or failure)
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
+	// +optional
+	HTTPStatusCode int `json:"httpStatusCode,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Result contains the response from the action execution (single endpoint mode)
+	// +optional
+	Result *PetUploadimageEndpointResponse `json:"result,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]PetUploadimageEndpointResponse `json:"responses,omitempty"`
+
+	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
+	// +optional
+	SuccessCount int `json:"successCount,omitempty"`
+
+	// TotalEndpoints is the total number of endpoints targeted (all-healthy strategy)
+	// +optional
+	TotalEndpoints int `json:"totalEndpoints,omitempty"`
+}
+
+// PetUploadimageEndpointResponse contains the response from a single endpoint for PetUploadimage actions
+type PetUploadimageEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data *PetUploadimageResult `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// ExecutedAt is when this endpoint was called
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pe;pet
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// PetUploadimage is the Schema for the petuploadimages API (Action Operation)
+type PetUploadimage struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   PetUploadimageSpec   `json:"spec,omitempty"`
+	Status PetUploadimageStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// PetUploadimageList contains a list of PetUploadimage
+type PetUploadimageList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []PetUploadimage `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&PetUploadimage{}, &PetUploadimageList{})
 }

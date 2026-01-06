@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -64,12 +65,17 @@ func (r *PetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	// Check if this is a read-only resource
+	isReadOnly := instance.Spec.ReadOnly
+
 	// Check if the resource is being deleted
 	if instance.GetDeletionTimestamp() != nil {
 		if controllerutil.ContainsFinalizer(instance, petFinalizer) {
-			// Run finalization logic
-			if err := r.finalizeResource(ctx, instance); err != nil {
-				return ctrl.Result{}, err
+			// Run finalization logic (skip for read-only resources)
+			if !isReadOnly {
+				if err := r.finalizeResource(ctx, instance); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 
 			// Remove finalizer
@@ -81,15 +87,28 @@ func (r *PetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(instance, petFinalizer) {
+	// Add finalizer if not present (skip for read-only resources)
+	if !isReadOnly && !controllerutil.ContainsFinalizer(instance, petFinalizer) {
 		controllerutil.AddFinalizer(instance, petFinalizer)
 		if err := r.Update(ctx, instance); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	// Sync with REST API
+	// Handle read-only mode: only GET and update status
+	if isReadOnly {
+		if instance.Spec.ExternalIDRef == "" {
+			r.updateStatus(ctx, instance, "Failed", "ReadOnly mode requires ExternalIDRef to be set")
+			return ctrl.Result{RequeueAfter: petRequeueAfter}, fmt.Errorf("readOnly mode requires externalIDRef")
+		}
+		if err := r.observeResource(ctx, instance); err != nil {
+			r.updateStatus(ctx, instance, "Failed", err.Error())
+			return ctrl.Result{RequeueAfter: petRequeueAfter}, err
+		}
+		return ctrl.Result{RequeueAfter: petRequeueAfter}, nil
+	}
+
+	// Sync with REST API (with drift detection)
 	if err := r.syncResource(ctx, instance); err != nil {
 		// Update status to failed
 		r.updateStatus(ctx, instance, "Failed", err.Error())
@@ -109,18 +128,6 @@ func (r *PetReconciler) getBaseURL(ctx context.Context) (string, error) {
 	return r.BaseURL, nil
 }
 
-func (r *PetReconciler) getAllBaseURLs(ctx context.Context) ([]string, error) {
-	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
-		return r.EndpointResolver.GetAllHealthyEndpoints()
-	}
-	// For non-all-healthy strategies, return single endpoint as slice
-	url, err := r.getBaseURL(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return []string{url}, nil
-}
-
 func (r *PetReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
@@ -132,47 +139,329 @@ func (r *PetReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32)
 	return r.getBaseURL(ctx)
 }
 
-// syncToEndpoint syncs to a single endpoint URL.
-// On success, it updates instance.Status.ExternalID and instance.Status.Response.
-// The caller is responsible for calling updateStatus after this returns.
-func (r *PetReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.Pet, baseURL string) error {
+// getExternalID returns the external ID to use for GET/PUT/DELETE operations.
+// It prefers ExternalIDRef from spec (for importing existing resources),
+// then falls back to ExternalID from status (for resources created by the controller).
+func (r *PetReconciler) getExternalID(instance *v1alpha1.Pet) string {
+	if instance.Spec.ExternalIDRef != "" {
+		return instance.Spec.ExternalIDRef
+	}
+	return instance.Status.ExternalID
+}
+
+// getResource performs a GET request to fetch the current state of the resource from the REST API.
+// Returns the response body as a map, or nil if the resource doesn't exist (404).
+func (r *PetReconciler) getResource(ctx context.Context, baseURL string, externalID string) (map[string]interface{}, []byte, error) {
 	logger := log.FromContext(ctx)
 
-	isCreate := instance.Status.ExternalID == ""
-	var method, url string
-	if isCreate {
-		method = "POST"
-		url = baseURL + "/pet"
-	} else {
-		method = "PUT"
-		url = baseURL + "/pet/" + instance.Status.ExternalID
-	}
-
-	specData, err := json.Marshal(instance.Spec)
+	url := baseURL + "/pet/" + externalID
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to marshal spec: %w", err)
+		return nil, nil, fmt.Errorf("failed to create GET request: %w", err)
 	}
+	req.Header.Set("Accept", "application/json")
 
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(specData))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	logger.Info("Syncing resource", "method", method, "url", url)
+	logger.Info("Getting resource", "url", url)
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
+		return nil, nil, fmt.Errorf("failed to execute GET request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return nil, nil, fmt.Errorf("failed to read GET response: %w", err)
+	}
+
+	// 404 means resource doesn't exist
+	if resp.StatusCode == http.StatusNotFound {
+		logger.Info("Resource not found in external API", "externalID", externalID)
+		return nil, nil, nil
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("API error: %s - %s", resp.Status, string(body))
+		return nil, nil, fmt.Errorf("GET failed: %s - %s", resp.Status, string(body))
+	}
+
+	var respData map[string]interface{}
+	if err := json.Unmarshal(body, &respData); err != nil {
+		return nil, body, fmt.Errorf("failed to parse GET response: %w", err)
+	}
+
+	return respData, body, nil
+}
+
+// compareSpecWithResponse compares the CR spec with the API response to detect drift.
+// Returns true if there is drift (spec differs from current state).
+func (r *PetReconciler) compareSpecWithResponse(instance *v1alpha1.Pet, apiResponse map[string]interface{}) bool {
+	// Marshal spec to JSON for comparison
+	specData, err := json.Marshal(instance.Spec)
+	if err != nil {
+		return true // Assume drift on error
+	}
+
+	var specMap map[string]interface{}
+	if err := json.Unmarshal(specData, &specMap); err != nil {
+		return true // Assume drift on error
+	}
+
+	// Remove controller-specific fields from spec that aren't part of the API resource
+	delete(specMap, "targetPodOrdinal")
+	delete(specMap, "targetHelmRelease")
+	delete(specMap, "targetStatefulSet")
+	delete(specMap, "targetDeployment")
+	delete(specMap, "targetNamespace")
+	delete(specMap, "externalIDRef")
+	delete(specMap, "readOnly")
+
+	// Compare each field in spec with API response
+	for key, specValue := range specMap {
+		apiValue, exists := apiResponse[key]
+		if !exists {
+			// Field exists in spec but not in API response - could be drift or API doesn't return this field
+			continue
+		}
+		if !reflect.DeepEqual(specValue, apiValue) {
+			return true // Drift detected
+		}
+	}
+
+	return false // No drift
+}
+
+// observeResource performs a GET-only observation for read-only CRs.
+func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.Pet) error {
+	logger := log.FromContext(ctx)
+
+	externalID := r.getExternalID(instance)
+	if externalID == "" {
+		return fmt.Errorf("no external ID available for observation")
+	}
+
+	now := metav1.Now()
+
+	// Check if using all-healthy strategy (fan out GET to multiple endpoints)
+	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
+		baseURLs, err := r.EndpointResolver.GetAllHealthyEndpoints()
+		if err != nil {
+			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
+		}
+
+		if len(baseURLs) > 1 {
+			// Multiple endpoints - collect responses from all
+			responses := make(map[string]v1alpha1.PetEndpointResponse)
+			successCount := 0
+			var firstSuccessBody []byte
+
+			for _, baseURL := range baseURLs {
+				endpointResp := v1alpha1.PetEndpointResponse{
+					LastUpdated: &now,
+				}
+
+				respData, body, err := r.getResource(ctx, baseURL, externalID)
+				if err != nil {
+					endpointResp.Success = false
+					endpointResp.Error = err.Error()
+					logger.Info("Failed to observe from endpoint", "endpoint", baseURL, "error", err)
+				} else if respData == nil {
+					endpointResp.Success = false
+					endpointResp.StatusCode = 404
+					endpointResp.Error = fmt.Sprintf("resource %s not found", externalID)
+					logger.Info("Resource not found at endpoint", "endpoint", baseURL, "externalID", externalID)
+				} else {
+					endpointResp.Success = true
+					endpointResp.StatusCode = 200
+					endpointResp.Data = &runtime.RawExtension{Raw: body}
+					successCount++
+					if firstSuccessBody == nil {
+						firstSuccessBody = body
+					}
+					logger.Info("Successfully observed from endpoint", "endpoint", baseURL, "externalID", externalID)
+				}
+
+				responses[baseURL] = endpointResp
+			}
+
+			// Update status with all responses
+			instance.Status.ExternalID = externalID
+			instance.Status.Responses = responses
+			instance.Status.LastGetTime = &now
+			instance.Status.DriftDetected = false
+
+			// Also set the single Response field with first success for backwards compatibility
+			if firstSuccessBody != nil {
+				instance.Status.Response = &v1alpha1.PetEndpointResponse{
+					Success:     true,
+					StatusCode:  200,
+					Data:        &runtime.RawExtension{Raw: firstSuccessBody},
+					LastUpdated: &now,
+				}
+			}
+
+			if successCount == 0 {
+				r.updateStatus(ctx, instance, "NotFound", fmt.Sprintf("Resource %s not found in any endpoint (%d endpoints queried)", externalID, len(baseURLs)))
+				return nil
+			}
+
+			message := fmt.Sprintf("Successfully observed from %d/%d endpoints", successCount, len(baseURLs))
+			logger.Info(message, "externalID", externalID)
+			r.updateStatus(ctx, instance, "Observed", message)
+			return nil
+		}
+	}
+
+	// Single endpoint case - resolve URL and observe
+	baseURL, err := r.resolveBaseURL(ctx, instance)
+	if err != nil {
+		return err
+	}
+
+	respData, body, err := r.getResource(ctx, baseURL, externalID)
+	if err != nil {
+		return err
+	}
+
+	if respData == nil {
+		r.updateStatus(ctx, instance, "NotFound", fmt.Sprintf("Resource %s not found in external API", externalID))
+		return nil
+	}
+
+	// Update status with fetched data
+	instance.Status.ExternalID = externalID
+	instance.Status.Response = &v1alpha1.PetEndpointResponse{
+		Success:     true,
+		StatusCode:  200,
+		Data:        &runtime.RawExtension{Raw: body},
+		LastUpdated: &now,
+	}
+	instance.Status.LastGetTime = &now
+	instance.Status.DriftDetected = false // No drift concept for read-only
+	instance.Status.Responses = nil       // Clear multi-endpoint responses for single endpoint
+
+	logger.Info("Successfully observed resource", "externalID", externalID)
+	r.updateStatus(ctx, instance, "Observed", "Successfully fetched resource from REST API")
+	return nil
+}
+
+// resolveBaseURL determines the base URL to use for API requests based on CR targeting fields.
+func (r *PetReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.Pet) (string, error) {
+	if r.EndpointResolver != nil {
+		namespace := instance.Spec.TargetNamespace
+		if namespace == "" {
+			namespace = instance.Namespace
+		}
+
+		// Per-CR Helm release targeting
+		if instance.Spec.TargetHelmRelease != "" {
+			return r.EndpointResolver.GetEndpointForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace, instance.Spec.TargetPodOrdinal)
+		}
+
+		// Per-CR StatefulSet targeting
+		if instance.Spec.TargetStatefulSet != "" {
+			return r.EndpointResolver.GetEndpointForStatefulSet(ctx, instance.Spec.TargetStatefulSet, namespace, instance.Spec.TargetPodOrdinal)
+		}
+
+		// Per-CR Deployment targeting
+		if instance.Spec.TargetDeployment != "" {
+			return r.EndpointResolver.GetEndpointForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
+		}
+
+		// By-ordinal strategy
+		if r.EndpointResolver.IsByOrdinalStrategy() {
+			return r.getBaseURLByOrdinal(ctx, instance.Spec.TargetPodOrdinal)
+		}
+	}
+
+	return r.getBaseURL(ctx)
+}
+
+// syncToEndpoint syncs to a single endpoint URL with GET-first drift detection.
+// On success, it updates instance.Status.ExternalID, instance.Status.Response, and instance.Status.DriftDetected.
+// The caller is responsible for calling updateStatus after this returns.
+func (r *PetReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.Pet, baseURL string) error {
+	logger := log.FromContext(ctx)
+
+	now := metav1.Now()
+	externalID := r.getExternalID(instance)
+
+	// If we have an external ID (from spec.externalIDRef or status.externalID), try GET first
+	if externalID != "" {
+		respData, body, err := r.getResource(ctx, baseURL, externalID)
+		if err != nil {
+			return fmt.Errorf("failed to get resource: %w", err)
+		}
+
+		instance.Status.LastGetTime = &now
+
+		if respData != nil {
+			// Resource exists - check for drift
+			hasDrift := r.compareSpecWithResponse(instance, respData)
+			instance.Status.DriftDetected = hasDrift
+
+			if !hasDrift {
+				// No drift - skip update
+				logger.Info("No drift detected, skipping update", "externalID", externalID)
+				instance.Status.ExternalID = externalID
+				instance.Status.Response = &v1alpha1.PetEndpointResponse{
+					Success:     true,
+					StatusCode:  200,
+					Data:        &runtime.RawExtension{Raw: body},
+					LastUpdated: &now,
+				}
+				return nil
+			}
+
+			// Drift detected - proceed with PUT
+			logger.Info("Drift detected, updating resource", "externalID", externalID)
+			return r.updateResource(ctx, instance, baseURL, externalID)
+		}
+
+		// Resource doesn't exist (404) - if we're using externalIDRef, this is an error
+		if instance.Spec.ExternalIDRef != "" {
+			return fmt.Errorf("resource with externalIDRef %s not found", instance.Spec.ExternalIDRef)
+		}
+
+		// Resource was created by us but no longer exists - recreate it
+		logger.Info("Resource no longer exists, recreating", "externalID", externalID)
+		instance.Status.ExternalID = "" // Clear so we do a POST
+	}
+
+	// No external ID or resource doesn't exist - create new resource
+	return r.createResource(ctx, instance, baseURL)
+}
+
+// createResource performs a POST to create a new resource.
+func (r *PetReconciler) createResource(ctx context.Context, instance *v1alpha1.Pet, baseURL string) error {
+	logger := log.FromContext(ctx)
+
+	url := baseURL + "/pet"
+
+	// Marshal spec, excluding controller-specific fields
+	specData, err := r.marshalSpecForAPI(instance)
+	if err != nil {
+		return fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(specData))
+	if err != nil {
+		return fmt.Errorf("failed to create POST request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	logger.Info("Creating resource", "url", url)
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute POST request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read POST response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("POST failed: %s - %s", resp.Status, string(body))
 	}
 
 	// Parse response to extract ID
@@ -188,111 +477,140 @@ func (r *PetReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.P
 		}
 	}
 
-	instance.Status.Response = &runtime.RawExtension{Raw: body}
+	now := metav1.Now()
+	instance.Status.Response = &v1alpha1.PetEndpointResponse{
+		Success:     true,
+		StatusCode:  resp.StatusCode,
+		Data:        &runtime.RawExtension{Raw: body},
+		LastUpdated: &now,
+	}
+	instance.Status.DriftDetected = false
+	instance.Status.LastGetTime = &now
+
+	logger.Info("Successfully created resource", "externalID", instance.Status.ExternalID)
 	return nil
+}
+
+// updateResource performs a PUT to update an existing resource.
+func (r *PetReconciler) updateResource(ctx context.Context, instance *v1alpha1.Pet, baseURL string, externalID string) error {
+	logger := log.FromContext(ctx)
+
+	url := baseURL + "/pet/" + externalID
+
+	// Marshal spec, excluding controller-specific fields
+	specData, err := r.marshalSpecForAPI(instance)
+	if err != nil {
+		return fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(specData))
+	if err != nil {
+		return fmt.Errorf("failed to create PUT request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	logger.Info("Updating resource", "url", url)
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute PUT request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read PUT response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("PUT failed: %s - %s", resp.Status, string(body))
+	}
+
+	now := metav1.Now()
+	instance.Status.ExternalID = externalID
+	instance.Status.Response = &v1alpha1.PetEndpointResponse{
+		Success:     true,
+		StatusCode:  resp.StatusCode,
+		Data:        &runtime.RawExtension{Raw: body},
+		LastUpdated: &now,
+	}
+	instance.Status.DriftDetected = false
+	instance.Status.LastGetTime = &now
+
+	logger.Info("Successfully updated resource", "externalID", externalID)
+	return nil
+}
+
+// marshalSpecForAPI marshals the spec for sending to the API, excluding controller-specific fields.
+func (r *PetReconciler) marshalSpecForAPI(instance *v1alpha1.Pet) ([]byte, error) {
+	specData, err := json.Marshal(instance.Spec)
+	if err != nil {
+		return nil, err
+	}
+
+	var specMap map[string]interface{}
+	if err := json.Unmarshal(specData, &specMap); err != nil {
+		return nil, err
+	}
+
+	// Remove controller-specific fields
+	delete(specMap, "targetPodOrdinal")
+	delete(specMap, "targetHelmRelease")
+	delete(specMap, "targetStatefulSet")
+	delete(specMap, "targetDeployment")
+	delete(specMap, "targetNamespace")
+	delete(specMap, "externalIDRef")
+	delete(specMap, "readOnly")
+
+	return json.Marshal(specMap)
 }
 
 func (r *PetReconciler) syncResource(ctx context.Context, instance *v1alpha1.Pet) error {
 	logger := log.FromContext(ctx)
 
-	// Handle per-CR targeting (Helm release, StatefulSet, or Deployment)
-	if r.EndpointResolver != nil {
-		namespace := instance.Spec.TargetNamespace
-		if namespace == "" {
-			namespace = instance.Namespace
-		}
-
-		// Per-CR Helm release targeting
-		if instance.Spec.TargetHelmRelease != "" {
-			baseURL, err := r.EndpointResolver.GetEndpointForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace, instance.Spec.TargetPodOrdinal)
-			if err != nil {
-				return fmt.Errorf("failed to get endpoint for Helm release %s: %w", instance.Spec.TargetHelmRelease, err)
-			}
-			logger.Info("Using per-CR Helm release endpoint", "helmRelease", instance.Spec.TargetHelmRelease, "namespace", namespace, "baseURL", baseURL)
-			if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
-				return err
-			}
-			r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
-			return nil
-		}
-
-		// Per-CR StatefulSet targeting
-		if instance.Spec.TargetStatefulSet != "" {
-			baseURL, err := r.EndpointResolver.GetEndpointForStatefulSet(ctx, instance.Spec.TargetStatefulSet, namespace, instance.Spec.TargetPodOrdinal)
-			if err != nil {
-				return fmt.Errorf("failed to get endpoint for StatefulSet %s: %w", instance.Spec.TargetStatefulSet, err)
-			}
-			logger.Info("Using per-CR StatefulSet endpoint", "statefulset", instance.Spec.TargetStatefulSet, "namespace", namespace, "baseURL", baseURL)
-			if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
-				return err
-			}
-			r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
-			return nil
-		}
-
-		// Per-CR Deployment targeting
-		if instance.Spec.TargetDeployment != "" {
-			baseURL, err := r.EndpointResolver.GetEndpointForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
-			if err != nil {
-				return fmt.Errorf("failed to get endpoint for Deployment %s: %w", instance.Spec.TargetDeployment, err)
-			}
-			logger.Info("Using per-CR Deployment endpoint", "deployment", instance.Spec.TargetDeployment, "namespace", namespace, "baseURL", baseURL)
-			if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
-				return err
-			}
-			r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
-			return nil
-		}
-	}
-
-	// Handle by-ordinal strategy
-	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
-		baseURL, err := r.getBaseURLByOrdinal(ctx, instance.Spec.TargetPodOrdinal)
+	// Check if using all-healthy strategy (fan out to multiple endpoints)
+	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
+		baseURLs, err := r.EndpointResolver.GetAllHealthyEndpoints()
 		if err != nil {
-			return fmt.Errorf("failed to get base URL by ordinal: %w", err)
+			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
-		if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
-			return err
+
+		if len(baseURLs) > 1 {
+			// Multiple endpoints - fan out to all
+			var syncErrors []error
+			successCount := 0
+
+			for _, baseURL := range baseURLs {
+				if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
+					syncErrors = append(syncErrors, fmt.Errorf("%s: %w", baseURL, err))
+				} else {
+					successCount++
+				}
+			}
+
+			// If all requests failed, return error
+			if successCount == 0 {
+				return fmt.Errorf("all sync requests failed: %v", syncErrors)
+			}
+
+			// Log partial failures
+			if len(syncErrors) > 0 {
+				logger.Info("Some sync requests failed", "successCount", successCount, "errors", syncErrors)
+			}
+
+			r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
+			return nil
 		}
-		r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
-		return nil
 	}
 
-	// Get base URLs (multiple for all-healthy strategy)
-	baseURLs, err := r.getAllBaseURLs(ctx)
+	// Single endpoint case - resolve URL and sync
+	baseURL, err := r.resolveBaseURL(ctx, instance)
 	if err != nil {
-		return fmt.Errorf("failed to get base URLs: %w", err)
+		return fmt.Errorf("failed to resolve base URL: %w", err)
 	}
 
-	// Single endpoint case
-	if len(baseURLs) == 1 {
-		if err := r.syncToEndpoint(ctx, instance, baseURLs[0]); err != nil {
-			return err
-		}
-		r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
-		return nil
-	}
-
-	// Multiple endpoints (all-healthy strategy) - fan out to all
-	var syncErrors []error
-	successCount := 0
-
-	for _, baseURL := range baseURLs {
-		if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
-			syncErrors = append(syncErrors, fmt.Errorf("%s: %w", baseURL, err))
-		} else {
-			successCount++
-		}
-	}
-
-	// If all requests failed, return error
-	if successCount == 0 {
-		return fmt.Errorf("all sync requests failed: %v", syncErrors)
-	}
-
-	// Log partial failures
-	if len(syncErrors) > 0 {
-		logger.Info("Some sync requests failed", "successCount", successCount, "errors", syncErrors)
+	logger.Info("Syncing to endpoint", "baseURL", baseURL)
+	if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
+		return err
 	}
 
 	r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
@@ -334,87 +652,47 @@ func (r *PetReconciler) finalizeResource(ctx context.Context, instance *v1alpha1
 		return nil
 	}
 
-	// Handle per-CR targeting (Helm release, StatefulSet, or Deployment)
-	if r.EndpointResolver != nil {
-		namespace := instance.Spec.TargetNamespace
-		if namespace == "" {
-			namespace = instance.Namespace
-		}
-
-		// Per-CR Helm release targeting
-		if instance.Spec.TargetHelmRelease != "" {
-			baseURL, err := r.EndpointResolver.GetEndpointForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace, instance.Spec.TargetPodOrdinal)
-			if err != nil {
-				return fmt.Errorf("failed to get endpoint for Helm release %s: %w", instance.Spec.TargetHelmRelease, err)
-			}
-			logger.Info("Using per-CR Helm release endpoint for delete", "helmRelease", instance.Spec.TargetHelmRelease, "namespace", namespace, "baseURL", baseURL)
-			return r.deleteFromEndpoint(ctx, instance, baseURL)
-		}
-
-		// Per-CR StatefulSet targeting
-		if instance.Spec.TargetStatefulSet != "" {
-			baseURL, err := r.EndpointResolver.GetEndpointForStatefulSet(ctx, instance.Spec.TargetStatefulSet, namespace, instance.Spec.TargetPodOrdinal)
-			if err != nil {
-				return fmt.Errorf("failed to get endpoint for StatefulSet %s: %w", instance.Spec.TargetStatefulSet, err)
-			}
-			logger.Info("Using per-CR StatefulSet endpoint for delete", "statefulset", instance.Spec.TargetStatefulSet, "namespace", namespace, "baseURL", baseURL)
-			return r.deleteFromEndpoint(ctx, instance, baseURL)
-		}
-
-		// Per-CR Deployment targeting
-		if instance.Spec.TargetDeployment != "" {
-			baseURL, err := r.EndpointResolver.GetEndpointForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
-			if err != nil {
-				return fmt.Errorf("failed to get endpoint for Deployment %s: %w", instance.Spec.TargetDeployment, err)
-			}
-			logger.Info("Using per-CR Deployment endpoint for delete", "deployment", instance.Spec.TargetDeployment, "namespace", namespace, "baseURL", baseURL)
-			return r.deleteFromEndpoint(ctx, instance, baseURL)
-		}
-	}
-
-	// Handle by-ordinal strategy
-	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
-		baseURL, err := r.getBaseURLByOrdinal(ctx, instance.Spec.TargetPodOrdinal)
+	// Check if using all-healthy strategy (fan out to multiple endpoints)
+	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
+		baseURLs, err := r.EndpointResolver.GetAllHealthyEndpoints()
 		if err != nil {
-			return fmt.Errorf("failed to get base URL by ordinal: %w", err)
+			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
-		return r.deleteFromEndpoint(ctx, instance, baseURL)
+
+		if len(baseURLs) > 1 {
+			// Multiple endpoints - fan out delete to all
+			var deleteErrors []error
+			successCount := 0
+
+			for _, baseURL := range baseURLs {
+				if err := r.deleteFromEndpoint(ctx, instance, baseURL); err != nil {
+					deleteErrors = append(deleteErrors, fmt.Errorf("%s: %w", baseURL, err))
+				} else {
+					successCount++
+				}
+			}
+
+			// If all requests failed, return error
+			if successCount == 0 {
+				return fmt.Errorf("all delete requests failed: %v", deleteErrors)
+			}
+
+			// Log partial failures but consider success if at least one succeeded
+			if len(deleteErrors) > 0 {
+				logger.Info("Some delete requests failed", "successCount", successCount, "errors", deleteErrors)
+			}
+
+			return nil
+		}
 	}
 
-	// Get base URLs (multiple for all-healthy strategy)
-	baseURLs, err := r.getAllBaseURLs(ctx)
+	// Single endpoint case - resolve URL and delete
+	baseURL, err := r.resolveBaseURL(ctx, instance)
 	if err != nil {
-		return fmt.Errorf("failed to get base URLs: %w", err)
+		return fmt.Errorf("failed to resolve base URL: %w", err)
 	}
 
-	// Single endpoint case
-	if len(baseURLs) == 1 {
-		return r.deleteFromEndpoint(ctx, instance, baseURLs[0])
-	}
-
-	// Multiple endpoints (all-healthy strategy) - fan out to all
-	var deleteErrors []error
-	successCount := 0
-
-	for _, baseURL := range baseURLs {
-		if err := r.deleteFromEndpoint(ctx, instance, baseURL); err != nil {
-			deleteErrors = append(deleteErrors, fmt.Errorf("%s: %w", baseURL, err))
-		} else {
-			successCount++
-		}
-	}
-
-	// If all requests failed, return error
-	if successCount == 0 {
-		return fmt.Errorf("all delete requests failed: %v", deleteErrors)
-	}
-
-	// Log partial failures but consider success if at least one succeeded
-	if len(deleteErrors) > 0 {
-		logger.Info("Some delete requests failed", "successCount", successCount, "errors", deleteErrors)
-	}
-
-	return nil
+	return r.deleteFromEndpoint(ctx, instance, baseURL)
 }
 
 func (r *PetReconciler) updateStatus(ctx context.Context, instance *v1alpha1.Pet, state, message string) {
@@ -434,7 +712,8 @@ func (r *PetReconciler) updateStatus(ctx context.Context, instance *v1alpha1.Pet
 		Message:            message,
 		LastTransitionTime: now,
 	}
-	if state == "Synced" {
+	// Set Ready=True for successful states
+	if state == "Synced" || state == "Observed" {
 		condition.Status = metav1.ConditionTrue
 	}
 	meta.SetStatusCondition(&instance.Status.Conditions, condition)

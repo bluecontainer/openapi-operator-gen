@@ -4,17 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
-  name: users.petstore.example.com
+  name: inventories.petstore.example.com
 spec:
   group: petstore.example.com
   names:
-    kind: User
-    listKind: UserList
-    plural: users
+    kind: Inventory
+    listKind: InventoryList
+    plural: inventories
     shortNames:
-    - us
-    - use
-    singular: user
+    - in
+    - inv
+    singular: inventory
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,7 +30,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: User is the Schema for the users API
+        description: Inventory is the Schema for the inventories API
         properties:
           apiVersion:
             description: |-
@@ -50,26 +50,17 @@ spec:
           metadata:
             type: object
           spec:
-            description: UserSpec defines the desired state of User
+            description: InventorySpec defines the desired state of Inventory
             properties:
-              email:
-                type: string
+              data:
+                description: Resource data as JSON
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               externalIDRef:
                 description: |-
                   ExternalIDRef references an existing resource in the external REST API by its ID.
                   When set, the controller will GET this resource instead of creating a new one.
                   This is useful for importing existing resources or for read-only observation.
-                type: string
-              firstName:
-                type: string
-              id:
-                format: int64
-                type: integer
-              lastName:
-                type: string
-              password:
-                type: string
-              phone:
                 type: string
               readOnly:
                 description: |-
@@ -106,15 +97,9 @@ spec:
                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                   When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
-              userStatus:
-                description: User Status
-                format: int32
-                type: integer
-              username:
-                type: string
             type: object
           status:
-            description: UserStatus defines the observed state of User
+            description: InventoryStatus defines the observed state of Inventory
             properties:
               conditions:
                 description: Conditions represent the latest available observations
@@ -231,8 +216,8 @@ spec:
                 type: object
               responses:
                 additionalProperties:
-                  description: UserEndpointResponse contains the response from a single
-                    endpoint for User resources
+                  description: InventoryEndpointResponse contains the response from
+                    a single endpoint for Inventory resources
                   properties:
                     data:
                       description: Data contains the response body from the endpoint

@@ -19,6 +19,16 @@ var GroupVersionInfoTemplate string
 //go:embed controller.go.tmpl
 var ControllerTemplate string
 
+// QueryControllerTemplate is the template for generating query-only controller reconciliation logic
+//
+//go:embed query_controller.go.tmpl
+var QueryControllerTemplate string
+
+// ActionControllerTemplate is the template for generating action controller reconciliation logic
+//
+//go:embed action_controller.go.tmpl
+var ActionControllerTemplate string
+
 // CRDYAMLTemplate is the template for generating CRD YAML manifests
 //
 //go:embed crd.yaml.tmpl

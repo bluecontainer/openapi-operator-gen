@@ -1,0 +1,1282 @@
+package parser
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestNewParser(t *testing.T) {
+	p := NewParser()
+	if p == nil {
+		t.Fatal("expected non-nil parser")
+	}
+}
+
+// =============================================================================
+// toPascalCase Tests
+// =============================================================================
+
+func TestToPascalCase(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"users", "Users"},
+		{"user-profiles", "UserProfiles"},
+		{"user_profiles", "UserProfiles"},
+		{"user-profile-settings", "UserProfileSettings"},
+		{"API", "Api"},
+		{"api", "Api"},
+		{"", ""},
+		{"a", "A"},
+		{"hello world", "HelloWorld"},
+		{"HELLO_WORLD", "HelloWorld"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := p.toPascalCase(tt.input)
+			if result != tt.expected {
+				t.Errorf("toPascalCase(%q) = %q, expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// singularize Tests
+// =============================================================================
+
+func TestSingularize(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"users", "user"},
+		{"pets", "pet"},
+		{"categories", "category"},
+		{"entries", "entry"},
+		{"boxes", "box"},
+		{"buses", "bus"},
+		{"class", "class"}, // ends in 'ss', should not singularize
+		{"address", "address"},
+		{"user", "user"}, // already singular
+		{"", ""},
+		{"a", "a"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := p.singularize(tt.input)
+			if result != tt.expected {
+				t.Errorf("singularize(%q) = %q, expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// pluralize Tests
+// =============================================================================
+
+func TestPluralize(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"user", "users"},
+		{"pet", "pets"},
+		{"category", "categories"},
+		{"entry", "entries"},
+		{"box", "boxes"},
+		{"bus", "buses"},
+		{"class", "classes"},
+		{"match", "matches"},
+		{"", "s"},
+		{"a", "as"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := p.pluralize(tt.input)
+			if result != tt.expected {
+				t.Errorf("pluralize(%q) = %q, expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// extractResourceName Tests
+// =============================================================================
+
+func TestExtractResourceName(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"/users", "User"},
+		{"/users/{id}", "User"},
+		{"/users/{userId}/posts", "User"},   // nested sub-resource: posts belong to users
+		{"/api/v1/users", "User"},           // namespaced resource: users under api/v1
+		{"/store/order", "Order"},           // namespaced resource: order under store
+		{"/store/order/{orderId}", "Order"}, // namespaced resource with ID param
+		{"/pets", "Pet"},
+		{"/categories", "Category"},
+		{"/user-profiles", "UserProfil"}, // singularize removes "es" from "profiles"
+		{"/user_settings", "UserSetting"},
+		{"/{id}", ""},       // only parameter
+		{"/", ""},           // empty path
+		{"", ""},            // empty string
+		{"/items/", "Item"}, // trailing slash
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := p.extractResourceName(tt.path)
+			if result != tt.expected {
+				t.Errorf("extractResourceName(%q) = %q, expected %q", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// getBasePath Tests
+// =============================================================================
+
+func TestGetBasePath(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"/users", "/users"},
+		{"/users/{id}", "/users"},
+		{"/users/{userId}/posts", "/users"},        // stops at {userId} since it's the resource ID
+		{"/api/v1/users", "/api/v1/users"},         // includes full namespace path
+		{"/store/order", "/store/order"},           // includes full namespace path
+		{"/store/order/{orderId}", "/store/order"}, // stops at resource before ID param
+		{"/", "/"},
+		{"", "/"},
+		{"/pets/", "/pets"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := p.getBasePath(tt.path)
+			if result != tt.expected {
+				t.Errorf("getBasePath(%q) = %q, expected %q", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// extractRefName Tests
+// =============================================================================
+
+func TestExtractRefName(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		ref      string
+		expected string
+	}{
+		{"#/components/schemas/Pet", "Pet"},
+		{"#/components/schemas/User", "User"},
+		{"#/components/schemas/ApiResponse", "ApiResponse"},
+		{"#/definitions/Pet", "Pet"},
+		{"Pet", ""}, // no fragment
+		{"", ""},    // empty
+		{"#/", ""},  // empty fragment parts
+		{"#/components", "components"},
+		{"invalid://url/%", ""}, // invalid URL
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			result := p.extractRefName(tt.ref)
+			if result != tt.expected {
+				t.Errorf("extractRefName(%q) = %q, expected %q", tt.ref, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// parseStatusCode Tests
+// =============================================================================
+
+func TestParseStatusCode(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		code     string
+		expected int
+	}{
+		{"200", 200},
+		{"201", 201},
+		{"404", 200}, // unknown defaults to 200
+		{"500", 200},
+		{"", 200},
+		{"abc", 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			result := p.parseStatusCode(tt.code)
+			if result != tt.expected {
+				t.Errorf("parseStatusCode(%q) = %d, expected %d", tt.code, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Integration Tests with OpenAPI Spec Files
+// =============================================================================
+
+func TestParse_SimpleSpec(t *testing.T) {
+	// Create a temporary OpenAPI spec file
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Test API"
+  version: "1.0.0"
+  description: "A test API"
+servers:
+  - url: "https://api.example.com/v1"
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      summary: Get all users
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+    post:
+      operationId: createUser
+      summary: Create a user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        "201":
+          description: Created
+  /users/{id}:
+    get:
+      operationId: getUserById
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+            - pending
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Verify basic info
+	if spec.Title != "Test API" {
+		t.Errorf("expected Title 'Test API', got %q", spec.Title)
+	}
+	if spec.Version != "1.0.0" {
+		t.Errorf("expected Version '1.0.0', got %q", spec.Version)
+	}
+	if spec.Description != "A test API" {
+		t.Errorf("expected Description 'A test API', got %q", spec.Description)
+	}
+	if spec.BaseURL != "https://api.example.com/v1" {
+		t.Errorf("expected BaseURL 'https://api.example.com/v1', got %q", spec.BaseURL)
+	}
+
+	// Verify schemas
+	if len(spec.Schemas) != 1 {
+		t.Errorf("expected 1 schema, got %d", len(spec.Schemas))
+	}
+	userSchema, ok := spec.Schemas["User"]
+	if !ok {
+		t.Fatal("User schema not found")
+	}
+	if userSchema.Type != "object" {
+		t.Errorf("expected User schema type 'object', got %q", userSchema.Type)
+	}
+	if len(userSchema.Properties) != 5 {
+		t.Errorf("expected 5 properties, got %d", len(userSchema.Properties))
+	}
+	if len(userSchema.Required) != 2 {
+		t.Errorf("expected 2 required fields, got %d", len(userSchema.Required))
+	}
+
+	// Verify resources
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
+	}
+	userResource := spec.Resources[0]
+	if userResource.Name != "User" {
+		t.Errorf("expected resource name 'User', got %q", userResource.Name)
+	}
+	if userResource.PluralName != "Users" {
+		t.Errorf("expected plural name 'Users', got %q", userResource.PluralName)
+	}
+	if userResource.Path != "/users" {
+		t.Errorf("expected path '/users', got %q", userResource.Path)
+	}
+
+	// Verify operations
+	if len(userResource.Operations) != 3 {
+		t.Errorf("expected 3 operations, got %d", len(userResource.Operations))
+	}
+
+	// Check that schema was extracted
+	if userResource.Schema == nil {
+		t.Error("expected resource schema to be set")
+	}
+}
+
+func TestParse_MultipleResources(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Multi Resource API"
+  version: "1.0.0"
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        "200":
+          description: Success
+  /pets:
+    get:
+      operationId: getPets
+      responses:
+        "200":
+          description: Success
+    post:
+      operationId: createPet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+  /orders:
+    get:
+      operationId: getOrders
+      responses:
+        "200":
+          description: Success
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) != 3 {
+		t.Fatalf("expected 3 resources, got %d", len(spec.Resources))
+	}
+
+	// Resources should be sorted alphabetically
+	expectedNames := []string{"Order", "Pet", "User"}
+	for i, name := range expectedNames {
+		if spec.Resources[i].Name != name {
+			t.Errorf("expected resource[%d] to be %q, got %q", i, name, spec.Resources[i].Name)
+		}
+	}
+}
+
+func TestParse_WithParameters(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "API with Parameters"
+  version: "1.0.0"
+paths:
+  /items/{id}:
+    get:
+      operationId: getItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Item ID
+          schema:
+            type: string
+        - name: include
+          in: query
+          required: false
+          description: Fields to include
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Success
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
+	}
+
+	resource := spec.Resources[0]
+	if len(resource.Operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(resource.Operations))
+	}
+
+	op := resource.Operations[0]
+	if len(op.PathParams) != 1 {
+		t.Errorf("expected 1 path param, got %d", len(op.PathParams))
+	}
+	if len(op.QueryParams) != 2 {
+		t.Errorf("expected 2 query params, got %d", len(op.QueryParams))
+	}
+
+	// Verify path param
+	if op.PathParams[0].Name != "id" {
+		t.Errorf("expected path param 'id', got %q", op.PathParams[0].Name)
+	}
+	if op.PathParams[0].In != "path" {
+		t.Errorf("expected In 'path', got %q", op.PathParams[0].In)
+	}
+	if !op.PathParams[0].Required {
+		t.Error("expected path param to be required")
+	}
+	if op.PathParams[0].Type != "string" {
+		t.Errorf("expected type 'string', got %q", op.PathParams[0].Type)
+	}
+}
+
+func TestParse_SchemaValidation(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Validation API"
+  version: "1.0.0"
+paths:
+  /items:
+    post:
+      operationId: createItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Item'
+      responses:
+        "201":
+          description: Created
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: "^[a-zA-Z0-9]+$"
+        price:
+          type: number
+          minimum: 0
+          maximum: 10000
+        tags:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+            - available
+            - sold
+            - pending
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	itemSchema, ok := spec.Schemas["Item"]
+	if !ok {
+		t.Fatal("Item schema not found")
+	}
+
+	// Check name field validation
+	nameSchema := itemSchema.Properties["name"]
+	if nameSchema == nil {
+		t.Fatal("name property not found")
+	}
+	if nameSchema.MinLength == nil || *nameSchema.MinLength != 1 {
+		t.Error("expected MinLength 1")
+	}
+	if nameSchema.MaxLength == nil || *nameSchema.MaxLength != 255 {
+		t.Error("expected MaxLength 255")
+	}
+	if nameSchema.Pattern != "^[a-zA-Z0-9]+$" {
+		t.Errorf("expected pattern, got %q", nameSchema.Pattern)
+	}
+
+	// Check price field validation
+	priceSchema := itemSchema.Properties["price"]
+	if priceSchema == nil {
+		t.Fatal("price property not found")
+	}
+	if priceSchema.Minimum == nil || *priceSchema.Minimum != 0 {
+		t.Error("expected Minimum 0")
+	}
+	if priceSchema.Maximum == nil || *priceSchema.Maximum != 10000 {
+		t.Error("expected Maximum 10000")
+	}
+
+	// Check tags field validation
+	tagsSchema := itemSchema.Properties["tags"]
+	if tagsSchema == nil {
+		t.Fatal("tags property not found")
+	}
+	if tagsSchema.MinItems == nil || *tagsSchema.MinItems != 1 {
+		t.Error("expected MinItems 1")
+	}
+	if tagsSchema.MaxItems == nil || *tagsSchema.MaxItems != 10 {
+		t.Error("expected MaxItems 10")
+	}
+	if tagsSchema.Items == nil {
+		t.Error("expected Items to be set")
+	}
+
+	// Check enum
+	statusSchema := itemSchema.Properties["status"]
+	if statusSchema == nil {
+		t.Fatal("status property not found")
+	}
+	if len(statusSchema.Enum) != 3 {
+		t.Errorf("expected 3 enum values, got %d", len(statusSchema.Enum))
+	}
+}
+
+func TestParse_NestedObjects(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Nested Objects API"
+  version: "1.0.0"
+paths:
+  /users:
+    get:
+      responses:
+        "200":
+          description: Success
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: object
+          properties:
+            street:
+              type: string
+            city:
+              type: string
+            location:
+              type: object
+              properties:
+                lat:
+                  type: number
+                lng:
+                  type: number
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	userSchema := spec.Schemas["User"]
+	if userSchema == nil {
+		t.Fatal("User schema not found")
+	}
+
+	addressSchema := userSchema.Properties["address"]
+	if addressSchema == nil {
+		t.Fatal("address property not found")
+	}
+	if addressSchema.Type != "object" {
+		t.Errorf("expected address type 'object', got %q", addressSchema.Type)
+	}
+
+	locationSchema := addressSchema.Properties["location"]
+	if locationSchema == nil {
+		t.Fatal("location property not found")
+	}
+	if len(locationSchema.Properties) != 2 {
+		t.Errorf("expected 2 properties in location, got %d", len(locationSchema.Properties))
+	}
+
+	latSchema := locationSchema.Properties["lat"]
+	if latSchema == nil || latSchema.Type != "number" {
+		t.Error("expected lat property with type number")
+	}
+}
+
+func TestParse_ArrayTypes(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Array Types API"
+  version: "1.0.0"
+paths:
+  /data:
+    get:
+      responses:
+        "200":
+          description: Success
+components:
+  schemas:
+    Data:
+      type: object
+      properties:
+        stringArray:
+          type: array
+          items:
+            type: string
+        intArray:
+          type: array
+          items:
+            type: integer
+            format: int64
+        objectArray:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	dataSchema := spec.Schemas["Data"]
+	if dataSchema == nil {
+		t.Fatal("Data schema not found")
+	}
+
+	// String array
+	stringArraySchema := dataSchema.Properties["stringArray"]
+	if stringArraySchema == nil {
+		t.Fatal("stringArray not found")
+	}
+	if stringArraySchema.Type != "array" {
+		t.Errorf("expected type 'array', got %q", stringArraySchema.Type)
+	}
+	if stringArraySchema.Items == nil || stringArraySchema.Items.Type != "string" {
+		t.Error("expected Items with type string")
+	}
+
+	// Int array
+	intArraySchema := dataSchema.Properties["intArray"]
+	if intArraySchema == nil {
+		t.Fatal("intArray not found")
+	}
+	if intArraySchema.Items == nil || intArraySchema.Items.Type != "integer" {
+		t.Error("expected Items with type integer")
+	}
+	if intArraySchema.Items.Format != "int64" {
+		t.Errorf("expected format 'int64', got %q", intArraySchema.Items.Format)
+	}
+
+	// Object array
+	objectArraySchema := dataSchema.Properties["objectArray"]
+	if objectArraySchema == nil {
+		t.Fatal("objectArray not found")
+	}
+	if objectArraySchema.Items == nil || objectArraySchema.Items.Type != "object" {
+		t.Error("expected Items with type object")
+	}
+	if len(objectArraySchema.Items.Properties) != 2 {
+		t.Errorf("expected 2 properties in item, got %d", len(objectArraySchema.Items.Properties))
+	}
+}
+
+func TestParse_NoServers(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "No Servers API"
+  version: "1.0.0"
+paths:
+  /test:
+    get:
+      responses:
+        "200":
+          description: Success
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if spec.BaseURL != "" {
+		t.Errorf("expected empty BaseURL, got %q", spec.BaseURL)
+	}
+}
+
+func TestParse_NoDescription(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "No Description API"
+  version: "1.0.0"
+paths:
+  /test:
+    get:
+      responses:
+        "200":
+          description: Success
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if spec.Description != "" {
+		t.Errorf("expected empty Description, got %q", spec.Description)
+	}
+}
+
+func TestParse_InvalidFile(t *testing.T) {
+	p := NewParser()
+	_, err := p.Parse("/nonexistent/path/openapi.yaml")
+	if err == nil {
+		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestParse_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "invalid.yaml")
+	if err := os.WriteFile(specPath, []byte("not: valid: yaml: content:::"), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	_, err := p.Parse(specPath)
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+}
+
+func TestParse_InvalidOpenAPISpec(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Invalid API"
+  # Missing required 'version' field
+paths: {}
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	_, err := p.Parse(specPath)
+	if err == nil {
+		t.Error("expected error for invalid OpenAPI spec")
+	}
+}
+
+func TestParse_EmptyPaths(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Empty Paths API"
+  version: "1.0.0"
+paths: {}
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) != 0 {
+		t.Errorf("expected 0 resources, got %d", len(spec.Resources))
+	}
+}
+
+func TestParse_RequestResponseBodies(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Request/Response Bodies API"
+  version: "1.0.0"
+paths:
+  /items:
+    post:
+      operationId: createItem
+      summary: Create an item
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
+	}
+
+	resource := spec.Resources[0]
+	if len(resource.Operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(resource.Operations))
+	}
+
+	op := resource.Operations[0]
+
+	// Check request body
+	if op.RequestBody == nil {
+		t.Error("expected RequestBody to be set")
+	} else {
+		if len(op.RequestBody.Properties) != 1 {
+			t.Errorf("expected 1 property in request body, got %d", len(op.RequestBody.Properties))
+		}
+	}
+
+	// Check response body
+	if op.ResponseBody == nil {
+		t.Error("expected ResponseBody to be set")
+	} else {
+		if len(op.ResponseBody.Properties) != 2 {
+			t.Errorf("expected 2 properties in response body, got %d", len(op.ResponseBody.Properties))
+		}
+	}
+}
+
+func TestParse_AllHTTPMethods(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "All Methods API"
+  version: "1.0.0"
+paths:
+  /resources/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getResource
+      responses:
+        "200":
+          description: Success
+    post:
+      operationId: createResource
+      responses:
+        "201":
+          description: Created
+    put:
+      operationId: updateResource
+      responses:
+        "200":
+          description: Success
+    patch:
+      operationId: patchResource
+      responses:
+        "200":
+          description: Success
+    delete:
+      operationId: deleteResource
+      responses:
+        "204":
+          description: Deleted
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
+	}
+
+	resource := spec.Resources[0]
+	if len(resource.Operations) != 5 {
+		t.Errorf("expected 5 operations, got %d", len(resource.Operations))
+	}
+
+	methods := make(map[string]bool)
+	for _, op := range resource.Operations {
+		methods[op.Method] = true
+	}
+
+	expectedMethods := []string{"GET", "POST", "PUT", "PATCH", "DELETE"}
+	for _, m := range expectedMethods {
+		if !methods[m] {
+			t.Errorf("expected method %s to be present", m)
+		}
+	}
+}
+
+func TestParse_TypeInference(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Type Inference API"
+  version: "1.0.0"
+paths:
+  /test:
+    get:
+      responses:
+        "200":
+          description: Success
+components:
+  schemas:
+    InferredObject:
+      properties:
+        name:
+          type: string
+    InferredArray:
+      items:
+        type: string
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Object type should be inferred from properties
+	objSchema := spec.Schemas["InferredObject"]
+	if objSchema == nil {
+		t.Fatal("InferredObject schema not found")
+	}
+	if objSchema.Type != "object" {
+		t.Errorf("expected inferred type 'object', got %q", objSchema.Type)
+	}
+
+	// Array type should be inferred from items
+	arrSchema := spec.Schemas["InferredArray"]
+	if arrSchema == nil {
+		t.Fatal("InferredArray schema not found")
+	}
+	if arrSchema.Type != "array" {
+		t.Errorf("expected inferred type 'array', got %q", arrSchema.Type)
+	}
+}
+
+func TestParse_NullableField(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Nullable API"
+  version: "1.0.0"
+paths:
+  /test:
+    get:
+      responses:
+        "200":
+          description: Success
+components:
+  schemas:
+    NullableTest:
+      type: object
+      properties:
+        normalField:
+          type: string
+        nullableField:
+          type: string
+          nullable: true
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	schema := spec.Schemas["NullableTest"]
+	if schema == nil {
+		t.Fatal("NullableTest schema not found")
+	}
+
+	normalField := schema.Properties["normalField"]
+	if normalField == nil {
+		t.Fatal("normalField not found")
+	}
+	if normalField.Nullable {
+		t.Error("expected normalField to not be nullable")
+	}
+
+	nullableField := schema.Properties["nullableField"]
+	if nullableField == nil {
+		t.Fatal("nullableField not found")
+	}
+	if !nullableField.Nullable {
+		t.Error("expected nullableField to be nullable")
+	}
+}
+
+func TestParse_DefaultValues(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Default Values API"
+  version: "1.0.0"
+paths:
+  /test:
+    get:
+      responses:
+        "200":
+          description: Success
+components:
+  schemas:
+    DefaultsTest:
+      type: object
+      properties:
+        count:
+          type: integer
+          default: 10
+        enabled:
+          type: boolean
+          default: true
+        name:
+          type: string
+          default: "default_name"
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	schema := spec.Schemas["DefaultsTest"]
+	if schema == nil {
+		t.Fatal("DefaultsTest schema not found")
+	}
+
+	countField := schema.Properties["count"]
+	if countField == nil {
+		t.Fatal("count field not found")
+	}
+	if countField.Default == nil {
+		t.Error("expected count to have default value")
+	}
+
+	enabledField := schema.Properties["enabled"]
+	if enabledField == nil {
+		t.Fatal("enabled field not found")
+	}
+	if enabledField.Default == nil {
+		t.Error("expected enabled to have default value")
+	}
+
+	nameField := schema.Properties["name"]
+	if nameField == nil {
+		t.Fatal("name field not found")
+	}
+	if nameField.Default == nil {
+		t.Error("expected name to have default value")
+	}
+}

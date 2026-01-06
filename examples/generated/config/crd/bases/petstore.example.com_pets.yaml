@@ -61,6 +61,12 @@ spec:
                   name:
                     type: string
                 type: object
+              externalIDRef:
+                description: |-
+                  ExternalIDRef references an existing resource in the external REST API by its ID.
+                  When set, the controller will GET this resource instead of creating a new one.
+                  This is useful for importing existing resources or for read-only observation.
+                type: string
               id:
                 format: int64
                 type: integer
@@ -70,6 +76,13 @@ spec:
                 items:
                   type: string
                 type: array
+              readOnly:
+                description: |-
+                  ReadOnly indicates that this CR is for observation only.
+                  When true, the controller will only GET the resource and update status,
+                  without performing any create, update, or delete operations.
+                  Requires ExternalIDRef to be set.
+                type: boolean
               status:
                 description: pet status in the store
                 enum:
@@ -184,9 +197,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              driftDetected:
+                description: DriftDetected indicates whether drift was detected between
+                  the spec and external resource
+                type: boolean
               externalID:
                 description: ExternalID is the ID of the resource in the external
                   REST API
+                type: string
+              lastGetTime:
+                description: LastGetTime is the last time the resource was fetched
+                  from the REST API via GET
+                format: date-time
                 type: string
               lastSyncTime:
                 description: LastSyncTime is the last time the resource was synced
@@ -203,8 +225,62 @@ spec:
                 type: integer
               response:
                 description: Response contains the last response from the REST API
+                  (single endpoint mode)
+                properties:
+                  data:
+                    description: Data contains the response body from the endpoint
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  error:
+                    description: Error contains the error message if the request failed
+                    type: string
+                  lastUpdated:
+                    description: LastUpdated is when this endpoint was last queried
+                    format: date-time
+                    type: string
+                  statusCode:
+                    description: StatusCode is the HTTP status code returned by the
+                      endpoint
+                    type: integer
+                  success:
+                    description: Success indicates whether the request to this endpoint
+                      succeeded
+                    type: boolean
+                required:
+                - success
                 type: object
-                x-kubernetes-preserve-unknown-fields: true
+              responses:
+                additionalProperties:
+                  description: PetEndpointResponse contains the response from a single
+                    endpoint for Pet resources
+                  properties:
+                    data:
+                      description: Data contains the response body from the endpoint
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    error:
+                      description: Error contains the error message if the request
+                        failed
+                      type: string
+                    lastUpdated:
+                      description: LastUpdated is when this endpoint was last queried
+                      format: date-time
+                      type: string
+                    statusCode:
+                      description: StatusCode is the HTTP status code returned by
+                        the endpoint
+                      type: integer
+                    success:
+                      description: Success indicates whether the request to this endpoint
+                        succeeded
+                      type: boolean
+                  required:
+                  - success
+                  type: object
+                description: |-
+                  Responses contains responses from multiple endpoints (all-healthy strategy)
+                  Keys are endpoint URLs, values are the response data
+                type: object
               state:
                 description: State represents the current state of the resource
                 enum:
@@ -212,6 +288,8 @@ spec:
                 - Syncing
                 - Synced
                 - Failed
+                - Observed
+                - NotFound
                 type: string
             type: object
         type: object
