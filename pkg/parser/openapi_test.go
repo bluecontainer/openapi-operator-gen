@@ -384,9 +384,15 @@ components:
 		t.Errorf("expected path '/users', got %q", userResource.Path)
 	}
 
-	// Verify operations
-	if len(userResource.Operations) != 3 {
-		t.Errorf("expected 3 operations, got %d", len(userResource.Operations))
+	// Verify operations - only GET and POST on /users are part of the resource
+	// GET /users/{id} is now a QueryEndpoint (GET-only)
+	if len(userResource.Operations) != 2 {
+		t.Errorf("expected 2 operations, got %d", len(userResource.Operations))
+	}
+
+	// Verify that GET /users/{id} is now a query endpoint
+	if len(spec.QueryEndpoints) != 1 {
+		t.Errorf("expected 1 query endpoint, got %d", len(spec.QueryEndpoints))
 	}
 
 	// Check that schema was extracted
@@ -447,16 +453,18 @@ paths:
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	if len(spec.Resources) != 3 {
-		t.Fatalf("expected 3 resources, got %d", len(spec.Resources))
+	// Only /pets is a Resource (GET+POST), /users and /orders are QueryEndpoints (GET-only)
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
 	}
 
-	// Resources should be sorted alphabetically
-	expectedNames := []string{"Order", "Pet", "User"}
-	for i, name := range expectedNames {
-		if spec.Resources[i].Name != name {
-			t.Errorf("expected resource[%d] to be %q, got %q", i, name, spec.Resources[i].Name)
-		}
+	if spec.Resources[0].Name != "Pet" {
+		t.Errorf("expected resource name 'Pet', got %q", spec.Resources[0].Name)
+	}
+
+	// /users and /orders are GET-only, so they're QueryEndpoints
+	if len(spec.QueryEndpoints) != 2 {
+		t.Errorf("expected 2 query endpoints, got %d", len(spec.QueryEndpoints))
 	}
 }
 
@@ -505,35 +513,23 @@ paths:
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	if len(spec.Resources) != 1 {
-		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
+	// /items/{id} with GET-only is now a QueryEndpoint, not a Resource
+	if len(spec.Resources) != 0 {
+		t.Errorf("expected 0 resources, got %d", len(spec.Resources))
 	}
 
-	resource := spec.Resources[0]
-	if len(resource.Operations) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(resource.Operations))
+	if len(spec.QueryEndpoints) != 1 {
+		t.Fatalf("expected 1 query endpoint, got %d", len(spec.QueryEndpoints))
 	}
 
-	op := resource.Operations[0]
-	if len(op.PathParams) != 1 {
-		t.Errorf("expected 1 path param, got %d", len(op.PathParams))
-	}
-	if len(op.QueryParams) != 2 {
-		t.Errorf("expected 2 query params, got %d", len(op.QueryParams))
+	qe := spec.QueryEndpoints[0]
+	if qe.Path != "/items/{id}" {
+		t.Errorf("expected path '/items/{id}', got %q", qe.Path)
 	}
 
-	// Verify path param
-	if op.PathParams[0].Name != "id" {
-		t.Errorf("expected path param 'id', got %q", op.PathParams[0].Name)
-	}
-	if op.PathParams[0].In != "path" {
-		t.Errorf("expected In 'path', got %q", op.PathParams[0].In)
-	}
-	if !op.PathParams[0].Required {
-		t.Error("expected path param to be required")
-	}
-	if op.PathParams[0].Type != "string" {
-		t.Errorf("expected type 'string', got %q", op.PathParams[0].Type)
+	// Query params should be captured
+	if len(qe.QueryParams) != 2 {
+		t.Errorf("expected 2 query params, got %d", len(qe.QueryParams))
 	}
 }
 
@@ -957,6 +953,11 @@ info:
   version: "1.0.0"
 paths:
   /items:
+    get:
+      operationId: listItems
+      responses:
+        "200":
+          description: Success
     post:
       operationId: createItem
       summary: Create an item
@@ -999,27 +1000,37 @@ paths:
 	}
 
 	resource := spec.Resources[0]
-	if len(resource.Operations) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(resource.Operations))
+	if len(resource.Operations) != 2 {
+		t.Fatalf("expected 2 operations, got %d", len(resource.Operations))
 	}
 
-	op := resource.Operations[0]
+	// Find the POST operation (createItem)
+	var postOp *Operation
+	for i := range resource.Operations {
+		if resource.Operations[i].Method == "POST" {
+			postOp = &resource.Operations[i]
+			break
+		}
+	}
+	if postOp == nil {
+		t.Fatal("expected POST operation")
+	}
 
 	// Check request body
-	if op.RequestBody == nil {
+	if postOp.RequestBody == nil {
 		t.Error("expected RequestBody to be set")
 	} else {
-		if len(op.RequestBody.Properties) != 1 {
-			t.Errorf("expected 1 property in request body, got %d", len(op.RequestBody.Properties))
+		if len(postOp.RequestBody.Properties) != 1 {
+			t.Errorf("expected 1 property in request body, got %d", len(postOp.RequestBody.Properties))
 		}
 	}
 
 	// Check response body
-	if op.ResponseBody == nil {
+	if postOp.ResponseBody == nil {
 		t.Error("expected ResponseBody to be set")
 	} else {
-		if len(op.ResponseBody.Properties) != 2 {
-			t.Errorf("expected 2 properties in response body, got %d", len(op.ResponseBody.Properties))
+		if len(postOp.ResponseBody.Properties) != 2 {
+			t.Errorf("expected 2 properties in response body, got %d", len(postOp.ResponseBody.Properties))
 		}
 	}
 }

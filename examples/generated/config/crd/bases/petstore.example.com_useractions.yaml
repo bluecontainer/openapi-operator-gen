@@ -4,17 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
-  name: petuploadimages.petstore.example.com
+  name: useractions.petstore.example.com
 spec:
   group: petstore.example.com
   names:
-    kind: PetUploadimage
-    listKind: PetUploadimageList
-    plural: petuploadimages
+    kind: UserAction
+    listKind: UserActionList
+    plural: useractions
     shortNames:
-    - pe
-    - pet
-    singular: petuploadimage
+    - us
+    - use
+    singular: useraction
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,8 +30,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PetUploadimage is the Schema for the petuploadimages API (Action
-          Operation)
+        description: UserAction is the Schema for the useractions API (Action Operation)
         properties:
           apiVersion:
             description: |-
@@ -51,14 +50,25 @@ spec:
           metadata:
             type: object
           spec:
-            description: PetUploadimageSpec defines the parameters for the PetUploadimage
+            description: UserActionSpec defines the parameters for the UserAction
               action
             properties:
-              additionalMetadata:
-                description: Additional Metadata
+              email:
                 type: string
-              petId:
-                description: ID of the parent Pet resource
+              firstName:
+                type: string
+              id:
+                format: int64
+                type: integer
+              lastName:
+                type: string
+              password:
+                type: string
+              phone:
+                type: string
+              reExecuteInterval:
+                description: Interval at which to re-execute the action (e.g., 30s,
+                  5m, 1h). If not set, action is one-shot.
                 type: string
               targetDeployment:
                 description: TargetDeployment specifies a Deployment name to route
@@ -82,11 +92,15 @@ spec:
                 description: TargetStatefulSet specifies a StatefulSet name to route
                   requests to.
                 type: string
-            required:
-            - petId
+              userStatus:
+                description: User Status
+                format: int32
+                type: integer
+              username:
+                type: string
             type: object
           status:
-            description: PetUploadimageStatus defines the observed state of PetUploadimage
+            description: UserActionStatus defines the observed state of UserAction
             properties:
               completedAt:
                 description: CompletedAt is when the action completed (success or
@@ -158,13 +172,28 @@ spec:
                 description: ExecutedAt is when the action was executed
                 format: date-time
                 type: string
+              executionCount:
+                description: ExecutionCount is the number of times this action has
+                  been executed
+                format: int64
+                type: integer
               httpStatusCode:
                 description: HTTPStatusCode is the HTTP status code from the action
                   response (single endpoint mode)
                 type: integer
+              lastExecutionTime:
+                description: LastExecutionTime is the last time the action was executed
+                  (for re-execution support)
+                format: date-time
+                type: string
               message:
                 description: Message is a human-readable message about the current
                   state
+                type: string
+              nextExecutionTime:
+                description: NextExecutionTime is when the next periodic execution
+                  will occur
+                format: date-time
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation
@@ -172,18 +201,30 @@ spec:
                 type: integer
               responses:
                 additionalProperties:
-                  description: PetUploadimageEndpointResponse contains the response
-                    from a single endpoint for PetUploadimage actions
+                  description: UserActionEndpointResponse contains the response from
+                    a single endpoint for UserAction actions
                   properties:
                     data:
                       description: Data contains the response body from the endpoint
                       properties:
-                        code:
+                        email:
+                          type: string
+                        firstName:
+                          type: string
+                        id:
+                          format: int64
+                          type: integer
+                        lastName:
+                          type: string
+                        password:
+                          type: string
+                        phone:
+                          type: string
+                        userStatus:
+                          description: User Status
                           format: int32
                           type: integer
-                        message:
-                          type: string
-                        type:
+                        username:
                           type: string
                       type: object
                     error:
@@ -216,12 +257,24 @@ spec:
                   data:
                     description: Data contains the response body from the endpoint
                     properties:
-                      code:
+                      email:
+                        type: string
+                      firstName:
+                        type: string
+                      id:
+                        format: int64
+                        type: integer
+                      lastName:
+                        type: string
+                      password:
+                        type: string
+                      phone:
+                        type: string
+                      userStatus:
+                        description: User Status
                         format: int32
                         type: integer
-                      message:
-                        type: string
-                      type:
+                      username:
                         type: string
                     type: object
                   error:

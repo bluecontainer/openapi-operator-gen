@@ -68,6 +68,7 @@ func init() {
 	generateCmd.Flags().StringVarP((*string)(&cfg.MappingMode), "mapping", "m", "per-resource", "Resource mapping mode: per-resource or single-crd")
 	generateCmd.Flags().StringVar(&cfg.ModuleName, "module", "github.com/bluecontainer/generated-operator", "Go module name for generated code")
 	generateCmd.Flags().BoolVar(&cfg.GenerateCRDs, "generate-crds", false, "Generate CRD YAML manifests directly (default: use controller-gen)")
+	generateCmd.Flags().StringVar(&cfg.RootKind, "root-kind", "", "Kind name for root '/' endpoint (default: derived from spec filename)")
 
 	generateCmd.MarkFlagRequired("spec")
 	generateCmd.MarkFlagRequired("group")
@@ -88,7 +89,7 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 
 	// Parse OpenAPI spec
 	fmt.Println("Parsing OpenAPI specification...")
-	p := parser.NewParser()
+	p := parser.NewParserWithRootKind(cfg.RootKind)
 	spec, err := p.Parse(cfg.SpecPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse OpenAPI spec: %w", err)

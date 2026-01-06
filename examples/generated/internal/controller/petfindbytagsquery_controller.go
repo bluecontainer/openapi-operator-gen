@@ -30,12 +30,12 @@ import (
 )
 
 const (
-	userloginFinalizer    = "petstore.example.com/finalizer"
-	userloginRequeueAfter = time.Second * 30
+	petfindbytagsqueryFinalizer    = "petstore.example.com/finalizer"
+	petfindbytagsqueryRequeueAfter = time.Second * 30
 )
 
-// UserLoginReconciler reconciles a UserLogin query object
-type UserLoginReconciler struct {
+// PetFindbytagsQueryReconciler reconciles a PetFindbytagsQuery query object
+type PetFindbytagsQueryReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	HTTPClient       *http.Client
@@ -44,35 +44,35 @@ type UserLoginReconciler struct {
 	BaseURL string
 }
 
-// +kubebuilder:rbac:groups=petstore.example.com,resources=userlogins,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=petstore.example.com,resources=userlogins/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbytagsquerys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbytagsquerys/status,verbs=get;update;patch
 
 // Reconcile executes the query and updates the status with results
-func (r *UserLoginReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *PetFindbytagsQueryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the UserLogin instance
-	instance := &v1alpha1.UserLogin{}
+	// Fetch the PetFindbytagsQuery instance
+	instance := &v1alpha1.PetFindbytagsQuery{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("UserLogin resource not found. Ignoring since object must be deleted")
+			logger.Info("PetFindbytagsQuery resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to get UserLogin")
+		logger.Error(err, "Failed to get PetFindbytagsQuery")
 		return ctrl.Result{}, err
 	}
 
 	// Execute the query
 	if err := r.executeQuery(ctx, instance); err != nil {
 		r.updateStatus(ctx, instance, "Failed", err.Error(), 0)
-		return ctrl.Result{RequeueAfter: userloginRequeueAfter}, err
+		return ctrl.Result{RequeueAfter: petfindbytagsqueryRequeueAfter}, err
 	}
 
-	return ctrl.Result{RequeueAfter: userloginRequeueAfter}, nil
+	return ctrl.Result{RequeueAfter: petfindbytagsqueryRequeueAfter}, nil
 }
 
-func (r *UserLoginReconciler) getBaseURL(ctx context.Context) (string, error) {
+func (r *PetFindbytagsQueryReconciler) getBaseURL(ctx context.Context) (string, error) {
 	if r.EndpointResolver != nil {
 		return r.EndpointResolver.GetEndpoint()
 	}
@@ -82,7 +82,7 @@ func (r *UserLoginReconciler) getBaseURL(ctx context.Context) (string, error) {
 	return r.BaseURL, nil
 }
 
-func (r *UserLoginReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
+func (r *PetFindbytagsQueryReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
 			return "", fmt.Errorf("targetPodOrdinal is required when using by-ordinal strategy")
@@ -93,7 +93,7 @@ func (r *UserLoginReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *
 }
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
-func (r *UserLoginReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.UserLogin) (string, error) {
+func (r *PetFindbytagsQueryReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.PetFindbytagsQuery) (string, error) {
 	if r.EndpointResolver != nil {
 		namespace := instance.Spec.TargetNamespace
 		if namespace == "" {
@@ -121,8 +121,8 @@ func (r *UserLoginReconciler) resolveBaseURL(ctx context.Context, instance *v1al
 }
 
 // buildQueryURL builds the query URL from the spec parameters
-func (r *UserLoginReconciler) buildQueryURL(baseURL string, instance *v1alpha1.UserLogin) string {
-	queryURL := baseURL + "/user/login"
+func (r *PetFindbytagsQueryReconciler) buildQueryURL(baseURL string, instance *v1alpha1.PetFindbytagsQuery) string {
+	queryURL := baseURL + "/pet/findByTags"
 
 	params := url.Values{}
 	specVal := reflect.ValueOf(instance.Spec)
@@ -177,7 +177,7 @@ func (r *UserLoginReconciler) buildQueryURL(baseURL string, instance *v1alpha1.U
 }
 
 // executeQueryToEndpoint executes the query against a single endpoint
-func (r *UserLoginReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.UserLogin, baseURL string) ([]byte, int, error) {
+func (r *PetFindbytagsQueryReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.PetFindbytagsQuery, baseURL string) ([]byte, int, error) {
 	logger := log.FromContext(ctx)
 
 	queryURL := r.buildQueryURL(baseURL, instance)
@@ -207,30 +207,16 @@ func (r *UserLoginReconciler) executeQueryToEndpoint(ctx context.Context, instan
 	return body, resp.StatusCode, nil
 }
 
-// countResults attempts to count results in the response
-func (r *UserLoginReconciler) countResults(body []byte) int {
-	// Try to parse as array
-	var arr []interface{}
-	if err := json.Unmarshal(body, &arr); err == nil {
-		return len(arr)
+// parseResults parses the response body into typed results
+func (r *PetFindbytagsQueryReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int, error) {
+	var results []v1alpha1.Pet
+	if err := json.Unmarshal(body, &results); err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal results: %w", err)
 	}
-
-	// Try to parse as object with items/data/results field
-	var obj map[string]interface{}
-	if err := json.Unmarshal(body, &obj); err == nil {
-		for _, key := range []string{"items", "data", "results", "content"} {
-			if items, ok := obj[key].([]interface{}); ok {
-				return len(items)
-			}
-		}
-		// If it's an object, count as 1 result
-		return 1
-	}
-
-	return 0
+	return results, len(results), nil
 }
 
-func (r *UserLoginReconciler) executeQuery(ctx context.Context, instance *v1alpha1.UserLogin) error {
+func (r *PetFindbytagsQueryReconciler) executeQuery(ctx context.Context, instance *v1alpha1.PetFindbytagsQuery) error {
 	logger := log.FromContext(ctx)
 	now := metav1.Now()
 
@@ -243,13 +229,13 @@ func (r *UserLoginReconciler) executeQuery(ctx context.Context, instance *v1alph
 
 		if len(baseURLs) > 1 {
 			// Multiple endpoints - collect responses from all
-			responses := make(map[string]v1alpha1.UserLoginEndpointResponse)
-			var firstSuccessResp *v1alpha1.UserLoginEndpointResponse
+			responses := make(map[string]v1alpha1.PetFindbytagsQueryEndpointResponse)
+			var firstSuccessResp *v1alpha1.PetFindbytagsQueryEndpointResponse
 			var firstResultCount int
 			successCount := 0
 
 			for _, baseURL := range baseURLs {
-				endpointResp := v1alpha1.UserLoginEndpointResponse{
+				endpointResp := v1alpha1.PetFindbytagsQueryEndpointResponse{
 					LastUpdated: &now,
 				}
 
@@ -262,15 +248,22 @@ func (r *UserLoginReconciler) executeQuery(ctx context.Context, instance *v1alph
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = statusCode
-					endpointResp.Data = &runtime.RawExtension{Raw: body}
-					successCount++
-					resultCount := r.countResults(body)
-					if firstSuccessResp == nil {
-						respCopy := endpointResp
-						firstSuccessResp = &respCopy
-						firstResultCount = resultCount
+					// Parse typed results for this endpoint
+					data, resultCount, parseErr := r.parseResults(body)
+					if parseErr != nil {
+						endpointResp.Success = false
+						endpointResp.Error = parseErr.Error()
+						logger.Info("Query succeeded but failed to parse for endpoint", "endpoint", baseURL, "error", parseErr)
+					} else {
+						endpointResp.Data = data
+						successCount++
+						if firstSuccessResp == nil {
+							respCopy := endpointResp
+							firstSuccessResp = &respCopy
+							firstResultCount = resultCount
+						}
+						logger.Info("Query succeeded for endpoint", "endpoint", baseURL, "resultCount", resultCount)
 					}
-					logger.Info("Query succeeded for endpoint", "endpoint", baseURL, "resultCount", resultCount)
 				}
 
 				responses[baseURL] = endpointResp
@@ -306,7 +299,7 @@ func (r *UserLoginReconciler) executeQuery(ctx context.Context, instance *v1alph
 	body, statusCode, err := r.executeQueryToEndpoint(ctx, instance, baseURL)
 
 	// Build EndpointResponse for Results
-	endpointResp := v1alpha1.UserLoginEndpointResponse{
+	endpointResp := v1alpha1.PetFindbytagsQueryEndpointResponse{
 		LastUpdated: &now,
 		StatusCode:  statusCode,
 	}
@@ -322,8 +315,16 @@ func (r *UserLoginReconciler) executeQuery(ctx context.Context, instance *v1alph
 	}
 
 	endpointResp.Success = true
-	endpointResp.Data = &runtime.RawExtension{Raw: body}
-	resultCount := r.countResults(body)
+	data, resultCount, parseErr := r.parseResults(body)
+	if parseErr != nil {
+		endpointResp.Success = false
+		endpointResp.Error = parseErr.Error()
+		instance.Status.Results = &endpointResp
+		instance.Status.LastQueryTime = &now
+		instance.Status.Responses = nil
+		return fmt.Errorf("failed to parse results: %w", parseErr)
+	}
+	endpointResp.Data = data
 
 	// Update status with results
 	instance.Status.Results = &endpointResp
@@ -333,7 +334,7 @@ func (r *UserLoginReconciler) executeQuery(ctx context.Context, instance *v1alph
 	return nil
 }
 
-func (r *UserLoginReconciler) updateStatus(ctx context.Context, instance *v1alpha1.UserLogin, state, message string, resultCount int) {
+func (r *PetFindbytagsQueryReconciler) updateStatus(ctx context.Context, instance *v1alpha1.PetFindbytagsQuery, state, message string, resultCount int) {
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
@@ -365,8 +366,8 @@ func (r *UserLoginReconciler) updateStatus(ctx context.Context, instance *v1alph
 }
 
 // SetupWithManager sets up the controller with the Manager
-func (r *UserLoginReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *PetFindbytagsQueryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.UserLogin{}).
+		For(&v1alpha1.PetFindbytagsQuery{}).
 		Complete(r)
 }

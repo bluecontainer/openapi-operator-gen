@@ -4,33 +4,34 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
-  name: pets.petstore.example.com
+  name: userlogoutqueries.petstore.example.com
 spec:
   group: petstore.example.com
   names:
-    kind: Pet
-    listKind: PetList
-    plural: pets
+    kind: UserLogoutQuery
+    listKind: UserLogoutQueryList
+    plural: userlogoutqueries
     shortNames:
-    - pe
-    - pet
-    singular: pet
+    - us
+    - use
+    singular: userlogoutquery
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.state
       name: State
       type: string
-    - jsonPath: .status.externalID
-      name: External-ID
-      type: string
+    - jsonPath: .status.resultCount
+      name: Results
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Pet is the Schema for the pets API
+        description: UserLogoutQuery is the Schema for the userlogoutquerys API (Query
+          Operation)
         properties:
           apiVersion:
             description: |-
@@ -50,56 +51,33 @@ spec:
           metadata:
             type: object
           spec:
-            description: PetSpec defines the desired state of Pet
+            description: UserLogoutQuerySpec defines the query parameters for UserLogoutQuery
             properties:
-              data:
-                description: Resource data as JSON
-                type: object
-                x-kubernetes-preserve-unknown-fields: true
-              externalIDRef:
-                description: |-
-                  ExternalIDRef references an existing resource in the external REST API by its ID.
-                  When set, the controller will GET this resource instead of creating a new one.
-                  This is useful for importing existing resources or for read-only observation.
-                type: string
-              readOnly:
-                description: |-
-                  ReadOnly indicates that this CR is for observation only.
-                  When true, the controller will only GET the resource and update status,
-                  without performing any create, update, or delete operations.
-                  Requires ExternalIDRef to be set.
-                type: boolean
               targetDeployment:
-                description: |-
-                  TargetDeployment specifies a Deployment name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
+                description: TargetDeployment specifies a Deployment name to route
+                  requests to.
                 type: string
               targetHelmRelease:
-                description: |-
-                  TargetHelmRelease specifies a Helm release to discover the workload from.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                  The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
+                description: TargetHelmRelease specifies a Helm release to discover
+                  the workload from.
                 type: string
               targetNamespace:
-                description: |-
-                  TargetNamespace specifies the namespace to look for the target workload.
-                  Defaults to the CR's namespace if not specified.
+                description: TargetNamespace specifies the namespace to look for the
+                  target workload.
                 type: string
               targetPodOrdinal:
-                description: |-
-                  TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-                  Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+                description: TargetPodOrdinal specifies the StatefulSet pod ordinal
+                  to route requests to.
                 format: int32
                 minimum: 0
                 type: integer
               targetStatefulSet:
-                description: |-
-                  TargetStatefulSet specifies a StatefulSet name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
+                description: TargetStatefulSet specifies a StatefulSet name to route
+                  requests to.
                 type: string
             type: object
           status:
-            description: PetStatus defines the observed state of Pet
+            description: UserLogoutQueryStatus defines the observed state of UserLogoutQuery
             properties:
               conditions:
                 description: Conditions represent the latest available observations
@@ -162,62 +140,37 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              driftDetected:
-                description: DriftDetected indicates whether drift was detected between
-                  the spec and external resource
-                type: boolean
-              externalID:
-                description: ExternalID is the ID of the resource in the external
-                  REST API
-                type: string
-              lastGetTime:
-                description: LastGetTime is the last time the resource was fetched
-                  from the REST API via GET
+              executionCount:
+                description: ExecutionCount is the number of times this query has
+                  been executed
+                format: int64
+                type: integer
+              lastExecutionTime:
+                description: LastExecutionTime is the last time the query was executed
+                  (alias for re-execution support)
                 format: date-time
                 type: string
-              lastSyncTime:
-                description: LastSyncTime is the last time the resource was synced
-                  with the REST API
+              lastQueryTime:
+                description: LastQueryTime is the last time the query was executed
                 format: date-time
                 type: string
               message:
                 description: Message is a human-readable message about the current
                   state
                 type: string
+              nextExecutionTime:
+                description: NextExecutionTime is when the next periodic execution
+                  will occur
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation
                 format: int64
                 type: integer
-              response:
-                description: Response contains the last response from the REST API
-                  (single endpoint mode)
-                properties:
-                  data:
-                    description: Data contains the response body from the endpoint
-                    type: object
-                    x-kubernetes-preserve-unknown-fields: true
-                  error:
-                    description: Error contains the error message if the request failed
-                    type: string
-                  lastUpdated:
-                    description: LastUpdated is when this endpoint was last queried
-                    format: date-time
-                    type: string
-                  statusCode:
-                    description: StatusCode is the HTTP status code returned by the
-                      endpoint
-                    type: integer
-                  success:
-                    description: Success indicates whether the request to this endpoint
-                      succeeded
-                    type: boolean
-                required:
-                - success
-                type: object
               responses:
                 additionalProperties:
-                  description: PetEndpointResponse contains the response from a single
-                    endpoint for Pet resources
+                  description: UserLogoutQueryEndpointResponse contains the response
+                    from a single endpoint for UserLogoutQuery queries
                   properties:
                     data:
                       description: Data contains the response body from the endpoint
@@ -242,19 +195,46 @@ spec:
                   required:
                   - success
                   type: object
-                description: |-
-                  Responses contains responses from multiple endpoints (all-healthy strategy)
-                  Keys are endpoint URLs, values are the response data
+                description: Responses contains responses from multiple endpoints
+                  (all-healthy strategy)
+                type: object
+              resultCount:
+                description: ResultCount is the number of results returned by the
+                  query
+                type: integer
+              results:
+                description: Results contains the query result from the REST API (single
+                  endpoint mode)
+                properties:
+                  data:
+                    description: Data contains the response body from the endpoint
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  error:
+                    description: Error contains the error message if the request failed
+                    type: string
+                  lastUpdated:
+                    description: LastUpdated is when this endpoint was last queried
+                    format: date-time
+                    type: string
+                  statusCode:
+                    description: StatusCode is the HTTP status code returned by the
+                      endpoint
+                    type: integer
+                  success:
+                    description: Success indicates whether the request to this endpoint
+                      succeeded
+                    type: boolean
+                required:
+                - success
                 type: object
               state:
-                description: State represents the current state of the resource
+                description: State represents the current state of the query
                 enum:
                 - Pending
-                - Syncing
-                - Synced
+                - Querying
+                - Queried
                 - Failed
-                - Observed
-                - NotFound
                 type: string
             type: object
         type: object

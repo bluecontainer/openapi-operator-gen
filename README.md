@@ -369,10 +369,13 @@ The generator detects and maps query/search endpoints (GET-only paths with query
 
 ### How Query Endpoints Are Detected
 
-A path is identified as a query endpoint when:
-- It only has a GET operation (no POST, PUT, PATCH, DELETE)
-- The path contains action keywords like `find`, `search`, `query`, `list`, `login`, `lookup`
-- Or it has query parameters
+A path is identified as a query endpoint when it has **GET method only** (no POST, PUT, PATCH, or DELETE).
+
+This simple rule means any read-only endpoint becomes a QueryEndpoint:
+- `/pet/findByStatus` (GET only) → QueryEndpoint
+- `/user/login` (GET only) → QueryEndpoint
+- `/api/info` (GET only) → QueryEndpoint
+- `/store/inventory` (GET only) → QueryEndpoint
 
 ### Example: Query CRD
 
@@ -514,11 +517,30 @@ The generator detects and maps action endpoints (operations on a parent resource
 
 ### How Action Endpoints Are Detected
 
-A path is identified as an action endpoint when:
-- It follows the pattern `/{resource}/{resourceId}/{action}` (at least 3 segments)
-- It only has POST or PUT operations (no GET, DELETE, or PATCH)
-- The last segment is an action keyword (upload, download, send, sync, reset, validate, etc.)
-- There's a path parameter in the middle (e.g., `{petId}`)
+A path is identified as an action endpoint when it has **POST or PUT method only** (no GET, DELETE, or PATCH):
+
+**Pattern 1: Root endpoint** - `/`
+- `/` (POST only) → ActionEndpoint (uses `--root-kind` or derived from filename)
+
+**Pattern 2: Single segment** - `/{action}`
+- `/store` (POST only) → ActionEndpoint
+- `/login` (POST only) → ActionEndpoint
+
+**Pattern 3: Two segments** - `/{resource}/{action}`
+- `/api/echo` (POST only) → ActionEndpoint
+- `/user/register` (POST only) → ActionEndpoint
+
+**Pattern 4: With parent resource ID** - `/{resource}/{resourceId}/{action}`
+- `/pet/{petId}/uploadImage` (POST only) → ActionEndpoint
+- `/user/{userId}/activate` (PUT only) → ActionEndpoint
+
+The key distinction: **Actions never have a GET method**. Any endpoint with GET is either a Resource (if it has other methods) or a QueryEndpoint (if GET-only).
+
+### Root Endpoint Kind Name
+
+For the root `/` endpoint, the Kind name is determined by:
+1. The `--root-kind` flag if provided
+2. Otherwise, derived from the OpenAPI spec filename (e.g., `petstore.yaml` → `Petstore`)
 
 ### Example: Action CRD
 
@@ -676,12 +698,26 @@ type PetUploadImageResult struct {
 
 | Aspect | Resource | Query | Action |
 |--------|----------|-------|--------|
-| Pattern | `/{resource}`, `/{resource}/{id}` | `/{resource}/findBy*` | `/{parent}/{id}/{action}` |
-| Methods | GET, POST, PUT, DELETE | GET only | POST, PUT only |
-| Behavior | CRUD lifecycle | Periodic query | One-shot or periodic execution |
-| States | Pending, Syncing, Synced, Failed | Pending, Querying, Queried, Failed | Pending, Executing, Completed, Failed |
-| Re-execution | Drift detection | Scheduled interval | Spec change or `reExecuteInterval` |
-| Finalizer | Yes (cleanup) | No | Yes (but no cleanup) |
+| **Detection Rule** | Has multiple HTTP methods | GET only | POST/PUT only (no GET) |
+| **Pattern Examples** | `/pet`, `/pet/{id}` | `/pet/findByStatus`, `/api/info` | `/store`, `/api/echo`, `/pet/{id}/upload` |
+| **Methods** | GET + POST/PUT/DELETE | GET only | POST or PUT only |
+| **Behavior** | CRUD lifecycle | Periodic query | One-shot or periodic execution |
+| **States** | Pending, Syncing, Synced, Failed | Pending, Querying, Queried, Failed | Pending, Executing, Completed, Failed |
+| **Re-execution** | Drift detection | Scheduled interval | Spec change or `reExecuteInterval` |
+| **Finalizer** | Yes (cleanup) | No | Yes (but no cleanup) |
+
+**Classification Examples:**
+
+| Endpoint | Methods | Classification |
+|----------|---------|----------------|
+| `/store` | POST | ActionEndpoint |
+| `/api/echo` | POST | ActionEndpoint |
+| `/pet/{petId}/uploadImage` | POST | ActionEndpoint |
+| `/user/login` | GET | QueryEndpoint |
+| `/api/info` | GET | QueryEndpoint |
+| `/pet/findByStatus` | GET | QueryEndpoint |
+| `/pet` | GET, POST | Resource |
+| `/pet/{petId}` | GET, PUT, DELETE | Resource |
 
 ## Generated Output
 

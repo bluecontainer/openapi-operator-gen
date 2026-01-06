@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -30,11 +30,11 @@ import (
 )
 
 const (
-	petuploadimageFinalizer = "petstore.example.com/finalizer"
+	useractionFinalizer = "petstore.example.com/finalizer"
 )
 
-// PetUploadimageReconciler reconciles a PetUploadimage action object
-type PetUploadimageReconciler struct {
+// UserActionReconciler reconciles a UserAction action object
+type UserActionReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	HTTPClient       *http.Client
@@ -43,30 +43,30 @@ type PetUploadimageReconciler struct {
 	BaseURL string
 }
 
-// +kubebuilder:rbac:groups=petstore.example.com,resources=petuploadimages,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=petstore.example.com,resources=petuploadimages/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=petstore.example.com,resources=useractions,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=petstore.example.com,resources=useractions/status,verbs=get;update;patch
 
 // Reconcile executes the action and updates the status
-func (r *PetUploadimageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *UserActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the PetUploadimage instance
-	instance := &v1alpha1.PetUploadimage{}
+	// Fetch the UserAction instance
+	instance := &v1alpha1.UserAction{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("PetUploadimage resource not found. Ignoring since object must be deleted")
+			logger.Info("UserAction resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to get PetUploadimage")
+		logger.Error(err, "Failed to get UserAction")
 		return ctrl.Result{}, err
 	}
 
 	// Handle deletion
 	if instance.ObjectMeta.DeletionTimestamp != nil {
-		if controllerutil.ContainsFinalizer(instance, petuploadimageFinalizer) {
+		if controllerutil.ContainsFinalizer(instance, useractionFinalizer) {
 			// No cleanup needed for action resources
-			controllerutil.RemoveFinalizer(instance, petuploadimageFinalizer)
+			controllerutil.RemoveFinalizer(instance, useractionFinalizer)
 			if err := r.Update(ctx, instance); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -75,34 +75,75 @@ func (r *PetUploadimageReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(instance, petuploadimageFinalizer) {
-		controllerutil.AddFinalizer(instance, petuploadimageFinalizer)
+	if !controllerutil.ContainsFinalizer(instance, useractionFinalizer) {
+		controllerutil.AddFinalizer(instance, useractionFinalizer)
 		if err := r.Update(ctx, instance); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Check if action has already been executed (one-shot behavior)
-	if instance.Status.State == "Completed" || instance.Status.State == "Failed" {
-		// Action already executed, don't re-execute unless spec changed
-		if instance.Status.ObservedGeneration == instance.Generation {
-			logger.Info("Action already executed, skipping", "state", instance.Status.State)
+	// Determine if action should be executed
+	shouldExecute := false
+	var requeueAfter time.Duration
+
+	if instance.Status.State == "" || instance.Status.State == "Pending" {
+		// First execution
+		shouldExecute = true
+	} else if instance.Status.State == "Completed" || instance.Status.State == "Failed" {
+		// Check if spec changed (always re-execute on spec change)
+		if instance.Status.ObservedGeneration != instance.Generation {
+			logger.Info("Spec changed, re-executing action")
+			shouldExecute = true
+		} else if instance.Spec.ReExecuteInterval != nil && instance.Spec.ReExecuteInterval.Duration > 0 {
+			// Check if re-execution interval has elapsed
+			if instance.Status.LastExecutionTime == nil {
+				// Should not happen, but handle gracefully
+				shouldExecute = true
+			} else {
+				elapsed := time.Since(instance.Status.LastExecutionTime.Time)
+				interval := instance.Spec.ReExecuteInterval.Duration
+
+				if elapsed >= interval {
+					logger.Info("Re-execution interval elapsed, re-executing",
+						"interval", interval, "elapsed", elapsed)
+					shouldExecute = true
+				} else {
+					// Schedule next execution
+					requeueAfter = interval - elapsed
+					logger.V(1).Info("Scheduling next re-execution", "requeueAfter", requeueAfter)
+				}
+			}
+		} else {
+			// No re-execution interval set, one-shot behavior
+			logger.V(1).Info("Action already executed and no re-execution interval set, skipping")
 			return ctrl.Result{}, nil
 		}
-		// Spec changed, re-execute
-		logger.Info("Spec changed, re-executing action")
+	}
+
+	if !shouldExecute {
+		// Not time to execute yet, requeue for next interval
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
 	// Execute the action
 	if err := r.executeAction(ctx, instance); err != nil {
-		return ctrl.Result{}, nil // Don't requeue on failure, status is already updated
+		// On error, still schedule next re-execution if interval is set
+		if instance.Spec.ReExecuteInterval != nil && instance.Spec.ReExecuteInterval.Duration > 0 {
+			return ctrl.Result{RequeueAfter: instance.Spec.ReExecuteInterval.Duration}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// After successful execution, schedule next re-execution if interval is set
+	if instance.Spec.ReExecuteInterval != nil && instance.Spec.ReExecuteInterval.Duration > 0 {
+		return ctrl.Result{RequeueAfter: instance.Spec.ReExecuteInterval.Duration}, nil
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *PetUploadimageReconciler) getBaseURL(ctx context.Context) (string, error) {
+func (r *UserActionReconciler) getBaseURL(ctx context.Context) (string, error) {
 	if r.EndpointResolver != nil {
 		return r.EndpointResolver.GetEndpoint()
 	}
@@ -112,7 +153,7 @@ func (r *PetUploadimageReconciler) getBaseURL(ctx context.Context) (string, erro
 	return r.BaseURL, nil
 }
 
-func (r *PetUploadimageReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
+func (r *UserActionReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
 			return "", fmt.Errorf("targetPodOrdinal is required when using by-ordinal strategy")
@@ -123,7 +164,7 @@ func (r *PetUploadimageReconciler) getBaseURLByOrdinal(ctx context.Context, ordi
 }
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
-func (r *PetUploadimageReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.PetUploadimage) (string, error) {
+func (r *UserActionReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.UserAction) (string, error) {
 	if r.EndpointResolver != nil {
 		namespace := instance.Spec.TargetNamespace
 		if namespace == "" {
@@ -151,20 +192,43 @@ func (r *PetUploadimageReconciler) resolveBaseURL(ctx context.Context, instance 
 }
 
 // buildActionURL builds the action URL with path parameters substituted
-func (r *PetUploadimageReconciler) buildActionURL(baseURL string, instance *v1alpha1.PetUploadimage) string {
-	actionPath := "/pet/{petId}/uploadImage"
+func (r *UserActionReconciler) buildActionURL(baseURL string, instance *v1alpha1.UserAction) string {
+	actionPath := "/user"
 
 	// Substitute path parameters
-	actionPath = strings.Replace(actionPath, "{petId}", instance.Spec.PetId, 1)
 
 	return baseURL + actionPath
 }
 
 // buildRequestBody builds the JSON request body from spec fields
-func (r *PetUploadimageReconciler) buildRequestBody(instance *v1alpha1.PetUploadimage) ([]byte, error) {
+func (r *UserActionReconciler) buildRequestBody(instance *v1alpha1.UserAction) ([]byte, error) {
 	body := make(map[string]interface{})
-	if !isZeroValue(instance.Spec.AdditionalMetadata) {
-		body["additionalMetadata"] = instance.Spec.AdditionalMetadata
+	if !isZeroValue(instance.Spec.ReExecuteInterval) {
+		body["reExecuteInterval"] = instance.Spec.ReExecuteInterval
+	}
+	if !isZeroValue(instance.Spec.Email) {
+		body["email"] = instance.Spec.Email
+	}
+	if !isZeroValue(instance.Spec.FirstName) {
+		body["firstName"] = instance.Spec.FirstName
+	}
+	if !isZeroValue(instance.Spec.Id) {
+		body["id"] = instance.Spec.Id
+	}
+	if !isZeroValue(instance.Spec.LastName) {
+		body["lastName"] = instance.Spec.LastName
+	}
+	if !isZeroValue(instance.Spec.Password) {
+		body["password"] = instance.Spec.Password
+	}
+	if !isZeroValue(instance.Spec.Phone) {
+		body["phone"] = instance.Spec.Phone
+	}
+	if !isZeroValue(instance.Spec.UserStatus) {
+		body["userStatus"] = instance.Spec.UserStatus
+	}
+	if !isZeroValue(instance.Spec.Username) {
+		body["username"] = instance.Spec.Username
 	}
 	if len(body) == 0 {
 		return nil, nil
@@ -173,8 +237,8 @@ func (r *PetUploadimageReconciler) buildRequestBody(instance *v1alpha1.PetUpload
 }
 
 // parseResult parses the response body into typed result
-func (r *PetUploadimageReconciler) parseResult(body []byte) (*v1alpha1.PetUploadimageResult, error) {
-	var result v1alpha1.PetUploadimageResult
+func (r *UserActionReconciler) parseResult(body []byte) (*v1alpha1.UserActionResult, error) {
+	var result v1alpha1.UserActionResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal result: %w", err)
 	}
@@ -182,7 +246,7 @@ func (r *PetUploadimageReconciler) parseResult(body []byte) (*v1alpha1.PetUpload
 }
 
 // executeActionToEndpoint executes the action against a single endpoint
-func (r *PetUploadimageReconciler) executeActionToEndpoint(ctx context.Context, instance *v1alpha1.PetUploadimage, baseURL string, body []byte) ([]byte, int, error) {
+func (r *UserActionReconciler) executeActionToEndpoint(ctx context.Context, instance *v1alpha1.UserAction, baseURL string, body []byte) ([]byte, int, error) {
 	logger := log.FromContext(ctx)
 
 	actionURL := r.buildActionURL(baseURL, instance)
@@ -218,7 +282,7 @@ func (r *PetUploadimageReconciler) executeActionToEndpoint(ctx context.Context, 
 	return respBody, resp.StatusCode, nil
 }
 
-func (r *PetUploadimageReconciler) executeAction(ctx context.Context, instance *v1alpha1.PetUploadimage) error {
+func (r *UserActionReconciler) executeAction(ctx context.Context, instance *v1alpha1.UserAction) error {
 	logger := log.FromContext(ctx)
 	now := metav1.Now()
 
@@ -246,13 +310,13 @@ func (r *PetUploadimageReconciler) executeAction(ctx context.Context, instance *
 
 		if len(baseURLs) > 1 {
 			// Multiple endpoints - execute on all
-			responses := make(map[string]v1alpha1.PetUploadimageEndpointResponse)
+			responses := make(map[string]v1alpha1.UserActionEndpointResponse)
 			successCount := 0
 			var firstStatusCode int
-			var firstResult *v1alpha1.PetUploadimageResult
+			var firstResult *v1alpha1.UserActionResult
 
 			for _, baseURL := range baseURLs {
-				endpointResp := v1alpha1.PetUploadimageEndpointResponse{
+				endpointResp := v1alpha1.UserActionEndpointResponse{
 					ExecutedAt: &now,
 				}
 
@@ -292,7 +356,7 @@ func (r *PetUploadimageReconciler) executeAction(ctx context.Context, instance *
 
 			// Store first successful result as EndpointResponse
 			if firstStatusCode != 0 {
-				instance.Status.Result = &v1alpha1.PetUploadimageEndpointResponse{
+				instance.Status.Result = &v1alpha1.UserActionEndpointResponse{
 					Success:    true,
 					StatusCode: firstStatusCode,
 					Data:       firstResult,
@@ -329,7 +393,7 @@ func (r *PetUploadimageReconciler) executeAction(ctx context.Context, instance *
 
 	if err != nil {
 		// Store failure in EndpointResponse
-		instance.Status.Result = &v1alpha1.PetUploadimageEndpointResponse{
+		instance.Status.Result = &v1alpha1.UserActionEndpointResponse{
 			Success:    false,
 			StatusCode: statusCode,
 			Error:      err.Error(),
@@ -344,14 +408,14 @@ func (r *PetUploadimageReconciler) executeAction(ctx context.Context, instance *
 		result, parseErr := r.parseResult(respBody)
 		if parseErr != nil {
 			logger.Error(parseErr, "Failed to parse response as typed result")
-			instance.Status.Result = &v1alpha1.PetUploadimageEndpointResponse{
+			instance.Status.Result = &v1alpha1.UserActionEndpointResponse{
 				Success:    false,
 				StatusCode: statusCode,
 				Error:      parseErr.Error(),
 				ExecutedAt: &now,
 			}
 		} else {
-			instance.Status.Result = &v1alpha1.PetUploadimageEndpointResponse{
+			instance.Status.Result = &v1alpha1.UserActionEndpointResponse{
 				Success:    true,
 				StatusCode: statusCode,
 				Data:       result,
@@ -364,7 +428,7 @@ func (r *PetUploadimageReconciler) executeAction(ctx context.Context, instance *
 	return nil
 }
 
-func (r *PetUploadimageReconciler) updateStatus(ctx context.Context, instance *v1alpha1.PetUploadimage, state, message string, statusCode, successCount, totalEndpoints int) {
+func (r *UserActionReconciler) updateStatus(ctx context.Context, instance *v1alpha1.UserAction, state, message string, statusCode, successCount, totalEndpoints int) {
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
@@ -385,6 +449,21 @@ func (r *PetUploadimageReconciler) updateStatus(ctx context.Context, instance *v
 
 	if state == "Completed" || state == "Failed" {
 		instance.Status.CompletedAt = &now
+
+		// Update last execution time for interval-based re-execution
+		instance.Status.LastExecutionTime = &now
+
+		// Increment execution count
+		instance.Status.ExecutionCount++
+
+		// Calculate next execution time if interval is configured
+		if instance.Spec.ReExecuteInterval != nil && instance.Spec.ReExecuteInterval.Duration > 0 {
+			nextTime := metav1.NewTime(now.Add(instance.Spec.ReExecuteInterval.Duration))
+			instance.Status.NextExecutionTime = &nextTime
+		} else {
+			// Clear next execution time if no interval is set
+			instance.Status.NextExecutionTime = nil
+		}
 	}
 
 	// Update condition
@@ -405,32 +484,9 @@ func (r *PetUploadimageReconciler) updateStatus(ctx context.Context, instance *v
 	}
 }
 
-// isZeroValue checks if a value is its zero value
-func isZeroValue(v interface{}) bool {
-	if v == nil {
-		return true
-	}
-	switch val := v.(type) {
-	case string:
-		return val == ""
-	case int, int32, int64:
-		return val == 0
-	case float32, float64:
-		return val == 0
-	case bool:
-		return !val
-	case []interface{}:
-		return len(val) == 0
-	case map[string]interface{}:
-		return len(val) == 0
-	default:
-		return false
-	}
-}
-
 // SetupWithManager sets up the controller with the Manager
-func (r *PetUploadimageReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *UserActionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.PetUploadimage{}).
+		For(&v1alpha1.UserAction{}).
 		Complete(r)
 }

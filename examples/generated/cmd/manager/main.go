@@ -183,17 +183,6 @@ func main() {
 		setupLog.Info("Using static base URL", "url", baseURL)
 	}
 
-	if err = (&controller.InventoryReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		HTTPClient:       httpClient,
-		EndpointResolver: resolver,
-		BaseURL:          baseURL,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Inventory")
-		os.Exit(1)
-	}
-
 	if err = (&controller.OrderReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
@@ -227,58 +216,113 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.PetFindbystatusReconciler{
+	if err = (&controller.PetFindbystatusQueryReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		HTTPClient:       httpClient,
 		EndpointResolver: resolver,
 		BaseURL:          baseURL,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PetFindbystatus")
+		setupLog.Error(err, "unable to create controller", "controller", "PetFindbystatusQuery")
 		os.Exit(1)
 	}
 
-	if err = (&controller.PetFindbytagsReconciler{
+	if err = (&controller.PetFindbytagsQueryReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		HTTPClient:       httpClient,
 		EndpointResolver: resolver,
 		BaseURL:          baseURL,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PetFindbytags")
+		setupLog.Error(err, "unable to create controller", "controller", "PetFindbytagsQuery")
 		os.Exit(1)
 	}
 
-	if err = (&controller.UserLoginReconciler{
+	if err = (&controller.StoreInventoryQueryReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		HTTPClient:       httpClient,
 		EndpointResolver: resolver,
 		BaseURL:          baseURL,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "UserLogin")
+		setupLog.Error(err, "unable to create controller", "controller", "StoreInventoryQuery")
 		os.Exit(1)
 	}
 
-	if err = (&controller.UserLogoutReconciler{
+	if err = (&controller.UserLoginQueryReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		HTTPClient:       httpClient,
 		EndpointResolver: resolver,
 		BaseURL:          baseURL,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "UserLogout")
+		setupLog.Error(err, "unable to create controller", "controller", "UserLoginQuery")
 		os.Exit(1)
 	}
 
-	if err = (&controller.PetUploadimageReconciler{
+	if err = (&controller.UserLogoutQueryReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		HTTPClient:       httpClient,
 		EndpointResolver: resolver,
 		BaseURL:          baseURL,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PetUploadimage")
+		setupLog.Error(err, "unable to create controller", "controller", "UserLogoutQuery")
+		os.Exit(1)
+	}
+
+	if err = (&controller.PetActionReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		HTTPClient:       httpClient,
+		EndpointResolver: resolver,
+		BaseURL:          baseURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PetAction")
+		os.Exit(1)
+	}
+
+	if err = (&controller.PetUploadimageActionReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		HTTPClient:       httpClient,
+		EndpointResolver: resolver,
+		BaseURL:          baseURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PetUploadimageAction")
+		os.Exit(1)
+	}
+
+	if err = (&controller.StoreOrderActionReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		HTTPClient:       httpClient,
+		EndpointResolver: resolver,
+		BaseURL:          baseURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "StoreOrderAction")
+		os.Exit(1)
+	}
+
+	if err = (&controller.UserActionReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		HTTPClient:       httpClient,
+		EndpointResolver: resolver,
+		BaseURL:          baseURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "UserAction")
+		os.Exit(1)
+	}
+
+	if err = (&controller.UserCreatewithlistActionReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		HTTPClient:       httpClient,
+		EndpointResolver: resolver,
+		BaseURL:          baseURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "UserCreatewithlistAction")
 		os.Exit(1)
 	}
 

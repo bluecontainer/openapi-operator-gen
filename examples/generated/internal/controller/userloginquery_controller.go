@@ -30,12 +30,12 @@ import (
 )
 
 const (
-	userlogoutFinalizer    = "petstore.example.com/finalizer"
-	userlogoutRequeueAfter = time.Second * 30
+	userloginqueryFinalizer    = "petstore.example.com/finalizer"
+	userloginqueryRequeueAfter = time.Second * 30
 )
 
-// UserLogoutReconciler reconciles a UserLogout query object
-type UserLogoutReconciler struct {
+// UserLoginQueryReconciler reconciles a UserLoginQuery query object
+type UserLoginQueryReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	HTTPClient       *http.Client
@@ -44,35 +44,35 @@ type UserLogoutReconciler struct {
 	BaseURL string
 }
 
-// +kubebuilder:rbac:groups=petstore.example.com,resources=userlogouts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=petstore.example.com,resources=userlogouts/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=petstore.example.com,resources=userloginquerys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=petstore.example.com,resources=userloginquerys/status,verbs=get;update;patch
 
 // Reconcile executes the query and updates the status with results
-func (r *UserLogoutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *UserLoginQueryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the UserLogout instance
-	instance := &v1alpha1.UserLogout{}
+	// Fetch the UserLoginQuery instance
+	instance := &v1alpha1.UserLoginQuery{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("UserLogout resource not found. Ignoring since object must be deleted")
+			logger.Info("UserLoginQuery resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to get UserLogout")
+		logger.Error(err, "Failed to get UserLoginQuery")
 		return ctrl.Result{}, err
 	}
 
 	// Execute the query
 	if err := r.executeQuery(ctx, instance); err != nil {
 		r.updateStatus(ctx, instance, "Failed", err.Error(), 0)
-		return ctrl.Result{RequeueAfter: userlogoutRequeueAfter}, err
+		return ctrl.Result{RequeueAfter: userloginqueryRequeueAfter}, err
 	}
 
-	return ctrl.Result{RequeueAfter: userlogoutRequeueAfter}, nil
+	return ctrl.Result{RequeueAfter: userloginqueryRequeueAfter}, nil
 }
 
-func (r *UserLogoutReconciler) getBaseURL(ctx context.Context) (string, error) {
+func (r *UserLoginQueryReconciler) getBaseURL(ctx context.Context) (string, error) {
 	if r.EndpointResolver != nil {
 		return r.EndpointResolver.GetEndpoint()
 	}
@@ -82,7 +82,7 @@ func (r *UserLogoutReconciler) getBaseURL(ctx context.Context) (string, error) {
 	return r.BaseURL, nil
 }
 
-func (r *UserLogoutReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
+func (r *UserLoginQueryReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
 			return "", fmt.Errorf("targetPodOrdinal is required when using by-ordinal strategy")
@@ -93,7 +93,7 @@ func (r *UserLogoutReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal 
 }
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
-func (r *UserLogoutReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.UserLogout) (string, error) {
+func (r *UserLoginQueryReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.UserLoginQuery) (string, error) {
 	if r.EndpointResolver != nil {
 		namespace := instance.Spec.TargetNamespace
 		if namespace == "" {
@@ -121,8 +121,8 @@ func (r *UserLogoutReconciler) resolveBaseURL(ctx context.Context, instance *v1a
 }
 
 // buildQueryURL builds the query URL from the spec parameters
-func (r *UserLogoutReconciler) buildQueryURL(baseURL string, instance *v1alpha1.UserLogout) string {
-	queryURL := baseURL + "/user/logout"
+func (r *UserLoginQueryReconciler) buildQueryURL(baseURL string, instance *v1alpha1.UserLoginQuery) string {
+	queryURL := baseURL + "/user/login"
 
 	params := url.Values{}
 	specVal := reflect.ValueOf(instance.Spec)
@@ -177,7 +177,7 @@ func (r *UserLogoutReconciler) buildQueryURL(baseURL string, instance *v1alpha1.
 }
 
 // executeQueryToEndpoint executes the query against a single endpoint
-func (r *UserLogoutReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.UserLogout, baseURL string) ([]byte, int, error) {
+func (r *UserLoginQueryReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.UserLoginQuery, baseURL string) ([]byte, int, error) {
 	logger := log.FromContext(ctx)
 
 	queryURL := r.buildQueryURL(baseURL, instance)
@@ -208,7 +208,7 @@ func (r *UserLogoutReconciler) executeQueryToEndpoint(ctx context.Context, insta
 }
 
 // countResults attempts to count results in the response
-func (r *UserLogoutReconciler) countResults(body []byte) int {
+func (r *UserLoginQueryReconciler) countResults(body []byte) int {
 	// Try to parse as array
 	var arr []interface{}
 	if err := json.Unmarshal(body, &arr); err == nil {
@@ -230,7 +230,7 @@ func (r *UserLogoutReconciler) countResults(body []byte) int {
 	return 0
 }
 
-func (r *UserLogoutReconciler) executeQuery(ctx context.Context, instance *v1alpha1.UserLogout) error {
+func (r *UserLoginQueryReconciler) executeQuery(ctx context.Context, instance *v1alpha1.UserLoginQuery) error {
 	logger := log.FromContext(ctx)
 	now := metav1.Now()
 
@@ -243,13 +243,13 @@ func (r *UserLogoutReconciler) executeQuery(ctx context.Context, instance *v1alp
 
 		if len(baseURLs) > 1 {
 			// Multiple endpoints - collect responses from all
-			responses := make(map[string]v1alpha1.UserLogoutEndpointResponse)
-			var firstSuccessResp *v1alpha1.UserLogoutEndpointResponse
+			responses := make(map[string]v1alpha1.UserLoginQueryEndpointResponse)
+			var firstSuccessResp *v1alpha1.UserLoginQueryEndpointResponse
 			var firstResultCount int
 			successCount := 0
 
 			for _, baseURL := range baseURLs {
-				endpointResp := v1alpha1.UserLogoutEndpointResponse{
+				endpointResp := v1alpha1.UserLoginQueryEndpointResponse{
 					LastUpdated: &now,
 				}
 
@@ -306,7 +306,7 @@ func (r *UserLogoutReconciler) executeQuery(ctx context.Context, instance *v1alp
 	body, statusCode, err := r.executeQueryToEndpoint(ctx, instance, baseURL)
 
 	// Build EndpointResponse for Results
-	endpointResp := v1alpha1.UserLogoutEndpointResponse{
+	endpointResp := v1alpha1.UserLoginQueryEndpointResponse{
 		LastUpdated: &now,
 		StatusCode:  statusCode,
 	}
@@ -333,7 +333,7 @@ func (r *UserLogoutReconciler) executeQuery(ctx context.Context, instance *v1alp
 	return nil
 }
 
-func (r *UserLogoutReconciler) updateStatus(ctx context.Context, instance *v1alpha1.UserLogout, state, message string, resultCount int) {
+func (r *UserLoginQueryReconciler) updateStatus(ctx context.Context, instance *v1alpha1.UserLoginQuery, state, message string, resultCount int) {
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
@@ -365,8 +365,8 @@ func (r *UserLogoutReconciler) updateStatus(ctx context.Context, instance *v1alp
 }
 
 // SetupWithManager sets up the controller with the Manager
-func (r *UserLogoutReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *UserLoginQueryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.UserLogout{}).
+		For(&v1alpha1.UserLoginQuery{}).
 		Complete(r)
 }

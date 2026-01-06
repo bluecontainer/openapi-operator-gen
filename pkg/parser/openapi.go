@@ -108,11 +108,19 @@ type ParsedSpec struct {
 }
 
 // Parser parses OpenAPI specifications
-type Parser struct{}
+type Parser struct {
+	// RootKind is the Kind name to use for the root "/" endpoint
+	RootKind string
+}
 
 // NewParser creates a new OpenAPI parser
 func NewParser() *Parser {
 	return &Parser{}
+}
+
+// NewParserWithRootKind creates a new OpenAPI parser with a specified root kind
+func NewParserWithRootKind(rootKind string) *Parser {
+	return &Parser{RootKind: rootKind}
 }
 
 // Parse parses an OpenAPI specification file
@@ -175,23 +183,35 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 	}
 	sort.Strings(paths)
 
+	// Log endpoint classification header
+	fmt.Println("\n┌───────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│                               Endpoint Classification                                        │")
+	fmt.Println("├────────────────────────────────────┬──────────────┬────────────────────┬─────────────────────┤")
+	fmt.Println("│ Endpoint                           │ Method       │ Classification     │ Kind                │")
+	fmt.Println("├────────────────────────────────────┼──────────────┼────────────────────┼─────────────────────┤")
+
 	for _, path := range paths {
 		pathItem := doc.Paths.Map()[path]
+		methods := p.getMethodsForPath(pathItem)
+
+		// Check if this is an action endpoint FIRST (before query endpoints)
+		// This ensures /user/login (GET with strong action keyword) is treated as action, not query
+		if actionEndpoint := p.extractActionEndpoint(path, pathItem, doc); actionEndpoint != nil {
+			actionEndpoints = append(actionEndpoints, actionEndpoint)
+			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), actionEndpoint.HTTPMethod, "ActionEndpoint", truncateString(actionEndpoint.Name, 19))
+			continue
+		}
 
 		// Check if this is a query endpoint
 		if queryEndpoint := p.extractQueryEndpoint(path, pathItem, doc); queryEndpoint != nil {
 			queryEndpoints = append(queryEndpoints, queryEndpoint)
-			continue
-		}
-
-		// Check if this is an action endpoint
-		if actionEndpoint := p.extractActionEndpoint(path, pathItem, doc); actionEndpoint != nil {
-			actionEndpoints = append(actionEndpoints, actionEndpoint)
+			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), "GET", "QueryEndpoint", truncateString(queryEndpoint.Name, 19))
 			continue
 		}
 
 		resourceName := p.extractResourceName(path)
 		if resourceName == "" {
+			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), methods, "Skipped", "-")
 			continue
 		}
 
@@ -206,6 +226,8 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 			resourceMap[resourceName] = resource
 		}
 
+		fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), methods, "Resource", truncateString(resourceName, 19))
+
 		// Extract operations
 		ops := p.extractOperations(path, pathItem)
 		resource.Operations = append(resource.Operations, ops...)
@@ -215,6 +237,9 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 			resource.Schema = p.extractResourceSchema(pathItem, doc)
 		}
 	}
+
+	fmt.Println("└────────────────────────────────────┴──────────────┴────────────────────┴─────────────────────┘")
+	fmt.Println()
 
 	// Convert map to slice
 	resources := make([]*Resource, 0, len(resourceMap))
@@ -237,52 +262,74 @@ func (p *Parser) extractResourcesAndQueries(doc *openapi3.T) ([]*Resource, []*Qu
 }
 
 // isActionEndpoint checks if a path is an action endpoint
-// Action endpoints have the pattern /{resource}/{resourceId}/{action} with POST or PUT only
+// Action endpoints are POST or PUT only (no GET) with patterns:
+//   - /{action} (e.g., /login, /store)
+//   - /{resource}/{action} (e.g., /api/echo, /user/register)
+//   - /{resource}/{resourceId}/{action} (e.g., /pet/{petId}/uploadImage)
 func (p *Parser) isActionEndpoint(path string, pathItem *openapi3.PathItem) bool {
-	// Must have POST or PUT (but not both regular CRUD operations)
 	hasPost := pathItem.Post != nil
 	hasPut := pathItem.Put != nil
 	hasGet := pathItem.Get != nil
 	hasDelete := pathItem.Delete != nil
 	hasPatch := pathItem.Patch != nil
 
-	// Action endpoints typically only have POST (or PUT for some actions)
-	// and don't have GET/DELETE which would indicate a resource endpoint
+	// Action endpoints must be POST/PUT only - no GET, DELETE, or PATCH
 	if !hasPost && !hasPut {
 		return false
 	}
-
-	// If it has GET or DELETE, it's likely a resource endpoint, not an action
 	if hasGet || hasDelete || hasPatch {
 		return false
 	}
 
-	// Check path structure: must have /{resource}/{param}/{action}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 3 {
+	if len(parts) < 1 {
 		return false
 	}
 
-	// Must have a parameter in the middle (like {petId})
-	hasParamInMiddle := false
-	for i := 1; i < len(parts)-1; i++ {
-		if strings.HasPrefix(parts[i], "{") && strings.HasSuffix(parts[i], "}") {
-			hasParamInMiddle = true
-			break
-		}
-	}
-	if !hasParamInMiddle {
-		return false
-	}
-
-	// Last segment must be an action (not a parameter)
+	// Last segment must not be a parameter
 	lastPart := parts[len(parts)-1]
 	if strings.HasPrefix(lastPart, "{") {
 		return false
 	}
 
-	// Check if the last segment looks like an action
-	return p.isActionSegment(lastPart)
+	// Pattern 1: /{resource}/{resourceId}/{action} (3+ segments with middle parameter)
+	if len(parts) >= 3 {
+		hasParamInMiddle := false
+		for i := 1; i < len(parts)-1; i++ {
+			if strings.HasPrefix(parts[i], "{") && strings.HasSuffix(parts[i], "}") {
+				hasParamInMiddle = true
+				break
+			}
+		}
+		if hasParamInMiddle {
+			return p.isActionSegment(lastPart)
+		}
+	}
+
+	// Pattern 2: /{resource}/{action} (2 segments) or /{action} (1 segment)
+	// POST/PUT only = always an action (e.g., /api/echo, /store, /login)
+	if len(parts) >= 1 {
+		return true
+	}
+
+	return false
+}
+
+// isStrongActionKeyword checks if a segment is a strong action keyword
+// These keywords clearly indicate an action even for GET-only endpoints
+func (p *Parser) isStrongActionKeyword(segment string) bool {
+	strongActions := []string{
+		"login", "logout", "signin", "signout", "register",
+		"verify", "activate", "deactivate", "reset", "refresh",
+		"revoke", "authorize", "authenticate", "token",
+	}
+	lower := strings.ToLower(segment)
+	for _, action := range strongActions {
+		if strings.Contains(lower, action) {
+			return true
+		}
+	}
+	return false
 }
 
 // extractActionEndpoint extracts an action endpoint definition
@@ -297,8 +344,9 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 	var parentResource string
 	var parentIDParam string
 	var actionName string
+	var name string
 
-	// Find the structure: {resource}/{resourceId}/{action}
+	// Pattern 1: Find structure /{resource}/{resourceId}/{action} (3+ segments with ID param)
 	for i := 0; i < len(parts)-1; i++ {
 		part := parts[i]
 		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
@@ -312,14 +360,41 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 
 	actionName = parts[len(parts)-1]
 
-	if parentResource == "" || parentIDParam == "" {
-		return nil
+	// Pattern 2: /{resource}/{action} (2 segments, no ID param)
+	if parentResource == "" && len(parts) == 2 {
+		parentResource = p.singularize(p.toPascalCase(parts[0]))
+		// parentIDParam stays empty - this is an action without parent ID
 	}
 
-	// Build the action endpoint name
-	name := parentResource + p.toPascalCase(actionName)
+	// Pattern 3: /{action} (1 segment, no parent resource)
+	if parentResource == "" && len(parts) == 1 {
+		// For single-segment actions, there's no parent resource
+		// The action name becomes the Kind (e.g., /store -> Store)
+		parentResource = ""
+		// parentIDParam stays empty
+	}
 
-	// Get the operation (prefer POST over PUT)
+	// Pattern 4: / (root endpoint)
+	// Use RootKind if configured, otherwise skip this endpoint
+	if actionName == "" {
+		if p.RootKind != "" {
+			name = p.RootKind + "Action"
+			actionName = strings.ToLower(p.RootKind)
+		} else {
+			// No RootKind configured, skip root endpoint
+			return nil
+		}
+	} else {
+		// Build the action endpoint name
+		if parentResource != "" {
+			name = parentResource + p.toPascalCase(actionName) + "Action"
+		} else {
+			// Single-segment action: use action name as the Kind
+			name = p.toPascalCase(actionName) + "Action"
+		}
+	}
+
+	// Get the operation (prefer POST over PUT, then GET for strong action keywords)
 	var op *openapi3.Operation
 	var httpMethod string
 	if pathItem.Post != nil {
@@ -328,6 +403,9 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 	} else if pathItem.Put != nil {
 		op = pathItem.Put
 		httpMethod = "PUT"
+	} else if pathItem.Get != nil && p.isStrongActionKeyword(actionName) {
+		op = pathItem.Get
+		httpMethod = "GET"
 	}
 
 	if op == nil {
@@ -415,50 +493,14 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 }
 
 // isQueryEndpoint checks if a path is a query/search endpoint
-// Query endpoints are GET-only paths without {id} parameter that have sub-paths like /findByTags
+// Query endpoints are any endpoint with GET method only (no POST, PUT, PATCH, DELETE)
 func (p *Parser) isQueryEndpoint(path string, pathItem *openapi3.PathItem) bool {
-	// Must have GET operation
-	if pathItem.Get == nil {
-		return false
-	}
-
-	// Must NOT have POST, PUT, PATCH, DELETE (read-only)
-	if pathItem.Post != nil || pathItem.Put != nil || pathItem.Patch != nil || pathItem.Delete != nil {
-		return false
-	}
-
-	// Check path structure - query endpoints typically have action names in the path
-	// Examples: /pet/findByStatus, /pet/findByTags, /user/login
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 {
-		return false
-	}
-
-	// Last segment should be an action name (not a parameter)
-	lastPart := parts[len(parts)-1]
-	if strings.HasPrefix(lastPart, "{") {
-		return false
-	}
-
-	// Should contain action verbs or be a sub-resource query
-	actionKeywords := []string{"find", "search", "query", "list", "get", "login", "logout", "check", "validate", "lookup"}
-	lowerLastPart := strings.ToLower(lastPart)
-	for _, keyword := range actionKeywords {
-		if strings.Contains(lowerLastPart, keyword) {
-			return true
-		}
-	}
-
-	// Also consider it a query if it has query parameters and is GET-only
-	if pathItem.Get != nil && len(pathItem.Get.Parameters) > 0 {
-		for _, param := range pathItem.Get.Parameters {
-			if param.Value != nil && param.Value.In == "query" {
-				return true
-			}
-		}
-	}
-
-	return false
+	// Must have GET operation and no other methods
+	return pathItem.Get != nil &&
+		pathItem.Post == nil &&
+		pathItem.Put == nil &&
+		pathItem.Patch == nil &&
+		pathItem.Delete == nil
 }
 
 // extractQueryEndpoint extracts a query endpoint definition
@@ -470,16 +512,25 @@ func (p *Parser) extractQueryEndpoint(path string, pathItem *openapi3.PathItem, 
 	op := pathItem.Get
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 
+	// Handle root "/" endpoint
+	if path == "/" || (len(parts) == 1 && parts[0] == "") {
+		if p.RootKind == "" {
+			// No RootKind configured, skip root endpoint
+			return nil
+		}
+		parts = []string{strings.ToLower(p.RootKind)}
+	}
+
 	// Build the query endpoint name
-	// /pet/findByTags -> PetFindByTags
-	// /user/login -> UserLogin
+	// /pet/findByTags -> PetFindByTagsQuery
+	// /user/login -> UserLoginQuery
 	nameParts := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if !strings.HasPrefix(part, "{") {
 			nameParts = append(nameParts, p.toPascalCase(part))
 		}
 	}
-	name := strings.Join(nameParts, "")
+	name := strings.Join(nameParts, "") + "Query"
 
 	// Extract base resource and operation
 	basePath := "/" + parts[0]
@@ -572,6 +623,14 @@ func (p *Parser) extractResourceName(path string) string {
 	// Remove leading slash and split by /
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 0 {
+		return ""
+	}
+
+	// Handle root "/" endpoint
+	if path == "/" || (len(parts) == 1 && parts[0] == "") {
+		if p.RootKind != "" {
+			return p.RootKind
+		}
 		return ""
 	}
 
@@ -940,4 +999,36 @@ func (p *Parser) pluralize(s string) string {
 		return s + "es"
 	}
 	return s + "s"
+}
+
+// getMethodsForPath returns a comma-separated string of HTTP methods for a path
+func (p *Parser) getMethodsForPath(pathItem *openapi3.PathItem) string {
+	methods := make([]string, 0)
+	if pathItem.Get != nil {
+		methods = append(methods, "GET")
+	}
+	if pathItem.Post != nil {
+		methods = append(methods, "POST")
+	}
+	if pathItem.Put != nil {
+		methods = append(methods, "PUT")
+	}
+	if pathItem.Patch != nil {
+		methods = append(methods, "PATCH")
+	}
+	if pathItem.Delete != nil {
+		methods = append(methods, "DELETE")
+	}
+	return strings.Join(methods, ",")
+}
+
+// truncateString truncates a string to maxLen characters, adding "..." if truncated
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }

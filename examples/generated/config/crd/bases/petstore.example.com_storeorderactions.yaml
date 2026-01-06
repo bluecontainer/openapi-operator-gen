@@ -4,25 +4,25 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
-  name: userlogins.petstore.example.com
+  name: storeorderactions.petstore.example.com
 spec:
   group: petstore.example.com
   names:
-    kind: UserLogin
-    listKind: UserLoginList
-    plural: userlogins
+    kind: StoreOrderAction
+    listKind: StoreOrderActionList
+    plural: storeorderactions
     shortNames:
-    - us
-    - use
-    singular: userlogin
+    - st
+    - sto
+    singular: storeorderaction
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.state
       name: State
       type: string
-    - jsonPath: .status.resultCount
-      name: Results
+    - jsonPath: .status.httpStatusCode
+      name: HTTP Status
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -30,7 +30,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: UserLogin is the Schema for the userlogins API (Query Operation)
+        description: StoreOrderAction is the Schema for the storeorderactions API
+          (Action Operation)
         properties:
           apiVersion:
             description: |-
@@ -50,10 +51,33 @@ spec:
           metadata:
             type: object
           spec:
-            description: UserLoginSpec defines the query parameters for UserLogin
+            description: StoreOrderActionSpec defines the parameters for the StoreOrderAction
+              action
             properties:
-              password:
-                description: The password for login in clear text
+              complete:
+                type: boolean
+              id:
+                format: int64
+                type: integer
+              petId:
+                format: int64
+                type: integer
+              quantity:
+                format: int32
+                type: integer
+              reExecuteInterval:
+                description: Interval at which to re-execute the action (e.g., 30s,
+                  5m, 1h). If not set, action is one-shot.
+                type: string
+              shipDate:
+                format: date-time
+                type: string
+              status:
+                description: Order Status
+                enum:
+                - placed
+                - approved
+                - delivered
                 type: string
               targetDeployment:
                 description: TargetDeployment specifies a Deployment name to route
@@ -77,13 +101,15 @@ spec:
                 description: TargetStatefulSet specifies a StatefulSet name to route
                   requests to.
                 type: string
-              username:
-                description: The user name for login
-                type: string
             type: object
           status:
-            description: UserLoginStatus defines the observed state of UserLogin
+            description: StoreOrderActionStatus defines the observed state of StoreOrderAction
             properties:
+              completedAt:
+                description: CompletedAt is when the action completed (success or
+                  failure)
+                format: date-time
+                type: string
               conditions:
                 description: Conditions represent the latest available observations
                   of an object's state
@@ -145,13 +171,32 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              lastQueryTime:
-                description: LastQueryTime is the last time the query was executed
+              executedAt:
+                description: ExecutedAt is when the action was executed
+                format: date-time
+                type: string
+              executionCount:
+                description: ExecutionCount is the number of times this action has
+                  been executed
+                format: int64
+                type: integer
+              httpStatusCode:
+                description: HTTPStatusCode is the HTTP status code from the action
+                  response (single endpoint mode)
+                type: integer
+              lastExecutionTime:
+                description: LastExecutionTime is the last time the action was executed
+                  (for re-execution support)
                 format: date-time
                 type: string
               message:
                 description: Message is a human-readable message about the current
                   state
+                type: string
+              nextExecutionTime:
+                description: NextExecutionTime is when the next periodic execution
+                  will occur
+                format: date-time
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation
@@ -159,19 +204,36 @@ spec:
                 type: integer
               responses:
                 additionalProperties:
-                  description: UserLoginEndpointResponse contains the response from
-                    a single endpoint for UserLogin queries
+                  description: StoreOrderActionEndpointResponse contains the response
+                    from a single endpoint for StoreOrderAction actions
                   properties:
                     data:
                       description: Data contains the response body from the endpoint
+                      properties:
+                        complete:
+                          type: boolean
+                        id:
+                          format: int64
+                          type: integer
+                        petId:
+                          format: int64
+                          type: integer
+                        quantity:
+                          format: int32
+                          type: integer
+                        shipDate:
+                          format: date-time
+                          type: string
+                        status:
+                          description: Order Status
+                          type: string
                       type: object
-                      x-kubernetes-preserve-unknown-fields: true
                     error:
                       description: Error contains the error message if the request
                         failed
                       type: string
-                    lastUpdated:
-                      description: LastUpdated is when this endpoint was last queried
+                    executedAt:
+                      description: ExecutedAt is when this endpoint was called
                       format: date-time
                       type: string
                     statusCode:
@@ -185,26 +247,40 @@ spec:
                   required:
                   - success
                   type: object
-                description: Responses contains responses from multiple endpoints
-                  (all-healthy strategy)
+                description: |-
+                  Responses contains responses from multiple endpoints (all-healthy strategy)
+                  Keys are endpoint URLs, values are the response data
                 type: object
-              resultCount:
-                description: ResultCount is the number of results returned by the
-                  query
-                type: integer
-              results:
-                description: Results contains the query result from the REST API (single
-                  endpoint mode)
+              result:
+                description: Result contains the response from the action execution
+                  (single endpoint mode)
                 properties:
                   data:
                     description: Data contains the response body from the endpoint
+                    properties:
+                      complete:
+                        type: boolean
+                      id:
+                        format: int64
+                        type: integer
+                      petId:
+                        format: int64
+                        type: integer
+                      quantity:
+                        format: int32
+                        type: integer
+                      shipDate:
+                        format: date-time
+                        type: string
+                      status:
+                        description: Order Status
+                        type: string
                     type: object
-                    x-kubernetes-preserve-unknown-fields: true
                   error:
                     description: Error contains the error message if the request failed
                     type: string
-                  lastUpdated:
-                    description: LastUpdated is when this endpoint was last queried
+                  executedAt:
+                    description: ExecutedAt is when this endpoint was called
                     format: date-time
                     type: string
                   statusCode:
@@ -219,13 +295,21 @@ spec:
                 - success
                 type: object
               state:
-                description: State represents the current state of the query
+                description: State represents the current state of the action
                 enum:
                 - Pending
-                - Querying
-                - Queried
+                - Executing
+                - Completed
                 - Failed
                 type: string
+              successCount:
+                description: SuccessCount is the number of endpoints that executed
+                  successfully (all-healthy strategy)
+                type: integer
+              totalEndpoints:
+                description: TotalEndpoints is the total number of endpoints targeted
+                  (all-healthy strategy)
+                type: integer
             type: object
         type: object
     served: true

@@ -4,17 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
-  name: petfindbystatuses.petstore.example.com
+  name: petfindbytagsqueries.petstore.example.com
 spec:
   group: petstore.example.com
   names:
-    kind: PetFindbystatus
-    listKind: PetFindbystatusList
-    plural: petfindbystatuses
+    kind: PetFindbytagsQuery
+    listKind: PetFindbytagsQueryList
+    plural: petfindbytagsqueries
     shortNames:
     - pe
     - pet
-    singular: petfindbystatus
+    singular: petfindbytagsquery
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,8 +30,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PetFindbystatus is the Schema for the petfindbystatuss API (Query
-          Operation)
+        description: PetFindbytagsQuery is the Schema for the petfindbytagsquerys
+          API (Query Operation)
         properties:
           apiVersion:
             description: |-
@@ -51,11 +51,13 @@ spec:
           metadata:
             type: object
           spec:
-            description: PetFindbystatusSpec defines the query parameters for PetFindbystatus
+            description: PetFindbytagsQuerySpec defines the query parameters for PetFindbytagsQuery
             properties:
-              status:
-                description: Status values that need to be considered for filter
-                type: string
+              tags:
+                description: Tags to filter by
+                items:
+                  type: string
+                type: array
               targetDeployment:
                 description: TargetDeployment specifies a Deployment name to route
                   requests to.
@@ -79,10 +81,10 @@ spec:
                   requests to.
                 type: string
             required:
-            - status
+            - tags
             type: object
           status:
-            description: PetFindbystatusStatus defines the observed state of PetFindbystatus
+            description: PetFindbytagsQueryStatus defines the observed state of PetFindbytagsQuery
             properties:
               conditions:
                 description: Conditions represent the latest available observations
@@ -145,6 +147,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              executionCount:
+                description: ExecutionCount is the number of times this query has
+                  been executed
+                format: int64
+                type: integer
+              lastExecutionTime:
+                description: LastExecutionTime is the last time the query was executed
+                  (alias for re-execution support)
+                format: date-time
+                type: string
               lastQueryTime:
                 description: LastQueryTime is the last time the query was executed
                 format: date-time
@@ -153,14 +165,19 @@ spec:
                 description: Message is a human-readable message about the current
                   state
                 type: string
+              nextExecutionTime:
+                description: NextExecutionTime is when the next periodic execution
+                  will occur
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation
                 format: int64
                 type: integer
               responses:
                 additionalProperties:
-                  description: PetFindbystatusEndpointResponse contains the response
-                    from a single endpoint for PetFindbystatus queries
+                  description: PetFindbytagsQueryEndpointResponse contains the response
+                    from a single endpoint for PetFindbytagsQuery queries
                   properties:
                     data:
                       description: Data contains the response body from the endpoint
@@ -187,31 +204,16 @@ spec:
                           spec:
                             description: PetSpec defines the desired state of Pet
                             properties:
-                              category:
-                                description: PetCategory is a nested type used by
-                                  CRD specs
-                                properties:
-                                  id:
-                                    format: int64
-                                    type: integer
-                                  name:
-                                    type: string
+                              data:
+                                description: Resource data as JSON
                                 type: object
+                                x-kubernetes-preserve-unknown-fields: true
                               externalIDRef:
                                 description: |-
                                   ExternalIDRef references an existing resource in the external REST API by its ID.
                                   When set, the controller will GET this resource instead of creating a new one.
                                   This is useful for importing existing resources or for read-only observation.
                                 type: string
-                              id:
-                                format: int64
-                                type: integer
-                              name:
-                                type: string
-                              photoUrls:
-                                items:
-                                  type: string
-                                type: array
                               readOnly:
                                 description: |-
                                   ReadOnly indicates that this CR is for observation only.
@@ -219,25 +221,6 @@ spec:
                                   without performing any create, update, or delete operations.
                                   Requires ExternalIDRef to be set.
                                 type: boolean
-                              status:
-                                description: pet status in the store
-                                enum:
-                                - available
-                                - pending
-                                - sold
-                                type: string
-                              tags:
-                                items:
-                                  description: PetTagsItem is a nested type used by
-                                    CRD specs
-                                  properties:
-                                    id:
-                                      format: int64
-                                      type: integer
-                                    name:
-                                      type: string
-                                  type: object
-                                type: array
                               targetDeployment:
                                 description: |-
                                   TargetDeployment specifies a Deployment name to route requests to.
@@ -266,9 +249,6 @@ spec:
                                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                                   When set, overrides the operator's global endpoint configuration for this CR.
                                 type: string
-                            required:
-                            - name
-                            - photoUrls
                             type: object
                           status:
                             description: PetStatus defines the observed state of Pet
@@ -495,31 +475,16 @@ spec:
                         spec:
                           description: PetSpec defines the desired state of Pet
                           properties:
-                            category:
-                              description: PetCategory is a nested type used by CRD
-                                specs
-                              properties:
-                                id:
-                                  format: int64
-                                  type: integer
-                                name:
-                                  type: string
+                            data:
+                              description: Resource data as JSON
                               type: object
+                              x-kubernetes-preserve-unknown-fields: true
                             externalIDRef:
                               description: |-
                                 ExternalIDRef references an existing resource in the external REST API by its ID.
                                 When set, the controller will GET this resource instead of creating a new one.
                                 This is useful for importing existing resources or for read-only observation.
                               type: string
-                            id:
-                              format: int64
-                              type: integer
-                            name:
-                              type: string
-                            photoUrls:
-                              items:
-                                type: string
-                              type: array
                             readOnly:
                               description: |-
                                 ReadOnly indicates that this CR is for observation only.
@@ -527,25 +492,6 @@ spec:
                                 without performing any create, update, or delete operations.
                                 Requires ExternalIDRef to be set.
                               type: boolean
-                            status:
-                              description: pet status in the store
-                              enum:
-                              - available
-                              - pending
-                              - sold
-                              type: string
-                            tags:
-                              items:
-                                description: PetTagsItem is a nested type used by
-                                  CRD specs
-                                properties:
-                                  id:
-                                    format: int64
-                                    type: integer
-                                  name:
-                                    type: string
-                                type: object
-                              type: array
                             targetDeployment:
                               description: |-
                                 TargetDeployment specifies a Deployment name to route requests to.
@@ -574,9 +520,6 @@ spec:
                                 TargetStatefulSet specifies a StatefulSet name to route requests to.
                                 When set, overrides the operator's global endpoint configuration for this CR.
                               type: string
-                          required:
-                          - name
-                          - photoUrls
                           type: object
                         status:
                           description: PetStatus defines the observed state of Pet

@@ -222,15 +222,17 @@ func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
 		Fields:   make([]*FieldDefinition, 0),
 	}
 
-	// Add parent resource ID field (required)
-	parentIDField := &FieldDefinition{
-		Name:        strcase.ToCamel(ae.ParentIDParam),
-		JSONName:    strcase.ToLowerCamel(ae.ParentIDParam),
-		GoType:      "string",
-		Description: "ID of the parent " + ae.ParentResource + " resource",
-		Required:    true,
+	// Add parent resource ID field (required) - only if the action has a parent ID
+	if ae.ParentIDParam != "" {
+		parentIDField := &FieldDefinition{
+			Name:        strcase.ToCamel(ae.ParentIDParam),
+			JSONName:    strcase.ToLowerCamel(ae.ParentIDParam),
+			GoType:      "string",
+			Description: "ID of the parent " + ae.ParentResource + " resource",
+			Required:    true,
+		}
+		spec.Fields = append(spec.Fields, parentIDField)
 	}
-	spec.Fields = append(spec.Fields, parentIDField)
 
 	// Add re-execution interval field (optional)
 	reExecuteIntervalField := &FieldDefinition{

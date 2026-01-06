@@ -4,17 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
-  name: userlogouts.petstore.example.com
+  name: userloginqueries.petstore.example.com
 spec:
   group: petstore.example.com
   names:
-    kind: UserLogout
-    listKind: UserLogoutList
-    plural: userlogouts
+    kind: UserLoginQuery
+    listKind: UserLoginQueryList
+    plural: userloginqueries
     shortNames:
     - us
     - use
-    singular: userlogout
+    singular: userloginquery
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,7 +30,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: UserLogout is the Schema for the userlogouts API (Query Operation)
+        description: UserLoginQuery is the Schema for the userloginquerys API (Query
+          Operation)
         properties:
           apiVersion:
             description: |-
@@ -50,8 +51,11 @@ spec:
           metadata:
             type: object
           spec:
-            description: UserLogoutSpec defines the query parameters for UserLogout
+            description: UserLoginQuerySpec defines the query parameters for UserLoginQuery
             properties:
+              password:
+                description: The password for login in clear text
+                type: string
               targetDeployment:
                 description: TargetDeployment specifies a Deployment name to route
                   requests to.
@@ -74,9 +78,12 @@ spec:
                 description: TargetStatefulSet specifies a StatefulSet name to route
                   requests to.
                 type: string
+              username:
+                description: The user name for login
+                type: string
             type: object
           status:
-            description: UserLogoutStatus defines the observed state of UserLogout
+            description: UserLoginQueryStatus defines the observed state of UserLoginQuery
             properties:
               conditions:
                 description: Conditions represent the latest available observations
@@ -139,6 +146,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              executionCount:
+                description: ExecutionCount is the number of times this query has
+                  been executed
+                format: int64
+                type: integer
+              lastExecutionTime:
+                description: LastExecutionTime is the last time the query was executed
+                  (alias for re-execution support)
+                format: date-time
+                type: string
               lastQueryTime:
                 description: LastQueryTime is the last time the query was executed
                 format: date-time
@@ -147,14 +164,19 @@ spec:
                 description: Message is a human-readable message about the current
                   state
                 type: string
+              nextExecutionTime:
+                description: NextExecutionTime is when the next periodic execution
+                  will occur
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation
                 format: int64
                 type: integer
               responses:
                 additionalProperties:
-                  description: UserLogoutEndpointResponse contains the response from
-                    a single endpoint for UserLogout queries
+                  description: UserLoginQueryEndpointResponse contains the response
+                    from a single endpoint for UserLoginQuery queries
                   properties:
                     data:
                       description: Data contains the response body from the endpoint

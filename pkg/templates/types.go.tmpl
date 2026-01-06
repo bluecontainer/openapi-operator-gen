@@ -126,6 +126,18 @@ type {{ .Kind }}Status struct {
 	// +optional
 	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
 
+	// LastExecutionTime is the last time the query was executed (alias for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this query has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
+
 	// ResultCount is the number of results returned by the query
 	// +optional
 	ResultCount int `json:"resultCount,omitempty"`
@@ -304,6 +316,18 @@ type {{ .Kind }}Status struct {
 	// CompletedAt is when the action completed (success or failure)
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// LastExecutionTime is the last time the action was executed (for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this action has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
 
 	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
 	// +optional

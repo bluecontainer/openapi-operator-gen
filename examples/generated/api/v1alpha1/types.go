@@ -15,174 +15,36 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// PetCategory is a nested type used by CRD specs
-type PetCategory struct {
+// PetActionCategory is a nested type used by CRD specs
+type PetActionCategory struct {
 	// +optional
 	Id *int64 `json:"id,omitempty"`
 	// +optional
 	Name string `json:"name,omitempty"`
 }
 
-// PetTagsItem is a nested type used by CRD specs
-type PetTagsItem struct {
+// PetActionResultCategory is a nested type used by CRD specs
+type PetActionResultCategory struct {
 	// +optional
 	Id *int64 `json:"id,omitempty"`
 	// +optional
 	Name string `json:"name,omitempty"`
 }
 
-// InventorySpec defines the desired state of Inventory
-type InventorySpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Resource data as JSON
+// PetActionResultTagsItem is a nested type used by CRD specs
+type PetActionResultTagsItem struct {
 	// +optional
-	Data *runtime.RawExtension `json:"data,omitempty"`
-
-	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-	// +kubebuilder:validation:Minimum=0
+	Id *int64 `json:"id,omitempty"`
 	// +optional
-	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
-
-	// TargetHelmRelease specifies a Helm release to discover the workload from.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-	// +optional
-	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
-
-	// TargetStatefulSet specifies a StatefulSet name to route requests to.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
-
-	// TargetDeployment specifies a Deployment name to route requests to.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetDeployment string `json:"targetDeployment,omitempty"`
-
-	// TargetNamespace specifies the namespace to look for the target workload.
-	// Defaults to the CR's namespace if not specified.
-	// +optional
-	TargetNamespace string `json:"targetNamespace,omitempty"`
-
-	// ExternalIDRef references an existing resource in the external REST API by its ID.
-	// When set, the controller will GET this resource instead of creating a new one.
-	// This is useful for importing existing resources or for read-only observation.
-	// +optional
-	ExternalIDRef string `json:"externalIDRef,omitempty"`
-
-	// ReadOnly indicates that this CR is for observation only.
-	// When true, the controller will only GET the resource and update status,
-	// without performing any create, update, or delete operations.
-	// Requires ExternalIDRef to be set.
-	// +optional
-	ReadOnly bool `json:"readOnly,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
-// InventoryStatus defines the observed state of Inventory
-type InventoryStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// State represents the current state of the resource
-	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
+// PetActionTagsItem is a nested type used by CRD specs
+type PetActionTagsItem struct {
 	// +optional
-	State string `json:"state,omitempty"`
-
-	// LastSyncTime is the last time the resource was synced with the REST API
+	Id *int64 `json:"id,omitempty"`
 	// +optional
-	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
-
-	// ExternalID is the ID of the resource in the external REST API
-	// +optional
-	ExternalID string `json:"externalID,omitempty"`
-
-	// Message is a human-readable message about the current state
-	// +optional
-	Message string `json:"message,omitempty"`
-
-	// Conditions represent the latest available observations of an object's state
-	// +optional
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-
-	// ObservedGeneration is the last observed generation
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// Response contains the last response from the REST API (single endpoint mode)
-	// +optional
-	Response *InventoryEndpointResponse `json:"response,omitempty"`
-
-	// Responses contains responses from multiple endpoints (all-healthy strategy)
-	// Keys are endpoint URLs, values are the response data
-	// +optional
-	Responses map[string]InventoryEndpointResponse `json:"responses,omitempty"`
-
-	// DriftDetected indicates whether drift was detected between the spec and external resource
-	// +optional
-	DriftDetected bool `json:"driftDetected,omitempty"`
-
-	// LastGetTime is the last time the resource was fetched from the REST API via GET
-	// +optional
-	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
-}
-
-// InventoryEndpointResponse contains the response from a single endpoint for Inventory resources
-type InventoryEndpointResponse struct {
-	// Success indicates whether the request to this endpoint succeeded
-	Success bool `json:"success"`
-
-	// StatusCode is the HTTP status code returned by the endpoint
-	// +optional
-	StatusCode int `json:"statusCode,omitempty"`
-
-	// Data contains the response body from the endpoint
-	// +optional
-	// +kubebuilder:pruning:PreserveUnknownFields
-	Data *runtime.RawExtension `json:"data,omitempty"`
-
-	// Error contains the error message if the request failed
-	// +optional
-	Error string `json:"error,omitempty"`
-
-	// LastUpdated is when this endpoint was last queried
-	// +optional
-	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=in;inv
-// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
-// +kubebuilder:printcolumn:name="External-ID",type=string,JSONPath=`.status.externalID`
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-
-// Inventory is the Schema for the inventories API
-type Inventory struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   InventorySpec   `json:"spec,omitempty"`
-	Status InventoryStatus `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
-// InventoryList contains a list of Inventory
-type InventoryList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Inventory `json:"items"`
-}
-
-func init() {
-	SchemeBuilder.Register(&Inventory{}, &InventoryList{})
+	Name string `json:"name,omitempty"`
 }
 
 // OrderSpec defines the desired state of Order
@@ -190,26 +52,9 @@ type OrderSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	// Resource data as JSON
 	// +optional
-	Complete bool `json:"complete,omitempty"`
-
-	// +optional
-	Id *int64 `json:"id,omitempty"`
-
-	// +optional
-	PetId *int64 `json:"petId,omitempty"`
-
-	// +optional
-	Quantity *int32 `json:"quantity,omitempty"`
-
-	// +optional
-	ShipDate *metav1.Time `json:"shipDate,omitempty"`
-
-	// Order Status
-	// +optional
-	// +kubebuilder:validation:Enum=placed;approved;delivered
-	// +kubebuilder:validation:Enum=placed;approved;delivered
-	Status string `json:"status,omitempty"`
+	Data *runtime.RawExtension `json:"data,omitempty"`
 
 	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
 	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
@@ -361,26 +206,9 @@ type PetSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	// Resource data as JSON
 	// +optional
-	Category PetCategory `json:"category,omitempty"`
-
-	// +optional
-	Id *int64 `json:"id,omitempty"`
-
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
-
-	// +kubebuilder:validation:Required
-	PhotoUrls []string `json:"photoUrls"`
-
-	// pet status in the store
-	// +optional
-	// +kubebuilder:validation:Enum=available;pending;sold
-	// +kubebuilder:validation:Enum=available;pending;sold
-	Status string `json:"status,omitempty"`
-
-	// +optional
-	Tags []PetTagsItem `json:"tags,omitempty"`
+	Data *runtime.RawExtension `json:"data,omitempty"`
 
 	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
 	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
@@ -702,8 +530,8 @@ func init() {
 	SchemeBuilder.Register(&User{}, &UserList{})
 }
 
-// PetFindbystatusSpec defines the query parameters for PetFindbystatus
-type PetFindbystatusSpec struct {
+// PetFindbystatusQuerySpec defines the query parameters for PetFindbystatusQuery
+type PetFindbystatusQuerySpec struct {
 	// Query parameters for /pet/findByStatus
 
 	// Status values that need to be considered for filter
@@ -732,8 +560,8 @@ type PetFindbystatusSpec struct {
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 }
 
-// PetFindbystatusStatus defines the observed state of PetFindbystatus
-type PetFindbystatusStatus struct {
+// PetFindbystatusQueryStatus defines the observed state of PetFindbystatusQuery
+type PetFindbystatusQueryStatus struct {
 	// State represents the current state of the query
 	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
 	// +optional
@@ -742,6 +570,18 @@ type PetFindbystatusStatus struct {
 	// LastQueryTime is the last time the query was executed
 	// +optional
 	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// LastExecutionTime is the last time the query was executed (alias for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this query has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
 
 	// ResultCount is the number of results returned by the query
 	// +optional
@@ -765,15 +605,15 @@ type PetFindbystatusStatus struct {
 
 	// Results contains the query result from the REST API (single endpoint mode)
 	// +optional
-	Results *PetFindbystatusEndpointResponse `json:"results,omitempty"`
+	Results *PetFindbystatusQueryEndpointResponse `json:"results,omitempty"`
 
 	// Responses contains responses from multiple endpoints (all-healthy strategy)
 	// +optional
-	Responses map[string]PetFindbystatusEndpointResponse `json:"responses,omitempty"`
+	Responses map[string]PetFindbystatusQueryEndpointResponse `json:"responses,omitempty"`
 }
 
-// PetFindbystatusEndpointResponse contains the response from a single endpoint for PetFindbystatus queries
-type PetFindbystatusEndpointResponse struct {
+// PetFindbystatusQueryEndpointResponse contains the response from a single endpoint for PetFindbystatusQuery queries
+type PetFindbystatusQueryEndpointResponse struct {
 	// Success indicates whether the request to this endpoint succeeded
 	Success bool `json:"success"`
 
@@ -801,30 +641,30 @@ type PetFindbystatusEndpointResponse struct {
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// PetFindbystatus is the Schema for the petfindbystatuss API (Query Operation)
-type PetFindbystatus struct {
+// PetFindbystatusQuery is the Schema for the petfindbystatusquerys API (Query Operation)
+type PetFindbystatusQuery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PetFindbystatusSpec   `json:"spec,omitempty"`
-	Status PetFindbystatusStatus `json:"status,omitempty"`
+	Spec   PetFindbystatusQuerySpec   `json:"spec,omitempty"`
+	Status PetFindbystatusQueryStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// PetFindbystatusList contains a list of PetFindbystatus
-type PetFindbystatusList struct {
+// PetFindbystatusQueryList contains a list of PetFindbystatusQuery
+type PetFindbystatusQueryList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PetFindbystatus `json:"items"`
+	Items           []PetFindbystatusQuery `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PetFindbystatus{}, &PetFindbystatusList{})
+	SchemeBuilder.Register(&PetFindbystatusQuery{}, &PetFindbystatusQueryList{})
 }
 
-// PetFindbytagsSpec defines the query parameters for PetFindbytags
-type PetFindbytagsSpec struct {
+// PetFindbytagsQuerySpec defines the query parameters for PetFindbytagsQuery
+type PetFindbytagsQuerySpec struct {
 	// Query parameters for /pet/findByTags
 
 	// Tags to filter by
@@ -853,8 +693,8 @@ type PetFindbytagsSpec struct {
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 }
 
-// PetFindbytagsStatus defines the observed state of PetFindbytags
-type PetFindbytagsStatus struct {
+// PetFindbytagsQueryStatus defines the observed state of PetFindbytagsQuery
+type PetFindbytagsQueryStatus struct {
 	// State represents the current state of the query
 	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
 	// +optional
@@ -863,6 +703,18 @@ type PetFindbytagsStatus struct {
 	// LastQueryTime is the last time the query was executed
 	// +optional
 	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// LastExecutionTime is the last time the query was executed (alias for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this query has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
 
 	// ResultCount is the number of results returned by the query
 	// +optional
@@ -886,15 +738,15 @@ type PetFindbytagsStatus struct {
 
 	// Results contains the query result from the REST API (single endpoint mode)
 	// +optional
-	Results *PetFindbytagsEndpointResponse `json:"results,omitempty"`
+	Results *PetFindbytagsQueryEndpointResponse `json:"results,omitempty"`
 
 	// Responses contains responses from multiple endpoints (all-healthy strategy)
 	// +optional
-	Responses map[string]PetFindbytagsEndpointResponse `json:"responses,omitempty"`
+	Responses map[string]PetFindbytagsQueryEndpointResponse `json:"responses,omitempty"`
 }
 
-// PetFindbytagsEndpointResponse contains the response from a single endpoint for PetFindbytags queries
-type PetFindbytagsEndpointResponse struct {
+// PetFindbytagsQueryEndpointResponse contains the response from a single endpoint for PetFindbytagsQuery queries
+type PetFindbytagsQueryEndpointResponse struct {
 	// Success indicates whether the request to this endpoint succeeded
 	Success bool `json:"success"`
 
@@ -922,30 +774,160 @@ type PetFindbytagsEndpointResponse struct {
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// PetFindbytags is the Schema for the petfindbytagss API (Query Operation)
-type PetFindbytags struct {
+// PetFindbytagsQuery is the Schema for the petfindbytagsquerys API (Query Operation)
+type PetFindbytagsQuery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PetFindbytagsSpec   `json:"spec,omitempty"`
-	Status PetFindbytagsStatus `json:"status,omitempty"`
+	Spec   PetFindbytagsQuerySpec   `json:"spec,omitempty"`
+	Status PetFindbytagsQueryStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// PetFindbytagsList contains a list of PetFindbytags
-type PetFindbytagsList struct {
+// PetFindbytagsQueryList contains a list of PetFindbytagsQuery
+type PetFindbytagsQueryList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PetFindbytags `json:"items"`
+	Items           []PetFindbytagsQuery `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PetFindbytags{}, &PetFindbytagsList{})
+	SchemeBuilder.Register(&PetFindbytagsQuery{}, &PetFindbytagsQueryList{})
 }
 
-// UserLoginSpec defines the query parameters for UserLogin
-type UserLoginSpec struct {
+// StoreInventoryQuerySpec defines the query parameters for StoreInventoryQuery
+type StoreInventoryQuerySpec struct {
+	// Query parameters for /store/inventory
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// StoreInventoryQueryStatus defines the observed state of StoreInventoryQuery
+type StoreInventoryQueryStatus struct {
+	// State represents the current state of the query
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// LastQueryTime is the last time the query was executed
+	// +optional
+	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// LastExecutionTime is the last time the query was executed (alias for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this query has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
+
+	// ResultCount is the number of results returned by the query
+	// +optional
+	ResultCount int `json:"resultCount,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results contains the query result from the REST API (single endpoint mode)
+	// +optional
+	Results *StoreInventoryQueryEndpointResponse `json:"results,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// +optional
+	Responses map[string]StoreInventoryQueryEndpointResponse `json:"responses,omitempty"`
+}
+
+// StoreInventoryQueryEndpointResponse contains the response from a single endpoint for StoreInventoryQuery queries
+type StoreInventoryQueryEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data *runtime.RawExtension `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// LastUpdated is when this endpoint was last queried
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=st;sto
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// StoreInventoryQuery is the Schema for the storeinventoryquerys API (Query Operation)
+type StoreInventoryQuery struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   StoreInventoryQuerySpec   `json:"spec,omitempty"`
+	Status StoreInventoryQueryStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// StoreInventoryQueryList contains a list of StoreInventoryQuery
+type StoreInventoryQueryList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []StoreInventoryQuery `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&StoreInventoryQuery{}, &StoreInventoryQueryList{})
+}
+
+// UserLoginQuerySpec defines the query parameters for UserLoginQuery
+type UserLoginQuerySpec struct {
 	// Query parameters for /user/login
 
 	// The user name for login
@@ -978,8 +960,8 @@ type UserLoginSpec struct {
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 }
 
-// UserLoginStatus defines the observed state of UserLogin
-type UserLoginStatus struct {
+// UserLoginQueryStatus defines the observed state of UserLoginQuery
+type UserLoginQueryStatus struct {
 	// State represents the current state of the query
 	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
 	// +optional
@@ -988,6 +970,18 @@ type UserLoginStatus struct {
 	// LastQueryTime is the last time the query was executed
 	// +optional
 	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// LastExecutionTime is the last time the query was executed (alias for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this query has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
 
 	// ResultCount is the number of results returned by the query
 	// +optional
@@ -1011,15 +1005,15 @@ type UserLoginStatus struct {
 
 	// Results contains the query result from the REST API (single endpoint mode)
 	// +optional
-	Results *UserLoginEndpointResponse `json:"results,omitempty"`
+	Results *UserLoginQueryEndpointResponse `json:"results,omitempty"`
 
 	// Responses contains responses from multiple endpoints (all-healthy strategy)
 	// +optional
-	Responses map[string]UserLoginEndpointResponse `json:"responses,omitempty"`
+	Responses map[string]UserLoginQueryEndpointResponse `json:"responses,omitempty"`
 }
 
-// UserLoginEndpointResponse contains the response from a single endpoint for UserLogin queries
-type UserLoginEndpointResponse struct {
+// UserLoginQueryEndpointResponse contains the response from a single endpoint for UserLoginQuery queries
+type UserLoginQueryEndpointResponse struct {
 	// Success indicates whether the request to this endpoint succeeded
 	Success bool `json:"success"`
 
@@ -1048,30 +1042,30 @@ type UserLoginEndpointResponse struct {
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// UserLogin is the Schema for the userlogins API (Query Operation)
-type UserLogin struct {
+// UserLoginQuery is the Schema for the userloginquerys API (Query Operation)
+type UserLoginQuery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   UserLoginSpec   `json:"spec,omitempty"`
-	Status UserLoginStatus `json:"status,omitempty"`
+	Spec   UserLoginQuerySpec   `json:"spec,omitempty"`
+	Status UserLoginQueryStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// UserLoginList contains a list of UserLogin
-type UserLoginList struct {
+// UserLoginQueryList contains a list of UserLoginQuery
+type UserLoginQueryList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []UserLogin `json:"items"`
+	Items           []UserLoginQuery `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&UserLogin{}, &UserLoginList{})
+	SchemeBuilder.Register(&UserLoginQuery{}, &UserLoginQueryList{})
 }
 
-// UserLogoutSpec defines the query parameters for UserLogout
-type UserLogoutSpec struct {
+// UserLogoutQuerySpec defines the query parameters for UserLogoutQuery
+type UserLogoutQuerySpec struct {
 	// Query parameters for /user/logout
 
 	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
@@ -1096,8 +1090,8 @@ type UserLogoutSpec struct {
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 }
 
-// UserLogoutStatus defines the observed state of UserLogout
-type UserLogoutStatus struct {
+// UserLogoutQueryStatus defines the observed state of UserLogoutQuery
+type UserLogoutQueryStatus struct {
 	// State represents the current state of the query
 	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
 	// +optional
@@ -1106,6 +1100,18 @@ type UserLogoutStatus struct {
 	// LastQueryTime is the last time the query was executed
 	// +optional
 	LastQueryTime *metav1.Time `json:"lastQueryTime,omitempty"`
+
+	// LastExecutionTime is the last time the query was executed (alias for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this query has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
 
 	// ResultCount is the number of results returned by the query
 	// +optional
@@ -1129,15 +1135,15 @@ type UserLogoutStatus struct {
 
 	// Results contains the query result from the REST API (single endpoint mode)
 	// +optional
-	Results *UserLogoutEndpointResponse `json:"results,omitempty"`
+	Results *UserLogoutQueryEndpointResponse `json:"results,omitempty"`
 
 	// Responses contains responses from multiple endpoints (all-healthy strategy)
 	// +optional
-	Responses map[string]UserLogoutEndpointResponse `json:"responses,omitempty"`
+	Responses map[string]UserLogoutQueryEndpointResponse `json:"responses,omitempty"`
 }
 
-// UserLogoutEndpointResponse contains the response from a single endpoint for UserLogout queries
-type UserLogoutEndpointResponse struct {
+// UserLogoutQueryEndpointResponse contains the response from a single endpoint for UserLogoutQuery queries
+type UserLogoutQueryEndpointResponse struct {
 	// Success indicates whether the request to this endpoint succeeded
 	Success bool `json:"success"`
 
@@ -1166,30 +1172,214 @@ type UserLogoutEndpointResponse struct {
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// UserLogout is the Schema for the userlogouts API (Query Operation)
-type UserLogout struct {
+// UserLogoutQuery is the Schema for the userlogoutquerys API (Query Operation)
+type UserLogoutQuery struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   UserLogoutSpec   `json:"spec,omitempty"`
-	Status UserLogoutStatus `json:"status,omitempty"`
+	Spec   UserLogoutQuerySpec   `json:"spec,omitempty"`
+	Status UserLogoutQueryStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// UserLogoutList contains a list of UserLogout
-type UserLogoutList struct {
+// UserLogoutQueryList contains a list of UserLogoutQuery
+type UserLogoutQueryList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []UserLogout `json:"items"`
+	Items           []UserLogoutQuery `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&UserLogout{}, &UserLogoutList{})
+	SchemeBuilder.Register(&UserLogoutQuery{}, &UserLogoutQueryList{})
 }
 
-// PetUploadimageResult represents the response from the PetUploadimage action
-type PetUploadimageResult struct {
+// PetActionResult represents the response from the PetAction action
+type PetActionResult struct {
+	// +optional
+	Category PetActionResultCategory `json:"category,omitempty"`
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+	// +optional
+	Name string `json:"name,omitempty"`
+	// +optional
+	PhotoUrls []string `json:"photoUrls,omitempty"`
+	// pet status in the store
+	// +optional
+	Status string `json:"status,omitempty"`
+	// +optional
+	Tags []PetActionResultTagsItem `json:"tags,omitempty"`
+}
+
+// PetActionSpec defines the parameters for the PetAction action
+type PetActionSpec struct {
+	// Action parameters for /pet
+
+	// Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.
+	// +optional
+	ReExecuteInterval *metav1.Duration `json:"reExecuteInterval,omitempty"`
+
+	// +optional
+	Category PetActionCategory `json:"category,omitempty"`
+
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
+	PhotoUrls []string `json:"photoUrls"`
+
+	// pet status in the store
+	// +optional
+	// +kubebuilder:validation:Enum=available;pending;sold
+	// +kubebuilder:validation:Enum=available;pending;sold
+	Status string `json:"status,omitempty"`
+
+	// +optional
+	Tags []PetActionTagsItem `json:"tags,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// PetActionStatus defines the observed state of PetAction
+type PetActionStatus struct {
+	// State represents the current state of the action
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ExecutedAt is when the action was executed
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+
+	// CompletedAt is when the action completed (success or failure)
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// LastExecutionTime is the last time the action was executed (for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this action has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
+
+	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
+	// +optional
+	HTTPStatusCode int `json:"httpStatusCode,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Result contains the response from the action execution (single endpoint mode)
+	// +optional
+	Result *PetActionEndpointResponse `json:"result,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]PetActionEndpointResponse `json:"responses,omitempty"`
+
+	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
+	// +optional
+	SuccessCount int `json:"successCount,omitempty"`
+
+	// TotalEndpoints is the total number of endpoints targeted (all-healthy strategy)
+	// +optional
+	TotalEndpoints int `json:"totalEndpoints,omitempty"`
+}
+
+// PetActionEndpointResponse contains the response from a single endpoint for PetAction actions
+type PetActionEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data *PetActionResult `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// ExecutedAt is when this endpoint was called
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pe;pet
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// PetAction is the Schema for the petactions API (Action Operation)
+type PetAction struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   PetActionSpec   `json:"spec,omitempty"`
+	Status PetActionStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// PetActionList contains a list of PetAction
+type PetActionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []PetAction `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&PetAction{}, &PetActionList{})
+}
+
+// PetUploadimageActionResult represents the response from the PetUploadimageAction action
+type PetUploadimageActionResult struct {
 	// +optional
 	Code *int32 `json:"code,omitempty"`
 	// +optional
@@ -1198,13 +1388,17 @@ type PetUploadimageResult struct {
 	Type string `json:"type,omitempty"`
 }
 
-// PetUploadimageSpec defines the parameters for the PetUploadimage action
-type PetUploadimageSpec struct {
+// PetUploadimageActionSpec defines the parameters for the PetUploadimageAction action
+type PetUploadimageActionSpec struct {
 	// Action parameters for /pet/{petId}/uploadImage
 
 	// ID of the parent Pet resource
 	// +kubebuilder:validation:Required
 	PetId string `json:"petId"`
+
+	// Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.
+	// +optional
+	ReExecuteInterval *metav1.Duration `json:"reExecuteInterval,omitempty"`
 
 	// Additional Metadata
 	// +optional
@@ -1232,8 +1426,8 @@ type PetUploadimageSpec struct {
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 }
 
-// PetUploadimageStatus defines the observed state of PetUploadimage
-type PetUploadimageStatus struct {
+// PetUploadimageActionStatus defines the observed state of PetUploadimageAction
+type PetUploadimageActionStatus struct {
 	// State represents the current state of the action
 	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
 	// +optional
@@ -1246,6 +1440,18 @@ type PetUploadimageStatus struct {
 	// CompletedAt is when the action completed (success or failure)
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// LastExecutionTime is the last time the action was executed (for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this action has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
 
 	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
 	// +optional
@@ -1269,12 +1475,12 @@ type PetUploadimageStatus struct {
 
 	// Result contains the response from the action execution (single endpoint mode)
 	// +optional
-	Result *PetUploadimageEndpointResponse `json:"result,omitempty"`
+	Result *PetUploadimageActionEndpointResponse `json:"result,omitempty"`
 
 	// Responses contains responses from multiple endpoints (all-healthy strategy)
 	// Keys are endpoint URLs, values are the response data
 	// +optional
-	Responses map[string]PetUploadimageEndpointResponse `json:"responses,omitempty"`
+	Responses map[string]PetUploadimageActionEndpointResponse `json:"responses,omitempty"`
 
 	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
 	// +optional
@@ -1285,8 +1491,8 @@ type PetUploadimageStatus struct {
 	TotalEndpoints int `json:"totalEndpoints,omitempty"`
 }
 
-// PetUploadimageEndpointResponse contains the response from a single endpoint for PetUploadimage actions
-type PetUploadimageEndpointResponse struct {
+// PetUploadimageActionEndpointResponse contains the response from a single endpoint for PetUploadimageAction actions
+type PetUploadimageActionEndpointResponse struct {
 	// Success indicates whether the request to this endpoint succeeded
 	Success bool `json:"success"`
 
@@ -1296,7 +1502,7 @@ type PetUploadimageEndpointResponse struct {
 
 	// Data contains the response body from the endpoint
 	// +optional
-	Data *PetUploadimageResult `json:"data,omitempty"`
+	Data *PetUploadimageActionResult `json:"data,omitempty"`
 
 	// Error contains the error message if the request failed
 	// +optional
@@ -1314,24 +1520,567 @@ type PetUploadimageEndpointResponse struct {
 // +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// PetUploadimage is the Schema for the petuploadimages API (Action Operation)
-type PetUploadimage struct {
+// PetUploadimageAction is the Schema for the petuploadimageactions API (Action Operation)
+type PetUploadimageAction struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PetUploadimageSpec   `json:"spec,omitempty"`
-	Status PetUploadimageStatus `json:"status,omitempty"`
+	Spec   PetUploadimageActionSpec   `json:"spec,omitempty"`
+	Status PetUploadimageActionStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// PetUploadimageList contains a list of PetUploadimage
-type PetUploadimageList struct {
+// PetUploadimageActionList contains a list of PetUploadimageAction
+type PetUploadimageActionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PetUploadimage `json:"items"`
+	Items           []PetUploadimageAction `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PetUploadimage{}, &PetUploadimageList{})
+	SchemeBuilder.Register(&PetUploadimageAction{}, &PetUploadimageActionList{})
+}
+
+// StoreOrderActionResult represents the response from the StoreOrderAction action
+type StoreOrderActionResult struct {
+	// +optional
+	Complete bool `json:"complete,omitempty"`
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+	// +optional
+	PetId *int64 `json:"petId,omitempty"`
+	// +optional
+	Quantity *int32 `json:"quantity,omitempty"`
+	// +optional
+	ShipDate *metav1.Time `json:"shipDate,omitempty"`
+	// Order Status
+	// +optional
+	Status string `json:"status,omitempty"`
+}
+
+// StoreOrderActionSpec defines the parameters for the StoreOrderAction action
+type StoreOrderActionSpec struct {
+	// Action parameters for /store/order
+
+	// Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.
+	// +optional
+	ReExecuteInterval *metav1.Duration `json:"reExecuteInterval,omitempty"`
+
+	// +optional
+	Complete bool `json:"complete,omitempty"`
+
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+
+	// +optional
+	PetId *int64 `json:"petId,omitempty"`
+
+	// +optional
+	Quantity *int32 `json:"quantity,omitempty"`
+
+	// +optional
+	ShipDate *metav1.Time `json:"shipDate,omitempty"`
+
+	// Order Status
+	// +optional
+	// +kubebuilder:validation:Enum=placed;approved;delivered
+	// +kubebuilder:validation:Enum=placed;approved;delivered
+	Status string `json:"status,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// StoreOrderActionStatus defines the observed state of StoreOrderAction
+type StoreOrderActionStatus struct {
+	// State represents the current state of the action
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ExecutedAt is when the action was executed
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+
+	// CompletedAt is when the action completed (success or failure)
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// LastExecutionTime is the last time the action was executed (for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this action has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
+
+	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
+	// +optional
+	HTTPStatusCode int `json:"httpStatusCode,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Result contains the response from the action execution (single endpoint mode)
+	// +optional
+	Result *StoreOrderActionEndpointResponse `json:"result,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]StoreOrderActionEndpointResponse `json:"responses,omitempty"`
+
+	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
+	// +optional
+	SuccessCount int `json:"successCount,omitempty"`
+
+	// TotalEndpoints is the total number of endpoints targeted (all-healthy strategy)
+	// +optional
+	TotalEndpoints int `json:"totalEndpoints,omitempty"`
+}
+
+// StoreOrderActionEndpointResponse contains the response from a single endpoint for StoreOrderAction actions
+type StoreOrderActionEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data *StoreOrderActionResult `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// ExecutedAt is when this endpoint was called
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=st;sto
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// StoreOrderAction is the Schema for the storeorderactions API (Action Operation)
+type StoreOrderAction struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   StoreOrderActionSpec   `json:"spec,omitempty"`
+	Status StoreOrderActionStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// StoreOrderActionList contains a list of StoreOrderAction
+type StoreOrderActionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []StoreOrderAction `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&StoreOrderAction{}, &StoreOrderActionList{})
+}
+
+// UserActionResult represents the response from the UserAction action
+type UserActionResult struct {
+	// +optional
+	Email string `json:"email,omitempty"`
+	// +optional
+	FirstName string `json:"firstName,omitempty"`
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+	// +optional
+	LastName string `json:"lastName,omitempty"`
+	// +optional
+	Password string `json:"password,omitempty"`
+	// +optional
+	Phone string `json:"phone,omitempty"`
+	// User Status
+	// +optional
+	UserStatus *int32 `json:"userStatus,omitempty"`
+	// +optional
+	Username string `json:"username,omitempty"`
+}
+
+// UserActionSpec defines the parameters for the UserAction action
+type UserActionSpec struct {
+	// Action parameters for /user
+
+	// Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.
+	// +optional
+	ReExecuteInterval *metav1.Duration `json:"reExecuteInterval,omitempty"`
+
+	// +optional
+	Email string `json:"email,omitempty"`
+
+	// +optional
+	FirstName string `json:"firstName,omitempty"`
+
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+
+	// +optional
+	LastName string `json:"lastName,omitempty"`
+
+	// +optional
+	Password string `json:"password,omitempty"`
+
+	// +optional
+	Phone string `json:"phone,omitempty"`
+
+	// User Status
+	// +optional
+	UserStatus *int32 `json:"userStatus,omitempty"`
+
+	// +optional
+	Username string `json:"username,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// UserActionStatus defines the observed state of UserAction
+type UserActionStatus struct {
+	// State represents the current state of the action
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ExecutedAt is when the action was executed
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+
+	// CompletedAt is when the action completed (success or failure)
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// LastExecutionTime is the last time the action was executed (for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this action has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
+
+	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
+	// +optional
+	HTTPStatusCode int `json:"httpStatusCode,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Result contains the response from the action execution (single endpoint mode)
+	// +optional
+	Result *UserActionEndpointResponse `json:"result,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]UserActionEndpointResponse `json:"responses,omitempty"`
+
+	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
+	// +optional
+	SuccessCount int `json:"successCount,omitempty"`
+
+	// TotalEndpoints is the total number of endpoints targeted (all-healthy strategy)
+	// +optional
+	TotalEndpoints int `json:"totalEndpoints,omitempty"`
+}
+
+// UserActionEndpointResponse contains the response from a single endpoint for UserAction actions
+type UserActionEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data *UserActionResult `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// ExecutedAt is when this endpoint was called
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=us;use
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// UserAction is the Schema for the useractions API (Action Operation)
+type UserAction struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   UserActionSpec   `json:"spec,omitempty"`
+	Status UserActionStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// UserActionList contains a list of UserAction
+type UserActionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []UserAction `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&UserAction{}, &UserActionList{})
+}
+
+// UserCreatewithlistActionResult represents the response from the UserCreatewithlistAction action
+type UserCreatewithlistActionResult struct {
+	// +optional
+	Email string `json:"email,omitempty"`
+	// +optional
+	FirstName string `json:"firstName,omitempty"`
+	// +optional
+	Id *int64 `json:"id,omitempty"`
+	// +optional
+	LastName string `json:"lastName,omitempty"`
+	// +optional
+	Password string `json:"password,omitempty"`
+	// +optional
+	Phone string `json:"phone,omitempty"`
+	// User Status
+	// +optional
+	UserStatus *int32 `json:"userStatus,omitempty"`
+	// +optional
+	Username string `json:"username,omitempty"`
+}
+
+// UserCreatewithlistActionSpec defines the parameters for the UserCreatewithlistAction action
+type UserCreatewithlistActionSpec struct {
+	// Action parameters for /user/createWithList
+
+	// Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.
+	// +optional
+	ReExecuteInterval *metav1.Duration `json:"reExecuteInterval,omitempty"`
+
+	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+
+	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// +optional
+	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
+
+	// TargetStatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
+
+	// TargetDeployment specifies a Deployment name to route requests to.
+	// +optional
+	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetNamespace specifies the namespace to look for the target workload.
+	// +optional
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// UserCreatewithlistActionStatus defines the observed state of UserCreatewithlistAction
+type UserCreatewithlistActionStatus struct {
+	// State represents the current state of the action
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ExecutedAt is when the action was executed
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+
+	// CompletedAt is when the action completed (success or failure)
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// LastExecutionTime is the last time the action was executed (for re-execution support)
+	// +optional
+	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
+
+	// NextExecutionTime is when the next periodic execution will occur
+	// +optional
+	NextExecutionTime *metav1.Time `json:"nextExecutionTime,omitempty"`
+
+	// ExecutionCount is the number of times this action has been executed
+	// +optional
+	ExecutionCount int64 `json:"executionCount,omitempty"`
+
+	// HTTPStatusCode is the HTTP status code from the action response (single endpoint mode)
+	// +optional
+	HTTPStatusCode int `json:"httpStatusCode,omitempty"`
+
+	// Message is a human-readable message about the current state
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of an object's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// ObservedGeneration is the last observed generation
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Result contains the response from the action execution (single endpoint mode)
+	// +optional
+	Result *UserCreatewithlistActionEndpointResponse `json:"result,omitempty"`
+
+	// Responses contains responses from multiple endpoints (all-healthy strategy)
+	// Keys are endpoint URLs, values are the response data
+	// +optional
+	Responses map[string]UserCreatewithlistActionEndpointResponse `json:"responses,omitempty"`
+
+	// SuccessCount is the number of endpoints that executed successfully (all-healthy strategy)
+	// +optional
+	SuccessCount int `json:"successCount,omitempty"`
+
+	// TotalEndpoints is the total number of endpoints targeted (all-healthy strategy)
+	// +optional
+	TotalEndpoints int `json:"totalEndpoints,omitempty"`
+}
+
+// UserCreatewithlistActionEndpointResponse contains the response from a single endpoint for UserCreatewithlistAction actions
+type UserCreatewithlistActionEndpointResponse struct {
+	// Success indicates whether the request to this endpoint succeeded
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	// +optional
+	StatusCode int `json:"statusCode,omitempty"`
+
+	// Data contains the response body from the endpoint
+	// +optional
+	Data *UserCreatewithlistActionResult `json:"data,omitempty"`
+
+	// Error contains the error message if the request failed
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// ExecutedAt is when this endpoint was called
+	// +optional
+	ExecutedAt *metav1.Time `json:"executedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=us;use
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// UserCreatewithlistAction is the Schema for the usercreatewithlistactions API (Action Operation)
+type UserCreatewithlistAction struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   UserCreatewithlistActionSpec   `json:"spec,omitempty"`
+	Status UserCreatewithlistActionStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// UserCreatewithlistActionList contains a list of UserCreatewithlistAction
+type UserCreatewithlistActionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []UserCreatewithlistAction `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&UserCreatewithlistAction{}, &UserCreatewithlistActionList{})
 }

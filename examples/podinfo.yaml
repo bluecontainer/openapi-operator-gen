@@ -1,0 +1,414 @@
+openapi: 3.0.1
+info:
+  title: Podinfo API
+  description: Go microservice template for Kubernetes.
+  contact:
+    name: Source Code
+    url: https://github.com/stefanprodan/podinfo
+  license:
+    name: MIT License
+    url: https://github.com/stefanprodan/podinfo/blob/master/LICENSE
+  version: "2.0"
+servers:
+- url: /
+paths:
+  /:
+    get:
+      tags:
+      - HTTP API
+      summary: Index
+      description: renders podinfo UI
+      responses:
+        "200":
+          description: OK
+          content:
+            text/html:
+              schema:
+                type: string
+  /api/echo:
+    post:
+      tags:
+      - HTTP API
+      summary: Echo
+      description: forwards the call to the backend service and echos the posted content
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+  /api/info:
+    get:
+      tags:
+      - HTTP API
+      summary: Runtime information
+      description: returns the runtime information
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.RuntimeResponse'
+  /cache/{key}:
+    get:
+      tags:
+      - HTTP API
+      summary: Get payload from cache
+      description: returns the content from cache if key exists
+      parameters:
+      - name: key
+        in: path
+        description: Key to load from cache
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+    post:
+      tags:
+      - HTTP API
+      summary: Save payload in cache
+      description: writes the posted content in cache
+      parameters:
+      - name: key
+        in: path
+        description: Key to save to
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          description: Accepted
+          content: {}
+    delete:
+      tags:
+      - HTTP API
+      summary: Delete payload from cache
+      description: deletes the key and its value from cache
+      parameters:
+      - name: key
+        in: path
+        description: Key to delete
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          description: Accepted
+          content: {}
+  /chunked/{seconds}:
+    get:
+      tags:
+      - HTTP API
+      summary: Chunked transfer encoding
+      description: uses transfer-encoding type chunked to give a partial response
+        and then waits for the specified period
+      parameters:
+      - name: seconds
+        in: path
+        description: seconds to wait for
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+  /delay/{seconds}:
+    get:
+      tags:
+      - HTTP API
+      summary: Delay
+      description: waits for the specified period
+      parameters:
+      - name: seconds
+        in: path
+        description: seconds to wait for
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+  /env:
+    get:
+      tags:
+      - HTTP API
+      summary: Environment
+      description: returns the environment variables as a JSON array
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /headers:
+    get:
+      tags:
+      - HTTP API
+      summary: Headers
+      description: returns a JSON array with the request HTTP headers
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /healthz:
+    get:
+      tags:
+      - Kubernetes
+      summary: Liveness check
+      description: used by Kubernetes liveness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+  /metrics:
+    get:
+      tags:
+      - Kubernetes
+      summary: Prometheus metrics
+      description: returns HTTP requests duration and Go runtime metrics
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+  /panic:
+    get:
+      tags:
+      - HTTP API
+      summary: Panic
+      description: crashes the process with exit code 255
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+  /readyz:
+    get:
+      tags:
+      - Kubernetes
+      summary: Readiness check
+      description: used by Kubernetes readiness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+  /readyz/disable:
+    post:
+      tags:
+      - Kubernetes
+      summary: Disable ready state
+      description: signals the Kubernetes LB to stop sending requests to this instance
+      responses:
+        "202":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+  /readyz/enable:
+    post:
+      tags:
+      - Kubernetes
+      summary: Enable ready state
+      description: signals the Kubernetes LB that this instance is ready to receive
+        traffic
+      responses:
+        "202":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+  /status/{code}:
+    get:
+      tags:
+      - HTTP API
+      summary: Status code
+      description: sets the response status code to the specified code
+      parameters:
+      - name: code
+        in: path
+        description: status code to return
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+  /store:
+    post:
+      tags:
+      - HTTP API
+      summary: Upload file
+      description: writes the posted content to disk at /data/hash and returns the
+        SHA1 hash of the content
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+  /store/{hash}:
+    get:
+      tags:
+      - HTTP API
+      summary: Download file
+      description: returns the content of the file /data/hash if exists
+      parameters:
+      - name: hash
+        in: path
+        description: hash value
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: file
+          content:
+            text/plain:
+              schema:
+                type: string
+  /token:
+    post:
+      tags:
+      - HTTP API
+      summary: Generate JWT token
+      description: issues a JWT token valid for one minute
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.TokenResponse'
+  /token/validate:
+    post:
+      tags:
+      - HTTP API
+      summary: Validate JWT token
+      description: validates the JWT token
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.TokenValidationResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: string
+  /version:
+    get:
+      tags:
+      - HTTP API
+      summary: Version
+      description: returns podinfo version and git commit hash
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+  /ws/echo:
+    post:
+      tags:
+      - HTTP API
+      summary: Echo over websockets
+      description: echos content via websockets
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/http.MapResponse'
+components:
+  schemas:
+    http.MapResponse:
+      type: object
+      additionalProperties:
+        type: string
+    http.RuntimeResponse:
+      type: object
+      properties:
+        color:
+          type: string
+        goarch:
+          type: string
+        goos:
+          type: string
+        hostname:
+          type: string
+        logo:
+          type: string
+        message:
+          type: string
+        num_cpu:
+          type: string
+        num_goroutine:
+          type: string
+        revision:
+          type: string
+        runtime:
+          type: string
+        version:
+          type: string
+    http.TokenResponse:
+      type: object
+      properties:
+        expires_at:
+          type: string
+        token:
+          type: string
+    http.TokenValidationResponse:
+      type: object
+      properties:
+        expires_at:
+          type: string
+        token_name:
+          type: string
+x-original-swagger-version: "2.0"
+

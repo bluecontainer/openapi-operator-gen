@@ -46,10 +46,11 @@ type ControllerTemplateData struct {
 	// Action endpoint fields
 	IsAction          bool                     // True if this is an action CRD
 	ActionPath        string                   // Full action path (e.g., /pet/{petId}/uploadImage)
-	ActionMethod      string                   // HTTP method (POST or PUT)
+	ActionMethod      string                   // HTTP method (POST, PUT, or GET)
 	ParentResource    string                   // Parent resource kind (e.g., "Pet")
 	ParentIDParam     string                   // Parent ID parameter name (e.g., "petId")
 	ParentIDField     string                   // Go field name for parent ID (e.g., "PetId")
+	HasParentID       bool                     // True if the action has a parent ID parameter
 	ActionName        string                   // Action name (e.g., "uploadImage")
 	PathParams        []ActionPathParam        // Path parameters other than parent ID
 	RequestBodyFields []ActionRequestBodyField // Request body fields
@@ -95,6 +96,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		if err := g.generateController(controllerDir, crd); err != nil {
 			return fmt.Errorf("failed to generate controller for %s: %w", crd.Kind, err)
 		}
+	}
+
+	// Generate utils.go with shared utility functions
+	if err := g.generateUtils(controllerDir); err != nil {
+		return fmt.Errorf("failed to generate utils.go: %w", err)
 	}
 
 	// Generate main.go
@@ -150,6 +156,7 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		ParentResource: crd.ParentResource,
 		ParentIDParam:  crd.ParentIDParam,
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
+		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
 	}
 
@@ -197,6 +204,36 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 	}
 
 	tmpl, err := template.New("controller").Parse(tmplContent)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// UtilsTemplateData holds data for utils template
+type UtilsTemplateData struct {
+	Year int
+}
+
+func (g *ControllerGenerator) generateUtils(outputDir string) error {
+	data := UtilsTemplateData{
+		Year: time.Now().Year(),
+	}
+
+	fp := filepath.Join(outputDir, "utils.go")
+
+	tmpl, err := template.New("utils").Parse(templates.UtilsTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}

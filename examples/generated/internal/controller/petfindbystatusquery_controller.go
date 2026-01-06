@@ -30,12 +30,12 @@ import (
 )
 
 const (
-	petfindbytagsFinalizer    = "petstore.example.com/finalizer"
-	petfindbytagsRequeueAfter = time.Second * 30
+	petfindbystatusqueryFinalizer    = "petstore.example.com/finalizer"
+	petfindbystatusqueryRequeueAfter = time.Second * 30
 )
 
-// PetFindbytagsReconciler reconciles a PetFindbytags query object
-type PetFindbytagsReconciler struct {
+// PetFindbystatusQueryReconciler reconciles a PetFindbystatusQuery query object
+type PetFindbystatusQueryReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	HTTPClient       *http.Client
@@ -44,35 +44,35 @@ type PetFindbytagsReconciler struct {
 	BaseURL string
 }
 
-// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbytagss,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbytagss/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbystatusquerys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbystatusquerys/status,verbs=get;update;patch
 
 // Reconcile executes the query and updates the status with results
-func (r *PetFindbytagsReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *PetFindbystatusQueryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the PetFindbytags instance
-	instance := &v1alpha1.PetFindbytags{}
+	// Fetch the PetFindbystatusQuery instance
+	instance := &v1alpha1.PetFindbystatusQuery{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("PetFindbytags resource not found. Ignoring since object must be deleted")
+			logger.Info("PetFindbystatusQuery resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to get PetFindbytags")
+		logger.Error(err, "Failed to get PetFindbystatusQuery")
 		return ctrl.Result{}, err
 	}
 
 	// Execute the query
 	if err := r.executeQuery(ctx, instance); err != nil {
 		r.updateStatus(ctx, instance, "Failed", err.Error(), 0)
-		return ctrl.Result{RequeueAfter: petfindbytagsRequeueAfter}, err
+		return ctrl.Result{RequeueAfter: petfindbystatusqueryRequeueAfter}, err
 	}
 
-	return ctrl.Result{RequeueAfter: petfindbytagsRequeueAfter}, nil
+	return ctrl.Result{RequeueAfter: petfindbystatusqueryRequeueAfter}, nil
 }
 
-func (r *PetFindbytagsReconciler) getBaseURL(ctx context.Context) (string, error) {
+func (r *PetFindbystatusQueryReconciler) getBaseURL(ctx context.Context) (string, error) {
 	if r.EndpointResolver != nil {
 		return r.EndpointResolver.GetEndpoint()
 	}
@@ -82,7 +82,7 @@ func (r *PetFindbytagsReconciler) getBaseURL(ctx context.Context) (string, error
 	return r.BaseURL, nil
 }
 
-func (r *PetFindbytagsReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
+func (r *PetFindbystatusQueryReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
 			return "", fmt.Errorf("targetPodOrdinal is required when using by-ordinal strategy")
@@ -93,7 +93,7 @@ func (r *PetFindbytagsReconciler) getBaseURLByOrdinal(ctx context.Context, ordin
 }
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
-func (r *PetFindbytagsReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.PetFindbytags) (string, error) {
+func (r *PetFindbystatusQueryReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.PetFindbystatusQuery) (string, error) {
 	if r.EndpointResolver != nil {
 		namespace := instance.Spec.TargetNamespace
 		if namespace == "" {
@@ -121,8 +121,8 @@ func (r *PetFindbytagsReconciler) resolveBaseURL(ctx context.Context, instance *
 }
 
 // buildQueryURL builds the query URL from the spec parameters
-func (r *PetFindbytagsReconciler) buildQueryURL(baseURL string, instance *v1alpha1.PetFindbytags) string {
-	queryURL := baseURL + "/pet/findByTags"
+func (r *PetFindbystatusQueryReconciler) buildQueryURL(baseURL string, instance *v1alpha1.PetFindbystatusQuery) string {
+	queryURL := baseURL + "/pet/findByStatus"
 
 	params := url.Values{}
 	specVal := reflect.ValueOf(instance.Spec)
@@ -177,7 +177,7 @@ func (r *PetFindbytagsReconciler) buildQueryURL(baseURL string, instance *v1alph
 }
 
 // executeQueryToEndpoint executes the query against a single endpoint
-func (r *PetFindbytagsReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.PetFindbytags, baseURL string) ([]byte, int, error) {
+func (r *PetFindbystatusQueryReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.PetFindbystatusQuery, baseURL string) ([]byte, int, error) {
 	logger := log.FromContext(ctx)
 
 	queryURL := r.buildQueryURL(baseURL, instance)
@@ -208,7 +208,7 @@ func (r *PetFindbytagsReconciler) executeQueryToEndpoint(ctx context.Context, in
 }
 
 // parseResults parses the response body into typed results
-func (r *PetFindbytagsReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int, error) {
+func (r *PetFindbystatusQueryReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int, error) {
 	var results []v1alpha1.Pet
 	if err := json.Unmarshal(body, &results); err != nil {
 		return nil, 0, fmt.Errorf("failed to unmarshal results: %w", err)
@@ -216,7 +216,7 @@ func (r *PetFindbytagsReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int
 	return results, len(results), nil
 }
 
-func (r *PetFindbytagsReconciler) executeQuery(ctx context.Context, instance *v1alpha1.PetFindbytags) error {
+func (r *PetFindbystatusQueryReconciler) executeQuery(ctx context.Context, instance *v1alpha1.PetFindbystatusQuery) error {
 	logger := log.FromContext(ctx)
 	now := metav1.Now()
 
@@ -229,13 +229,13 @@ func (r *PetFindbytagsReconciler) executeQuery(ctx context.Context, instance *v1
 
 		if len(baseURLs) > 1 {
 			// Multiple endpoints - collect responses from all
-			responses := make(map[string]v1alpha1.PetFindbytagsEndpointResponse)
-			var firstSuccessResp *v1alpha1.PetFindbytagsEndpointResponse
+			responses := make(map[string]v1alpha1.PetFindbystatusQueryEndpointResponse)
+			var firstSuccessResp *v1alpha1.PetFindbystatusQueryEndpointResponse
 			var firstResultCount int
 			successCount := 0
 
 			for _, baseURL := range baseURLs {
-				endpointResp := v1alpha1.PetFindbytagsEndpointResponse{
+				endpointResp := v1alpha1.PetFindbystatusQueryEndpointResponse{
 					LastUpdated: &now,
 				}
 
@@ -299,7 +299,7 @@ func (r *PetFindbytagsReconciler) executeQuery(ctx context.Context, instance *v1
 	body, statusCode, err := r.executeQueryToEndpoint(ctx, instance, baseURL)
 
 	// Build EndpointResponse for Results
-	endpointResp := v1alpha1.PetFindbytagsEndpointResponse{
+	endpointResp := v1alpha1.PetFindbystatusQueryEndpointResponse{
 		LastUpdated: &now,
 		StatusCode:  statusCode,
 	}
@@ -334,7 +334,7 @@ func (r *PetFindbytagsReconciler) executeQuery(ctx context.Context, instance *v1
 	return nil
 }
 
-func (r *PetFindbytagsReconciler) updateStatus(ctx context.Context, instance *v1alpha1.PetFindbytags, state, message string, resultCount int) {
+func (r *PetFindbystatusQueryReconciler) updateStatus(ctx context.Context, instance *v1alpha1.PetFindbystatusQuery, state, message string, resultCount int) {
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
@@ -366,8 +366,8 @@ func (r *PetFindbytagsReconciler) updateStatus(ctx context.Context, instance *v1
 }
 
 // SetupWithManager sets up the controller with the Manager
-func (r *PetFindbytagsReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *PetFindbystatusQueryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.PetFindbytags{}).
+		For(&v1alpha1.PetFindbystatusQuery{}).
 		Complete(r)
 }

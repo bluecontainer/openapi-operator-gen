@@ -413,6 +413,7 @@ type ControllerTemplateData struct {
 	ParentResource    string
 	ParentIDParam     string
 	ParentIDField     string
+	HasParentID       bool
 	ActionName        string
 	PathParams        []ActionPathParam
 	RequestBodyFields []ActionRequestBodyField
@@ -559,6 +560,7 @@ func TestActionControllerTemplateExecution(t *testing.T) {
 		ParentResource: "Pet",
 		ParentIDParam:  "petId",
 		ParentIDField:  "PetId",
+		HasParentID:    true,
 		ActionName:     "uploadImage",
 		HasRequestBody: true,
 		RequestBodyFields: []ActionRequestBodyField{
@@ -612,6 +614,7 @@ func TestActionControllerTemplateWithTypedResults(t *testing.T) {
 		ParentResource:  "Pet",
 		ParentIDParam:   "petId",
 		ParentIDField:   "PetId",
+		HasParentID:     true,
 		ActionName:      "uploadImage",
 		HasRequestBody:  true,
 		HasTypedResults: true,
@@ -659,8 +662,9 @@ func TestActionControllerTemplateWithArrayTypedResults(t *testing.T) {
 		ActionPath:      "/pet/batch",
 		ActionMethod:    "POST",
 		ParentResource:  "Pet",
-		ParentIDParam:   "petId",
-		ParentIDField:   "PetId",
+		ParentIDParam:   "",
+		ParentIDField:   "",
+		HasParentID:     false,
 		ActionName:      "batch",
 		HasRequestBody:  false,
 		HasTypedResults: true,

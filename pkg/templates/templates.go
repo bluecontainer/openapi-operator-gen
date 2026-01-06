@@ -43,3 +43,8 @@ var EndpointResolverTemplate string
 //
 //go:embed main.go.tmpl
 var MainTemplate string
+
+// UtilsTemplate is the template for utility functions shared across controllers
+//
+//go:embed utils.go.tmpl
+var UtilsTemplate string

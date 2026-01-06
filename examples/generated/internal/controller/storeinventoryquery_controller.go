@@ -30,12 +30,12 @@ import (
 )
 
 const (
-	petfindbystatusFinalizer    = "petstore.example.com/finalizer"
-	petfindbystatusRequeueAfter = time.Second * 30
+	storeinventoryqueryFinalizer    = "petstore.example.com/finalizer"
+	storeinventoryqueryRequeueAfter = time.Second * 30
 )
 
-// PetFindbystatusReconciler reconciles a PetFindbystatus query object
-type PetFindbystatusReconciler struct {
+// StoreInventoryQueryReconciler reconciles a StoreInventoryQuery query object
+type StoreInventoryQueryReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	HTTPClient       *http.Client
@@ -44,35 +44,35 @@ type PetFindbystatusReconciler struct {
 	BaseURL string
 }
 
-// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbystatuss,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=petstore.example.com,resources=petfindbystatuss/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=petstore.example.com,resources=storeinventoryquerys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=petstore.example.com,resources=storeinventoryquerys/status,verbs=get;update;patch
 
 // Reconcile executes the query and updates the status with results
-func (r *PetFindbystatusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *StoreInventoryQueryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the PetFindbystatus instance
-	instance := &v1alpha1.PetFindbystatus{}
+	// Fetch the StoreInventoryQuery instance
+	instance := &v1alpha1.StoreInventoryQuery{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("PetFindbystatus resource not found. Ignoring since object must be deleted")
+			logger.Info("StoreInventoryQuery resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to get PetFindbystatus")
+		logger.Error(err, "Failed to get StoreInventoryQuery")
 		return ctrl.Result{}, err
 	}
 
 	// Execute the query
 	if err := r.executeQuery(ctx, instance); err != nil {
 		r.updateStatus(ctx, instance, "Failed", err.Error(), 0)
-		return ctrl.Result{RequeueAfter: petfindbystatusRequeueAfter}, err
+		return ctrl.Result{RequeueAfter: storeinventoryqueryRequeueAfter}, err
 	}
 
-	return ctrl.Result{RequeueAfter: petfindbystatusRequeueAfter}, nil
+	return ctrl.Result{RequeueAfter: storeinventoryqueryRequeueAfter}, nil
 }
 
-func (r *PetFindbystatusReconciler) getBaseURL(ctx context.Context) (string, error) {
+func (r *StoreInventoryQueryReconciler) getBaseURL(ctx context.Context) (string, error) {
 	if r.EndpointResolver != nil {
 		return r.EndpointResolver.GetEndpoint()
 	}
@@ -82,7 +82,7 @@ func (r *PetFindbystatusReconciler) getBaseURL(ctx context.Context) (string, err
 	return r.BaseURL, nil
 }
 
-func (r *PetFindbystatusReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
+func (r *StoreInventoryQueryReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
 			return "", fmt.Errorf("targetPodOrdinal is required when using by-ordinal strategy")
@@ -93,7 +93,7 @@ func (r *PetFindbystatusReconciler) getBaseURLByOrdinal(ctx context.Context, ord
 }
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
-func (r *PetFindbystatusReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.PetFindbystatus) (string, error) {
+func (r *StoreInventoryQueryReconciler) resolveBaseURL(ctx context.Context, instance *v1alpha1.StoreInventoryQuery) (string, error) {
 	if r.EndpointResolver != nil {
 		namespace := instance.Spec.TargetNamespace
 		if namespace == "" {
@@ -121,8 +121,8 @@ func (r *PetFindbystatusReconciler) resolveBaseURL(ctx context.Context, instance
 }
 
 // buildQueryURL builds the query URL from the spec parameters
-func (r *PetFindbystatusReconciler) buildQueryURL(baseURL string, instance *v1alpha1.PetFindbystatus) string {
-	queryURL := baseURL + "/pet/findByStatus"
+func (r *StoreInventoryQueryReconciler) buildQueryURL(baseURL string, instance *v1alpha1.StoreInventoryQuery) string {
+	queryURL := baseURL + "/store/inventory"
 
 	params := url.Values{}
 	specVal := reflect.ValueOf(instance.Spec)
@@ -177,7 +177,7 @@ func (r *PetFindbystatusReconciler) buildQueryURL(baseURL string, instance *v1al
 }
 
 // executeQueryToEndpoint executes the query against a single endpoint
-func (r *PetFindbystatusReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.PetFindbystatus, baseURL string) ([]byte, int, error) {
+func (r *StoreInventoryQueryReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.StoreInventoryQuery, baseURL string) ([]byte, int, error) {
 	logger := log.FromContext(ctx)
 
 	queryURL := r.buildQueryURL(baseURL, instance)
@@ -207,16 +207,30 @@ func (r *PetFindbystatusReconciler) executeQueryToEndpoint(ctx context.Context, 
 	return body, resp.StatusCode, nil
 }
 
-// parseResults parses the response body into typed results
-func (r *PetFindbystatusReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int, error) {
-	var results []v1alpha1.Pet
-	if err := json.Unmarshal(body, &results); err != nil {
-		return nil, 0, fmt.Errorf("failed to unmarshal results: %w", err)
+// countResults attempts to count results in the response
+func (r *StoreInventoryQueryReconciler) countResults(body []byte) int {
+	// Try to parse as array
+	var arr []interface{}
+	if err := json.Unmarshal(body, &arr); err == nil {
+		return len(arr)
 	}
-	return results, len(results), nil
+
+	// Try to parse as object with items/data/results field
+	var obj map[string]interface{}
+	if err := json.Unmarshal(body, &obj); err == nil {
+		for _, key := range []string{"items", "data", "results", "content"} {
+			if items, ok := obj[key].([]interface{}); ok {
+				return len(items)
+			}
+		}
+		// If it's an object, count as 1 result
+		return 1
+	}
+
+	return 0
 }
 
-func (r *PetFindbystatusReconciler) executeQuery(ctx context.Context, instance *v1alpha1.PetFindbystatus) error {
+func (r *StoreInventoryQueryReconciler) executeQuery(ctx context.Context, instance *v1alpha1.StoreInventoryQuery) error {
 	logger := log.FromContext(ctx)
 	now := metav1.Now()
 
@@ -229,13 +243,13 @@ func (r *PetFindbystatusReconciler) executeQuery(ctx context.Context, instance *
 
 		if len(baseURLs) > 1 {
 			// Multiple endpoints - collect responses from all
-			responses := make(map[string]v1alpha1.PetFindbystatusEndpointResponse)
-			var firstSuccessResp *v1alpha1.PetFindbystatusEndpointResponse
+			responses := make(map[string]v1alpha1.StoreInventoryQueryEndpointResponse)
+			var firstSuccessResp *v1alpha1.StoreInventoryQueryEndpointResponse
 			var firstResultCount int
 			successCount := 0
 
 			for _, baseURL := range baseURLs {
-				endpointResp := v1alpha1.PetFindbystatusEndpointResponse{
+				endpointResp := v1alpha1.StoreInventoryQueryEndpointResponse{
 					LastUpdated: &now,
 				}
 
@@ -248,22 +262,15 @@ func (r *PetFindbystatusReconciler) executeQuery(ctx context.Context, instance *
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = statusCode
-					// Parse typed results for this endpoint
-					data, resultCount, parseErr := r.parseResults(body)
-					if parseErr != nil {
-						endpointResp.Success = false
-						endpointResp.Error = parseErr.Error()
-						logger.Info("Query succeeded but failed to parse for endpoint", "endpoint", baseURL, "error", parseErr)
-					} else {
-						endpointResp.Data = data
-						successCount++
-						if firstSuccessResp == nil {
-							respCopy := endpointResp
-							firstSuccessResp = &respCopy
-							firstResultCount = resultCount
-						}
-						logger.Info("Query succeeded for endpoint", "endpoint", baseURL, "resultCount", resultCount)
+					endpointResp.Data = &runtime.RawExtension{Raw: body}
+					successCount++
+					resultCount := r.countResults(body)
+					if firstSuccessResp == nil {
+						respCopy := endpointResp
+						firstSuccessResp = &respCopy
+						firstResultCount = resultCount
 					}
+					logger.Info("Query succeeded for endpoint", "endpoint", baseURL, "resultCount", resultCount)
 				}
 
 				responses[baseURL] = endpointResp
@@ -299,7 +306,7 @@ func (r *PetFindbystatusReconciler) executeQuery(ctx context.Context, instance *
 	body, statusCode, err := r.executeQueryToEndpoint(ctx, instance, baseURL)
 
 	// Build EndpointResponse for Results
-	endpointResp := v1alpha1.PetFindbystatusEndpointResponse{
+	endpointResp := v1alpha1.StoreInventoryQueryEndpointResponse{
 		LastUpdated: &now,
 		StatusCode:  statusCode,
 	}
@@ -315,16 +322,8 @@ func (r *PetFindbystatusReconciler) executeQuery(ctx context.Context, instance *
 	}
 
 	endpointResp.Success = true
-	data, resultCount, parseErr := r.parseResults(body)
-	if parseErr != nil {
-		endpointResp.Success = false
-		endpointResp.Error = parseErr.Error()
-		instance.Status.Results = &endpointResp
-		instance.Status.LastQueryTime = &now
-		instance.Status.Responses = nil
-		return fmt.Errorf("failed to parse results: %w", parseErr)
-	}
-	endpointResp.Data = data
+	endpointResp.Data = &runtime.RawExtension{Raw: body}
+	resultCount := r.countResults(body)
 
 	// Update status with results
 	instance.Status.Results = &endpointResp
@@ -334,7 +333,7 @@ func (r *PetFindbystatusReconciler) executeQuery(ctx context.Context, instance *
 	return nil
 }
 
-func (r *PetFindbystatusReconciler) updateStatus(ctx context.Context, instance *v1alpha1.PetFindbystatus, state, message string, resultCount int) {
+func (r *StoreInventoryQueryReconciler) updateStatus(ctx context.Context, instance *v1alpha1.StoreInventoryQuery, state, message string, resultCount int) {
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
@@ -366,8 +365,8 @@ func (r *PetFindbystatusReconciler) updateStatus(ctx context.Context, instance *
 }
 
 // SetupWithManager sets up the controller with the Manager
-func (r *PetFindbystatusReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *StoreInventoryQueryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.PetFindbystatus{}).
+		For(&v1alpha1.StoreInventoryQuery{}).
 		Complete(r)
 }
