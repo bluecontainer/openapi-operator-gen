@@ -1291,3 +1291,308 @@ components:
 		t.Error("expected name to have default value")
 	}
 }
+
+// =============================================================================
+// isResourceIDPath Tests
+// =============================================================================
+
+func TestIsResourceIDPath(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"/pet/{petId}", true},
+		{"/store/order/{orderId}", true},
+		{"/users/{id}", true},
+		{"/users/{userId}", true},
+		{"/api/v1/users/{userId}", true},
+		{"/pet", false},                     // No ID parameter
+		{"/store/order", false},             // No ID parameter
+		{"/{id}", false},                    // Only 1 segment
+		{"/pet/{petId}/uploadImage", false}, // ID param not at end
+		{"/pet/findByStatus", false},        // No ID parameter
+		{"/user/{userId}/posts", false},     // Extra segment after ID
+		{"/", false},                        // Root path
+		{"", false},                         // Empty path
+		{"/pet/{randomId}", false},          // ID param doesn't match resource name
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := p.isResourceIDPath(tt.path)
+			if result != tt.expected {
+				t.Errorf("isResourceIDPath(%q) = %v, expected %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// getBasePathForIDPath Tests
+// =============================================================================
+
+func TestGetBasePathForIDPath(t *testing.T) {
+	p := &Parser{}
+
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"/pet/{petId}", "/pet"},
+		{"/store/order/{orderId}", "/store/order"},
+		{"/users/{id}", "/users"},
+		{"/api/v1/users/{userId}", "/api/v1/users"},
+		{"/pet", ""},                     // Not an ID path
+		{"/store/order", ""},             // Not an ID path
+		{"/pet/{petId}/uploadImage", ""}, // Not an ID path (ID not at end)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := p.getBasePathForIDPath(tt.path)
+			if result != tt.expected {
+				t.Errorf("getBasePathForIDPath(%q) = %q, expected %q", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Combined Path Tests
+// =============================================================================
+
+func TestParse_CombinedPaths(t *testing.T) {
+	// Test that /pet (POST) and /pet/{petId} (GET/PUT/DELETE) are combined into one resource
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Combined Paths API"
+  version: "1.0.0"
+paths:
+  /pet:
+    post:
+      operationId: createPet
+      summary: Create a pet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+  /pet/{petId}:
+    get:
+      operationId: getPet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Success
+    put:
+      operationId: updatePet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+    delete:
+      operationId: deletePet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Should have exactly 1 resource (Pet), not 2
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource (combined), got %d", len(spec.Resources))
+	}
+
+	resource := spec.Resources[0]
+	if resource.Name != "Pet" {
+		t.Errorf("expected resource name 'Pet', got %q", resource.Name)
+	}
+
+	// Should have all 4 operations (POST from /pet, GET/PUT/DELETE from /pet/{petId})
+	if len(resource.Operations) != 4 {
+		t.Errorf("expected 4 operations, got %d", len(resource.Operations))
+	}
+
+	methods := make(map[string]bool)
+	for _, op := range resource.Operations {
+		methods[op.Method] = true
+	}
+
+	expectedMethods := []string{"POST", "GET", "PUT", "DELETE"}
+	for _, m := range expectedMethods {
+		if !methods[m] {
+			t.Errorf("expected method %s to be present", m)
+		}
+	}
+
+	// Should NOT be classified as an ActionEndpoint
+	if len(spec.ActionEndpoints) != 0 {
+		t.Errorf("expected 0 action endpoints, got %d", len(spec.ActionEndpoints))
+	}
+}
+
+func TestParse_CombinedPathsWithQueryEndpoints(t *testing.T) {
+	// Test that combined paths work alongside query endpoints
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Combined with Query API"
+  version: "1.0.0"
+paths:
+  /pet:
+    post:
+      operationId: createPet
+      responses:
+        "201":
+          description: Created
+  /pet/{petId}:
+    get:
+      operationId: getPet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Success
+    delete:
+      operationId: deletePet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+  /pet/findByStatus:
+    get:
+      operationId: findPetsByStatus
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Should have 1 resource (Pet)
+	if len(spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(spec.Resources))
+	}
+
+	resource := spec.Resources[0]
+	if resource.Name != "Pet" {
+		t.Errorf("expected resource name 'Pet', got %q", resource.Name)
+	}
+
+	// Should have 3 operations (POST, GET, DELETE)
+	if len(resource.Operations) != 3 {
+		t.Errorf("expected 3 operations, got %d", len(resource.Operations))
+	}
+
+	// Should have 1 query endpoint (findByStatus)
+	if len(spec.QueryEndpoints) != 1 {
+		t.Errorf("expected 1 query endpoint, got %d", len(spec.QueryEndpoints))
+	}
+}
+
+func TestParse_PostOnlyWithoutIDPath_IsAction(t *testing.T) {
+	// Test that POST-only endpoints WITHOUT a corresponding ID path are still actions
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Action Only API"
+  version: "1.0.0"
+paths:
+  /store:
+    post:
+      operationId: createStore
+      responses:
+        "201":
+          description: Created
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Should have 0 resources (no corresponding ID path)
+	if len(spec.Resources) != 0 {
+		t.Errorf("expected 0 resources, got %d", len(spec.Resources))
+	}
+
+	// Should have 1 action endpoint
+	if len(spec.ActionEndpoints) != 1 {
+		t.Errorf("expected 1 action endpoint, got %d", len(spec.ActionEndpoints))
+	}
+}

@@ -52,16 +52,27 @@ spec:
           spec:
             description: OrderSpec defines the desired state of Order
             properties:
-              data:
-                description: Resource data as JSON
-                type: object
-                x-kubernetes-preserve-unknown-fields: true
+              complete:
+                type: boolean
               externalIDRef:
                 description: |-
                   ExternalIDRef references an existing resource in the external REST API by its ID.
                   When set, the controller will GET this resource instead of creating a new one.
                   This is useful for importing existing resources or for read-only observation.
                 type: string
+              id:
+                format: int64
+                type: integer
+              orderId:
+                description: ID of order that needs to be fetched
+                format: int64
+                type: integer
+              petId:
+                format: int64
+                type: integer
+              quantity:
+                format: int32
+                type: integer
               readOnly:
                 description: |-
                   ReadOnly indicates that this CR is for observation only.
@@ -69,6 +80,16 @@ spec:
                   without performing any create, update, or delete operations.
                   Requires ExternalIDRef to be set.
                 type: boolean
+              shipDate:
+                format: date-time
+                type: string
+              status:
+                description: Order Status
+                enum:
+                - placed
+                - approved
+                - delivered
+                type: string
               targetDeployment:
                 description: |-
                   TargetDeployment specifies a Deployment name to route requests to.
@@ -97,6 +118,8 @@ spec:
                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                   When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
+            required:
+            - orderId
             type: object
           status:
             description: OrderStatus defines the observed state of Order

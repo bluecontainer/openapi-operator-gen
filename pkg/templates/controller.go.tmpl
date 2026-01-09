@@ -20,7 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -28,6 +28,7 @@ import (
 
 	{{ .APIVersion }} "{{ .ModuleName }}/api/{{ .APIVersion }}"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 )
 
 const (
@@ -38,7 +39,7 @@ const (
 // {{ .Kind }}Reconciler reconciles a {{ .Kind }} object
 type {{ .Kind }}Reconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
@@ -139,6 +140,63 @@ func (r *{{ .Kind }}Reconciler) getBaseURLByOrdinal(ctx context.Context, ordinal
 	return r.getBaseURL(ctx)
 }
 
+// buildResourceURL builds the URL for resource operations with path and query parameters
+// BasePath is the base path without path parameter placeholders (e.g., /pet, not /pet/{petId})
+// The resourceID is appended to the path for GET/PUT/DELETE operations
+func (r *{{ .Kind }}Reconciler) buildResourceURL(baseURL string, instance *{{ .APIVersion }}.{{ .Kind }}, resourceID string) string {
+	builder := runtime.NewURLBuilder("{{ .BasePath }}")
+
+	// Add resource ID for operations that need it (appended to path)
+	builder.WithResourceID(resourceID)
+
+	{{- if .ResourceQueryParams }}
+	// Add query parameters from spec
+	{{- range .ResourceQueryParams }}
+	{{- if .IsArray }}
+	if len(instance.Spec.{{ .GoName }}) > 0 {
+		builder.WithQueryParamArray("{{ .Name }}", instance.Spec.{{ .GoName }})
+	}
+	{{- else if eq .GoType "string" }}
+	builder.WithQueryParam("{{ .Name }}", instance.Spec.{{ .GoName }})
+	{{- else if eq .GoType "int64" }}
+	builder.WithQueryParamInt("{{ .Name }}", instance.Spec.{{ .GoName }})
+	{{- else }}
+	if instance.Spec.{{ .GoName }} != 0 {
+		builder.WithQueryParam("{{ .Name }}", fmt.Sprintf("%v", instance.Spec.{{ .GoName }}))
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+
+	return builder.Build(baseURL)
+}
+
+// buildResourceURLForCreate builds the URL for resource creation (POST) with query parameters only
+func (r *{{ .Kind }}Reconciler) buildResourceURLForCreate(baseURL string, instance *{{ .APIVersion }}.{{ .Kind }}) string {
+	builder := runtime.NewURLBuilder("{{ .BasePath }}")
+
+	{{- if .ResourceQueryParams }}
+	// Add query parameters from spec
+	{{- range .ResourceQueryParams }}
+	{{- if .IsArray }}
+	if len(instance.Spec.{{ .GoName }}) > 0 {
+		builder.WithQueryParamArray("{{ .Name }}", instance.Spec.{{ .GoName }})
+	}
+	{{- else if eq .GoType "string" }}
+	builder.WithQueryParam("{{ .Name }}", instance.Spec.{{ .GoName }})
+	{{- else if eq .GoType "int64" }}
+	builder.WithQueryParamInt("{{ .Name }}", instance.Spec.{{ .GoName }})
+	{{- else }}
+	if instance.Spec.{{ .GoName }} != 0 {
+		builder.WithQueryParam("{{ .Name }}", fmt.Sprintf("%v", instance.Spec.{{ .GoName }}))
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+
+	return builder.BuildForCreate(baseURL)
+}
+
 // getExternalID returns the external ID to use for GET/PUT/DELETE operations.
 // It prefers ExternalIDRef from spec (for importing existing resources),
 // then falls back to ExternalID from status (for resources created by the controller).
@@ -151,10 +209,10 @@ func (r *{{ .Kind }}Reconciler) getExternalID(instance *{{ .APIVersion }}.{{ .Ki
 
 // getResource performs a GET request to fetch the current state of the resource from the REST API.
 // Returns the response body as a map, or nil if the resource doesn't exist (404).
-func (r *{{ .Kind }}Reconciler) getResource(ctx context.Context, baseURL string, externalID string) (map[string]interface{}, []byte, error) {
+func (r *{{ .Kind }}Reconciler) getResource(ctx context.Context, baseURL string, externalID string, instance *{{ .APIVersion }}.{{ .Kind }}) (map[string]interface{}, []byte, error) {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "{{ .BasePath }}/" + externalID
+	url := r.buildResourceURL(baseURL, instance, externalID)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GET request: %w", err)
@@ -258,7 +316,7 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 					LastUpdated: &now,
 				}
 
-				respData, body, err := r.getResource(ctx, baseURL, externalID)
+				respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 				if err != nil {
 					endpointResp.Success = false
 					endpointResp.Error = err.Error()
@@ -271,7 +329,7 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = 200
-					endpointResp.Data = &runtime.RawExtension{Raw: body}
+					endpointResp.Data = &k8sruntime.RawExtension{Raw: body}
 					successCount++
 					if firstSuccessBody == nil {
 						firstSuccessBody = body
@@ -293,7 +351,7 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 				instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					Success:     true,
 					StatusCode:  200,
-					Data:        &runtime.RawExtension{Raw: firstSuccessBody},
+					Data:        &k8sruntime.RawExtension{Raw: firstSuccessBody},
 					LastUpdated: &now,
 				}
 			}
@@ -316,7 +374,7 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 		return err
 	}
 
-	respData, body, err := r.getResource(ctx, baseURL, externalID)
+	respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 	if err != nil {
 		return err
 	}
@@ -331,7 +389,7 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 		Success:     true,
 		StatusCode:  200,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.LastGetTime = &now
@@ -386,7 +444,7 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 
 	// If we have an external ID (from spec.externalIDRef or status.externalID), try GET first
 	if externalID != "" {
-		respData, body, err := r.getResource(ctx, baseURL, externalID)
+		respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get resource: %w", err)
 		}
@@ -405,7 +463,7 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 				instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					Success:     true,
 					StatusCode:  200,
-					Data:        &runtime.RawExtension{Raw: body},
+					Data:        &k8sruntime.RawExtension{Raw: body},
 					LastUpdated: &now,
 				}
 				return nil
@@ -434,7 +492,7 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "{{ .BasePath }}"
+	url := r.buildResourceURLForCreate(baseURL, instance)
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
@@ -481,7 +539,7 @@ func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{
 	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.DriftDetected = false
@@ -495,7 +553,7 @@ func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{
 func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "{{ .BasePath }}/" + externalID
+	url := r.buildResourceURL(baseURL, instance, externalID)
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
@@ -530,7 +588,7 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.DriftDetected = false
@@ -560,6 +618,20 @@ func (r *{{ .Kind }}Reconciler) marshalSpecForAPI(instance *{{ .APIVersion }}.{{
 	delete(specMap, "targetNamespace")
 	delete(specMap, "externalIDRef")
 	delete(specMap, "readOnly")
+
+	{{- if .ResourcePathParams }}
+	// Remove path parameter fields (they're used in URL, not body)
+	{{- range .ResourcePathParams }}
+	delete(specMap, "{{ .Name }}")
+	{{- end }}
+	{{- end }}
+
+	{{- if .ResourceQueryParams }}
+	// Remove query parameter fields (they're used in URL, not body)
+	{{- range .ResourceQueryParams }}
+	delete(specMap, "{{ .JSONName }}")
+	{{- end }}
+	{{- end }}
 
 	return json.Marshal(specMap)
 }
@@ -621,7 +693,7 @@ func (r *{{ .Kind }}Reconciler) syncResource(ctx context.Context, instance *{{ .
 func (r *{{ .Kind }}Reconciler) deleteFromEndpoint(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "{{ .BasePath }}/" + instance.Status.ExternalID
+	url := r.buildResourceURL(baseURL, instance, instance.Status.ExternalID)
 	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create delete request: %w", err)

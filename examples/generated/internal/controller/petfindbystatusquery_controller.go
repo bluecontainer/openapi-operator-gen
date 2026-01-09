@@ -20,7 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,7 +37,7 @@ const (
 // PetFindbystatusQueryReconciler reconciles a PetFindbystatusQuery query object
 type PetFindbystatusQueryReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)

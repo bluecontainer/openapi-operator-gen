@@ -74,15 +74,6 @@ func TestCRDYAMLTemplateLoaded(t *testing.T) {
 	}
 }
 
-func TestEndpointResolverTemplateLoaded(t *testing.T) {
-	if EndpointResolverTemplate == "" {
-		t.Error("EndpointResolverTemplate is empty - embed may have failed")
-	}
-	if !strings.Contains(EndpointResolverTemplate, "Resolver") {
-		t.Error("EndpointResolverTemplate doesn't contain expected 'Resolver' keyword")
-	}
-}
-
 func TestMainTemplateLoaded(t *testing.T) {
 	if MainTemplate == "" {
 		t.Error("MainTemplate is empty - embed may have failed")
@@ -135,13 +126,6 @@ func TestCRDYAMLTemplateParseable(t *testing.T) {
 	_, err := template.New("crdyaml").Parse(CRDYAMLTemplate)
 	if err != nil {
 		t.Errorf("Failed to parse CRDYAMLTemplate: %v", err)
-	}
-}
-
-func TestEndpointResolverTemplateParseable(t *testing.T) {
-	_, err := template.New("endpointresolver").Parse(EndpointResolverTemplate)
-	if err != nil {
-		t.Errorf("Failed to parse EndpointResolverTemplate: %v", err)
 	}
 }
 
@@ -388,6 +372,14 @@ type ActionRequestBodyField struct {
 	GoName   string
 }
 
+type ResourceQueryParam struct {
+	Name     string // Parameter name as it appears in URL (e.g., "status")
+	JSONName string // JSON field name (e.g., "status")
+	GoName   string // Go field name (e.g., "Status")
+	GoType   string // Go type (e.g., "string", "int64")
+	IsArray  bool   // True if this is an array parameter
+}
+
 // ControllerTemplateData mimics the data structure for controller template
 type ControllerTemplateData struct {
 	Year            int
@@ -407,17 +399,20 @@ type ControllerTemplateData struct {
 	UsesSharedType  bool
 
 	// Action endpoint fields
-	IsAction          bool
-	ActionPath        string
-	ActionMethod      string
-	ParentResource    string
-	ParentIDParam     string
-	ParentIDField     string
-	HasParentID       bool
-	ActionName        string
-	PathParams        []ActionPathParam
-	RequestBodyFields []ActionRequestBodyField
-	HasRequestBody    bool
+	IsAction            bool
+	ActionPath          string
+	ActionMethod        string
+	ParentResource      string
+	ParentIDParam       string
+	ParentIDField       string
+	HasParentID         bool
+	ActionName          string
+	PathParams          []ActionPathParam
+	RequestBodyFields   []ActionRequestBodyField
+	HasRequestBody      bool
+	ResourcePathParams  []ActionPathParam
+	ResourceQueryParams []ResourceQueryParam
+	HasResourceParams   bool
 }
 
 func TestControllerTemplateExecution(t *testing.T) {
@@ -427,15 +422,16 @@ func TestControllerTemplateExecution(t *testing.T) {
 	}
 
 	data := ControllerTemplateData{
-		Year:       2024,
-		APIGroup:   "petstore.example.com",
-		APIVersion: "v1alpha1",
-		ModuleName: "github.com/example/petstore-operator",
-		Kind:       "Pet",
-		KindLower:  "pet",
-		Plural:     "pets",
-		BasePath:   "/pet",
-		IsQuery:    false,
+		Year:              2024,
+		APIGroup:          "petstore.example.com",
+		APIVersion:        "v1alpha1",
+		ModuleName:        "github.com/example/petstore-operator",
+		Kind:              "Pet",
+		KindLower:         "pet",
+		Plural:            "pets",
+		BasePath:          "/pet",
+		IsQuery:           false,
+		HasResourceParams: false,
 	}
 
 	var buf bytes.Buffer

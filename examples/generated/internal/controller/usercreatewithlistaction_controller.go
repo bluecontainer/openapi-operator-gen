@@ -19,13 +19,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
@@ -36,7 +37,7 @@ const (
 // UserCreatewithlistActionReconciler reconciles a UserCreatewithlistAction action object
 type UserCreatewithlistActionReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
@@ -193,17 +194,15 @@ func (r *UserCreatewithlistActionReconciler) resolveBaseURL(ctx context.Context,
 
 // buildActionURL builds the action URL with path parameters substituted
 func (r *UserCreatewithlistActionReconciler) buildActionURL(baseURL string, instance *v1alpha1.UserCreatewithlistAction) string {
-	actionPath := "/user/createWithList"
+	builder := runtime.NewURLBuilder("/user/createWithList")
 
-	// Substitute path parameters
-
-	return baseURL + actionPath
+	return builder.Build(baseURL)
 }
 
 // buildRequestBody builds the JSON request body from spec fields
 func (r *UserCreatewithlistActionReconciler) buildRequestBody(instance *v1alpha1.UserCreatewithlistAction) ([]byte, error) {
 	body := make(map[string]interface{})
-	if !isZeroValue(instance.Spec.ReExecuteInterval) {
+	if !runtime.IsZeroValue(instance.Spec.ReExecuteInterval) {
 		body["reExecuteInterval"] = instance.Spec.ReExecuteInterval
 	}
 	if len(body) == 0 {

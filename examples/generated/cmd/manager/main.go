@@ -271,17 +271,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.PetActionReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		HTTPClient:       httpClient,
-		EndpointResolver: resolver,
-		BaseURL:          baseURL,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PetAction")
-		os.Exit(1)
-	}
-
 	if err = (&controller.PetUploadimageActionReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
@@ -290,28 +279,6 @@ func main() {
 		BaseURL:          baseURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PetUploadimageAction")
-		os.Exit(1)
-	}
-
-	if err = (&controller.StoreOrderActionReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		HTTPClient:       httpClient,
-		EndpointResolver: resolver,
-		BaseURL:          baseURL,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "StoreOrderAction")
-		os.Exit(1)
-	}
-
-	if err = (&controller.UserActionReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		HTTPClient:       httpClient,
-		EndpointResolver: resolver,
-		BaseURL:          baseURL,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "UserAction")
 		os.Exit(1)
 	}
 

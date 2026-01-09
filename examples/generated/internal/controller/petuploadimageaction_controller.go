@@ -14,19 +14,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
@@ -37,7 +37,7 @@ const (
 // PetUploadimageActionReconciler reconciles a PetUploadimageAction action object
 type PetUploadimageActionReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
@@ -194,21 +194,20 @@ func (r *PetUploadimageActionReconciler) resolveBaseURL(ctx context.Context, ins
 
 // buildActionURL builds the action URL with path parameters substituted
 func (r *PetUploadimageActionReconciler) buildActionURL(baseURL string, instance *v1alpha1.PetUploadimageAction) string {
-	actionPath := "/pet/{petId}/uploadImage"
+	builder := runtime.NewURLBuilder("/pet/{petId}/uploadImage")
+	// Add parent ID path parameter
+	builder.WithPathParam("petId", instance.Spec.PetId)
 
-	// Substitute path parameters
-	actionPath = strings.Replace(actionPath, "{petId}", instance.Spec.PetId, 1)
-
-	return baseURL + actionPath
+	return builder.Build(baseURL)
 }
 
 // buildRequestBody builds the JSON request body from spec fields
 func (r *PetUploadimageActionReconciler) buildRequestBody(instance *v1alpha1.PetUploadimageAction) ([]byte, error) {
 	body := make(map[string]interface{})
-	if !isZeroValue(instance.Spec.ReExecuteInterval) {
+	if !runtime.IsZeroValue(instance.Spec.ReExecuteInterval) {
 		body["reExecuteInterval"] = instance.Spec.ReExecuteInterval
 	}
-	if !isZeroValue(instance.Spec.AdditionalMetadata) {
+	if !runtime.IsZeroValue(instance.Spec.AdditionalMetadata) {
 		body["additionalMetadata"] = instance.Spec.AdditionalMetadata
 	}
 	if len(body) == 0 {

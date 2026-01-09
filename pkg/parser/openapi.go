@@ -72,6 +72,7 @@ type QueryEndpoint struct {
 	Operation         string // e.g., "findByTags"
 	Summary           string
 	Description       string
+	PathParams        []Parameter // Path parameters become spec fields
 	QueryParams       []Parameter // Query parameters become spec fields
 	ResponseSchema    *Schema     // Response schema for status
 	ResponseSchemaRef string      // Reference name if response uses $ref (e.g., "Pet")
@@ -176,6 +177,13 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 	queryEndpoints := make([]*QueryEndpoint, 0)
 	actionEndpoints := make([]*ActionEndpoint, 0)
 
+	// Build map of base paths to their corresponding resource ID paths
+	// e.g., /pet -> /pet/{petId}
+	resourceIDPaths := p.buildResourceIDPaths(doc)
+
+	// Track which paths are part of a combined resource (base path for POST)
+	combinedBasePaths := make(map[string]bool)
+
 	// Get sorted paths for deterministic output
 	paths := make([]string, 0, len(doc.Paths.Map()))
 	for path := range doc.Paths.Map() {
@@ -184,34 +192,47 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 	sort.Strings(paths)
 
 	// Log endpoint classification header
-	fmt.Println("\n┌───────────────────────────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("│                               Endpoint Classification                                        │")
-	fmt.Println("├────────────────────────────────────┬──────────────┬────────────────────┬─────────────────────┤")
-	fmt.Println("│ Endpoint                           │ Method       │ Classification     │ Kind                │")
-	fmt.Println("├────────────────────────────────────┼──────────────┼────────────────────┼─────────────────────┤")
+	fmt.Println("\n┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("│                                        Endpoint Classification                                                    │")
+	fmt.Println("├────────────────────────────────────┬──────────────┬────────────────────┬─────────────────────┬─────────────────────┤")
+	fmt.Println("│ Endpoint                           │ Method       │ Classification     │ Kind                │ Parent ID Param     │")
+	fmt.Println("├────────────────────────────────────┼──────────────┼────────────────────┼─────────────────────┼─────────────────────┤")
 
 	for _, path := range paths {
 		pathItem := doc.Paths.Map()[path]
 		methods := p.getMethodsForPath(pathItem)
 
-		// Check if this is an action endpoint FIRST (before query endpoints)
-		// This ensures /user/login (GET with strong action keyword) is treated as action, not query
-		if actionEndpoint := p.extractActionEndpoint(path, pathItem, doc); actionEndpoint != nil {
-			actionEndpoints = append(actionEndpoints, actionEndpoint)
-			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), actionEndpoint.HTTPMethod, "ActionEndpoint", truncateString(actionEndpoint.Name, 19))
-			continue
-		}
+		// Check if this path is a base path with POST that has a corresponding resource ID path
+		// e.g., /pet with POST + /pet/{petId} with GET/PUT/DELETE = combined resource
+		if p.hasCorrespondingResourceIDPath(path, doc, resourceIDPaths) && pathItem.Post != nil {
+			// This is a base path that should be combined with its ID path
+			// Mark it as combined and process as a resource
+			combinedBasePaths[path] = true
+			// Continue processing as resource below (don't skip)
+		} else {
+			// Check if this is an action endpoint FIRST (before query endpoints)
+			// This ensures /user/login (GET with strong action keyword) is treated as action, not query
+			if actionEndpoint := p.extractActionEndpoint(path, pathItem, doc); actionEndpoint != nil {
+				actionEndpoints = append(actionEndpoints, actionEndpoint)
+				parentIDDisplay := actionEndpoint.ParentIDParam
+				if parentIDDisplay == "" {
+					parentIDDisplay = "-"
+				}
+				fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), actionEndpoint.HTTPMethod, "ActionEndpoint", truncateString(actionEndpoint.Name, 19), truncateString(parentIDDisplay, 19))
+				continue
+			}
 
-		// Check if this is a query endpoint
-		if queryEndpoint := p.extractQueryEndpoint(path, pathItem, doc); queryEndpoint != nil {
-			queryEndpoints = append(queryEndpoints, queryEndpoint)
-			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), "GET", "QueryEndpoint", truncateString(queryEndpoint.Name, 19))
-			continue
+			// Check if this is a query endpoint
+			if queryEndpoint := p.extractQueryEndpoint(path, pathItem, doc); queryEndpoint != nil {
+				queryEndpoints = append(queryEndpoints, queryEndpoint)
+				fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), "GET", "QueryEndpoint", truncateString(queryEndpoint.Name, 19), "-")
+				continue
+			}
 		}
 
 		resourceName := p.extractResourceName(path)
 		if resourceName == "" {
-			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), methods, "Skipped", "-")
+			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), methods, "Skipped", "-", "-")
 			continue
 		}
 
@@ -226,7 +247,19 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 			resourceMap[resourceName] = resource
 		}
 
-		fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │\n", truncateString(path, 34), methods, "Resource", truncateString(resourceName, 19))
+		// Check if this is a combined resource (base path that was combined with ID path)
+		classification := "Resource"
+		if combinedBasePaths[path] {
+			classification = "Resource (POST)"
+		} else if p.isResourceIDPath(path) {
+			// Check if this ID path has a corresponding base path with POST
+			basePath := p.getBasePathForIDPath(path)
+			if combinedBasePaths[basePath] {
+				classification = "Resource (ID)"
+			}
+		}
+
+		fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), methods, classification, truncateString(resourceName, 19), "-")
 
 		// Extract operations
 		ops := p.extractOperations(path, pathItem)
@@ -238,7 +271,7 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 		}
 	}
 
-	fmt.Println("└────────────────────────────────────┴──────────────┴────────────────────┴─────────────────────┘")
+	fmt.Println("└────────────────────────────────────┴──────────────┴────────────────────┴─────────────────────┴─────────────────────┘")
 	fmt.Println()
 
 	// Convert map to slice
@@ -544,15 +577,29 @@ func (p *Parser) extractQueryEndpoint(path string, pathItem *openapi3.PathItem, 
 		Operation:   operation,
 		Summary:     op.Summary,
 		Description: op.Description,
+		PathParams:  make([]Parameter, 0),
 		QueryParams: make([]Parameter, 0),
 	}
 
-	// Extract query parameters
+	// Extract path and query parameters
 	for _, paramRef := range op.Parameters {
 		if paramRef.Value == nil {
 			continue
 		}
-		if paramRef.Value.In == "query" {
+		if paramRef.Value.In == "path" {
+			param := Parameter{
+				Name:        paramRef.Value.Name,
+				In:          paramRef.Value.In,
+				Required:    paramRef.Value.Required,
+				Description: paramRef.Value.Description,
+			}
+			if paramRef.Value.Schema != nil && paramRef.Value.Schema.Value != nil {
+				if len(paramRef.Value.Schema.Value.Type.Slice()) > 0 {
+					param.Type = paramRef.Value.Schema.Value.Type.Slice()[0]
+				}
+			}
+			queryEndpoint.PathParams = append(queryEndpoint.PathParams, param)
+		} else if paramRef.Value.In == "query" {
 			param := Parameter{
 				Name:        paramRef.Value.Name,
 				In:          paramRef.Value.In,
@@ -1031,4 +1078,88 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// isResourceIDPath checks if a path is a resource with an ID parameter
+// e.g., /pet/{petId}, /store/order/{orderId}, /users/{userId}
+// Returns true if the path ends with a resource segment followed by an ID parameter
+func (p *Parser) isResourceIDPath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 {
+		return false
+	}
+
+	// Last part must be a parameter
+	lastPart := parts[len(parts)-1]
+	if !strings.HasPrefix(lastPart, "{") || !strings.HasSuffix(lastPart, "}") {
+		return false
+	}
+
+	// Second to last must be a non-parameter (the resource segment)
+	secondLastPart := parts[len(parts)-2]
+	if strings.HasPrefix(secondLastPart, "{") {
+		return false
+	}
+
+	// Check if the param name relates to the resource name (e.g., petId for pet)
+	paramName := strings.ToLower(lastPart[1 : len(lastPart)-1])
+	segmentName := strings.ToLower(secondLastPart)
+	singularSegment := strings.ToLower(p.singularize(secondLastPart))
+
+	// Common patterns: {petId}, {id}, {pet_id}, {userId} for /users
+	return strings.Contains(paramName, segmentName) ||
+		strings.Contains(paramName, singularSegment) ||
+		paramName == "id"
+}
+
+// getBasePathForIDPath returns the base path for a resource ID path
+// e.g., /pet/{petId} -> /pet, /store/order/{orderId} -> /store/order
+func (p *Parser) getBasePathForIDPath(path string) string {
+	if !p.isResourceIDPath(path) {
+		return ""
+	}
+
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// Remove the last part (ID param) to get the base path
+	baseParts := parts[:len(parts)-1]
+	return "/" + strings.Join(baseParts, "/")
+}
+
+// buildResourceIDPaths builds a map of base paths to their corresponding ID paths
+// This identifies all resource paths like /pet -> /pet/{petId}
+func (p *Parser) buildResourceIDPaths(doc *openapi3.T) map[string]string {
+	result := make(map[string]string)
+
+	for path := range doc.Paths.Map() {
+		if p.isResourceIDPath(path) {
+			basePath := p.getBasePathForIDPath(path)
+			if basePath != "" {
+				result[basePath] = path
+			}
+		}
+	}
+
+	return result
+}
+
+// hasCorrespondingResourceIDPath checks if a path (like /pet with POST) has a
+// corresponding resource ID path (like /pet/{petId} with GET/PUT/DELETE)
+func (p *Parser) hasCorrespondingResourceIDPath(path string, doc *openapi3.T, resourceIDPaths map[string]string) bool {
+	idPath, exists := resourceIDPaths[path]
+	if !exists {
+		return false
+	}
+
+	// Check if the ID path has typical resource operations (GET, PUT, DELETE)
+	idPathItem := doc.Paths.Map()[idPath]
+	if idPathItem == nil {
+		return false
+	}
+
+	// Resource ID paths typically have at least GET
+	return idPathItem.Get != nil || idPathItem.Put != nil || idPathItem.Delete != nil
 }

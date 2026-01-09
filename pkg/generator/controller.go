@@ -55,18 +55,33 @@ type ControllerTemplateData struct {
 	PathParams        []ActionPathParam        // Path parameters other than parent ID
 	RequestBodyFields []ActionRequestBodyField // Request body fields
 	HasRequestBody    bool                     // True if there are request body fields
+
+	// Resource endpoint fields (for standard CRUD resources)
+	ResourcePathParams  []ActionPathParam    // Path parameters for resource endpoints
+	ResourceQueryParams []ResourceQueryParam // Query parameters for resource endpoints
+	HasResourceParams   bool                 // True if there are path or query params to handle
 }
 
 // ActionPathParam represents a path parameter in action templates
 type ActionPathParam struct {
 	Name   string // Parameter name (e.g., "userId")
 	GoName string // Go field name (e.g., "UserId")
+	GoType string // Go type (e.g., "string", "int64")
 }
 
 // ActionRequestBodyField represents a request body field in action templates
 type ActionRequestBodyField struct {
 	JSONName string // JSON field name (e.g., "additionalMetadata")
 	GoName   string // Go field name (e.g., "AdditionalMetadata")
+}
+
+// ResourceQueryParam represents a query parameter for resource endpoints
+type ResourceQueryParam struct {
+	Name     string // Parameter name as it appears in URL (e.g., "status")
+	JSONName string // JSON field name (e.g., "status")
+	GoName   string // Go field name (e.g., "Status")
+	GoType   string // Go type (e.g., "string", "int64")
+	IsArray  bool   // True if this is an array parameter
 }
 
 // MainTemplateData holds data for main.go template
@@ -96,11 +111,10 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		if err := g.generateController(controllerDir, crd); err != nil {
 			return fmt.Errorf("failed to generate controller for %s: %w", crd.Kind, err)
 		}
-	}
-
-	// Generate utils.go with shared utility functions
-	if err := g.generateUtils(controllerDir); err != nil {
-		return fmt.Errorf("failed to generate utils.go: %w", err)
+		// Generate test file for the controller
+		if err := g.generateControllerTest(controllerDir, crd); err != nil {
+			return fmt.Errorf("failed to generate controller test for %s: %w", crd.Kind, err)
+		}
 	}
 
 	// Generate main.go
@@ -190,6 +204,63 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		data.HasRequestBody = len(data.RequestBodyFields) > 0
 	}
 
+	// Populate path and query params for resource endpoints (non-query, non-action)
+	if !crd.IsQuery && !crd.IsAction {
+		// Collect unique path params from operations
+		pathParamsSeen := make(map[string]bool)
+		queryParamsSeen := make(map[string]bool)
+
+		for _, op := range crd.Operations {
+			for _, paramName := range op.PathParams {
+				if pathParamsSeen[paramName] {
+					continue
+				}
+				pathParamsSeen[paramName] = true
+				// Find the field in spec to get type info
+				goType := "string" // default
+				if crd.Spec != nil {
+					for _, field := range crd.Spec.Fields {
+						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(paramName)) {
+							goType = field.GoType
+							break
+						}
+					}
+				}
+				data.ResourcePathParams = append(data.ResourcePathParams, ActionPathParam{
+					Name:   paramName,
+					GoName: strcase.ToCamel(paramName),
+					GoType: goType,
+				})
+			}
+			for _, paramName := range op.QueryParams {
+				if queryParamsSeen[paramName] {
+					continue
+				}
+				queryParamsSeen[paramName] = true
+				// Find the field in spec to get type info
+				isArray := false
+				goType := "string" // default
+				if crd.Spec != nil {
+					for _, field := range crd.Spec.Fields {
+						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(paramName)) {
+							goType = field.GoType
+							isArray = strings.HasPrefix(field.GoType, "[]")
+							break
+						}
+					}
+				}
+				data.ResourceQueryParams = append(data.ResourceQueryParams, ResourceQueryParam{
+					Name:     paramName,
+					JSONName: strcase.ToLowerCamel(paramName),
+					GoName:   strcase.ToCamel(paramName),
+					GoType:   goType,
+					IsArray:  isArray,
+				})
+			}
+		}
+		data.HasResourceParams = len(data.ResourcePathParams) > 0 || len(data.ResourceQueryParams) > 0
+	}
+
 	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(crd.Kind))
 	fp := filepath.Join(outputDir, filename)
 
@@ -221,19 +292,34 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 	return nil
 }
 
-// UtilsTemplateData holds data for utils template
-type UtilsTemplateData struct {
-	Year int
-}
+func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapper.CRDDefinition) error {
+	data := ControllerTemplateData{
+		Year:            time.Now().Year(),
+		APIGroup:        crd.APIGroup,
+		APIVersion:      crd.APIVersion,
+		ModuleName:      g.config.ModuleName,
+		Kind:            crd.Kind,
+		KindLower:       strings.ToLower(crd.Kind),
+		Plural:          crd.Plural,
+		BasePath:        crd.BasePath,
+		IsQuery:         crd.IsQuery,
+		QueryPath:       crd.QueryPath,
+		IsAction:        crd.IsAction,
+		ActionPath:      crd.ActionPath,
+		ActionMethod:    crd.ActionMethod,
+		ResponseIsArray: crd.ResponseIsArray,
 
-func (g *ControllerGenerator) generateUtils(outputDir string) error {
-	data := UtilsTemplateData{
-		Year: time.Now().Year(),
+		ParentResource: crd.ParentResource,
+		ParentIDParam:  crd.ParentIDParam,
+		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
+		HasParentID:    crd.ParentIDParam != "",
+		ActionName:     crd.ActionName,
 	}
 
-	fp := filepath.Join(outputDir, "utils.go")
+	filename := fmt.Sprintf("%s_controller_test.go", strings.ToLower(crd.Kind))
+	fp := filepath.Join(outputDir, filename)
 
-	tmpl, err := template.New("utils").Parse(templates.UtilsTemplate)
+	tmpl, err := template.New("controller_test").Parse(templates.ControllerTestTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}

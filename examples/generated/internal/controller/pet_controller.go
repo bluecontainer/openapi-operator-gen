@@ -20,13 +20,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
@@ -38,7 +39,7 @@ const (
 // PetReconciler reconciles a Pet object
 type PetReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
@@ -139,6 +140,31 @@ func (r *PetReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32)
 	return r.getBaseURL(ctx)
 }
 
+// buildResourceURL builds the URL for resource operations with path and query parameters
+// BasePath is the base path without path parameter placeholders (e.g., /pet, not /pet/{petId})
+// The resourceID is appended to the path for GET/PUT/DELETE operations
+func (r *PetReconciler) buildResourceURL(baseURL string, instance *v1alpha1.Pet, resourceID string) string {
+	builder := runtime.NewURLBuilder("/pet")
+
+	// Add resource ID for operations that need it (appended to path)
+	builder.WithResourceID(resourceID)
+	// Add query parameters from spec
+	builder.WithQueryParam("name", instance.Spec.Name)
+	builder.WithQueryParam("status", instance.Spec.Status)
+
+	return builder.Build(baseURL)
+}
+
+// buildResourceURLForCreate builds the URL for resource creation (POST) with query parameters only
+func (r *PetReconciler) buildResourceURLForCreate(baseURL string, instance *v1alpha1.Pet) string {
+	builder := runtime.NewURLBuilder("/pet")
+	// Add query parameters from spec
+	builder.WithQueryParam("name", instance.Spec.Name)
+	builder.WithQueryParam("status", instance.Spec.Status)
+
+	return builder.BuildForCreate(baseURL)
+}
+
 // getExternalID returns the external ID to use for GET/PUT/DELETE operations.
 // It prefers ExternalIDRef from spec (for importing existing resources),
 // then falls back to ExternalID from status (for resources created by the controller).
@@ -151,10 +177,10 @@ func (r *PetReconciler) getExternalID(instance *v1alpha1.Pet) string {
 
 // getResource performs a GET request to fetch the current state of the resource from the REST API.
 // Returns the response body as a map, or nil if the resource doesn't exist (404).
-func (r *PetReconciler) getResource(ctx context.Context, baseURL string, externalID string) (map[string]interface{}, []byte, error) {
+func (r *PetReconciler) getResource(ctx context.Context, baseURL string, externalID string, instance *v1alpha1.Pet) (map[string]interface{}, []byte, error) {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/pet/" + externalID
+	url := r.buildResourceURL(baseURL, instance, externalID)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GET request: %w", err)
@@ -258,7 +284,7 @@ func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.
 					LastUpdated: &now,
 				}
 
-				respData, body, err := r.getResource(ctx, baseURL, externalID)
+				respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 				if err != nil {
 					endpointResp.Success = false
 					endpointResp.Error = err.Error()
@@ -271,7 +297,7 @@ func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = 200
-					endpointResp.Data = &runtime.RawExtension{Raw: body}
+					endpointResp.Data = &k8sruntime.RawExtension{Raw: body}
 					successCount++
 					if firstSuccessBody == nil {
 						firstSuccessBody = body
@@ -293,7 +319,7 @@ func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.
 				instance.Status.Response = &v1alpha1.PetEndpointResponse{
 					Success:     true,
 					StatusCode:  200,
-					Data:        &runtime.RawExtension{Raw: firstSuccessBody},
+					Data:        &k8sruntime.RawExtension{Raw: firstSuccessBody},
 					LastUpdated: &now,
 				}
 			}
@@ -316,7 +342,7 @@ func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.
 		return err
 	}
 
-	respData, body, err := r.getResource(ctx, baseURL, externalID)
+	respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 	if err != nil {
 		return err
 	}
@@ -331,7 +357,7 @@ func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.
 	instance.Status.Response = &v1alpha1.PetEndpointResponse{
 		Success:     true,
 		StatusCode:  200,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.LastGetTime = &now
@@ -386,7 +412,7 @@ func (r *PetReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.P
 
 	// If we have an external ID (from spec.externalIDRef or status.externalID), try GET first
 	if externalID != "" {
-		respData, body, err := r.getResource(ctx, baseURL, externalID)
+		respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get resource: %w", err)
 		}
@@ -405,7 +431,7 @@ func (r *PetReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.P
 				instance.Status.Response = &v1alpha1.PetEndpointResponse{
 					Success:     true,
 					StatusCode:  200,
-					Data:        &runtime.RawExtension{Raw: body},
+					Data:        &k8sruntime.RawExtension{Raw: body},
 					LastUpdated: &now,
 				}
 				return nil
@@ -434,7 +460,7 @@ func (r *PetReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.P
 func (r *PetReconciler) createResource(ctx context.Context, instance *v1alpha1.Pet, baseURL string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/pet"
+	url := r.buildResourceURLForCreate(baseURL, instance)
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
@@ -481,7 +507,7 @@ func (r *PetReconciler) createResource(ctx context.Context, instance *v1alpha1.P
 	instance.Status.Response = &v1alpha1.PetEndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.DriftDetected = false
@@ -495,7 +521,7 @@ func (r *PetReconciler) createResource(ctx context.Context, instance *v1alpha1.P
 func (r *PetReconciler) updateResource(ctx context.Context, instance *v1alpha1.Pet, baseURL string, externalID string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/pet/" + externalID
+	url := r.buildResourceURL(baseURL, instance, externalID)
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
@@ -530,7 +556,7 @@ func (r *PetReconciler) updateResource(ctx context.Context, instance *v1alpha1.P
 	instance.Status.Response = &v1alpha1.PetEndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.DriftDetected = false
@@ -560,6 +586,11 @@ func (r *PetReconciler) marshalSpecForAPI(instance *v1alpha1.Pet) ([]byte, error
 	delete(specMap, "targetNamespace")
 	delete(specMap, "externalIDRef")
 	delete(specMap, "readOnly")
+	// Remove path parameter fields (they're used in URL, not body)
+	delete(specMap, "petId")
+	// Remove query parameter fields (they're used in URL, not body)
+	delete(specMap, "name")
+	delete(specMap, "status")
 
 	return json.Marshal(specMap)
 }
@@ -621,7 +652,7 @@ func (r *PetReconciler) syncResource(ctx context.Context, instance *v1alpha1.Pet
 func (r *PetReconciler) deleteFromEndpoint(ctx context.Context, instance *v1alpha1.Pet, baseURL string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/pet/" + instance.Status.ExternalID
+	url := r.buildResourceURL(baseURL, instance, instance.Status.ExternalID)
 	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create delete request: %w", err)

@@ -592,6 +592,18 @@ func (m *Mapper) createQuerySpec(qe *parser.QueryEndpoint) *FieldDefinition {
 		Fields:   make([]*FieldDefinition, 0),
 	}
 
+	// Add path parameters as spec fields
+	for _, param := range qe.PathParams {
+		field := &FieldDefinition{
+			Name:        strcase.ToCamel(param.Name),
+			JSONName:    strcase.ToLowerCamel(param.Name),
+			GoType:      m.mapParamType(param.Type),
+			Description: param.Description,
+			Required:    param.Required,
+		}
+		spec.Fields = append(spec.Fields, field)
+	}
+
 	// Add query parameters as spec fields
 	for _, param := range qe.QueryParams {
 		goType := m.mapParamType(param.Type)
@@ -702,6 +714,9 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 			crd.Spec = m.createGenericSpec()
 		}
 
+		// Add path and query parameters from operations to spec fields
+		m.addOperationParamsToSpec(crd.Spec, resource.Operations)
+
 		// Generate status fields
 		crd.Status = m.createStatusDefinition()
 
@@ -709,6 +724,79 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 	}
 
 	return crds, nil
+}
+
+// addOperationParamsToSpec adds path and query parameters from operations to the spec
+func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []parser.Operation) {
+	if spec == nil {
+		return
+	}
+
+	// Track existing field names to avoid duplicates
+	existingFields := make(map[string]bool)
+	for _, field := range spec.Fields {
+		existingFields[strings.ToLower(field.JSONName)] = true
+	}
+
+	// Collect unique path params from all operations
+	pathParamsSeen := make(map[string]bool)
+	for _, op := range operations {
+		for _, param := range op.PathParams {
+			paramKey := strings.ToLower(param.Name)
+			if pathParamsSeen[paramKey] || existingFields[paramKey] {
+				continue
+			}
+			pathParamsSeen[paramKey] = true
+
+			field := &FieldDefinition{
+				Name:        strcase.ToCamel(param.Name),
+				JSONName:    strcase.ToLowerCamel(param.Name),
+				GoType:      m.mapParamType(param.Type),
+				Description: param.Description,
+				Required:    param.Required,
+			}
+			spec.Fields = append(spec.Fields, field)
+			existingFields[paramKey] = true
+		}
+	}
+
+	// Collect unique query params from all operations
+	queryParamsSeen := make(map[string]bool)
+	for _, op := range operations {
+		for _, param := range op.QueryParams {
+			paramKey := strings.ToLower(param.Name)
+			if queryParamsSeen[paramKey] || existingFields[paramKey] {
+				continue
+			}
+			queryParamsSeen[paramKey] = true
+
+			goType := m.mapParamType(param.Type)
+			isArray := false
+
+			if strings.HasPrefix(param.Type, "array:") {
+				isArray = true
+				itemType := strings.TrimPrefix(param.Type, "array:")
+				goType = "[]" + m.mapParamType(itemType)
+			}
+
+			field := &FieldDefinition{
+				Name:        strcase.ToCamel(param.Name),
+				JSONName:    strcase.ToLowerCamel(param.Name),
+				GoType:      goType,
+				Description: param.Description,
+				Required:    param.Required,
+			}
+
+			if isArray {
+				field.ItemType = &FieldDefinition{
+					GoType: m.mapParamType(strings.TrimPrefix(param.Type, "array:")),
+				}
+			}
+
+			spec.Fields = append(spec.Fields, field)
+			existingFields[paramKey] = true
+		}
+	}
 }
 
 func (m *Mapper) mapSingleCRD(spec *parser.ParsedSpec) ([]*CRDDefinition, error) {

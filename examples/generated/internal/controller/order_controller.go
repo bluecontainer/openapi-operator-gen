@@ -20,13 +20,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
@@ -38,7 +39,7 @@ const (
 // OrderReconciler reconciles a Order object
 type OrderReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
@@ -139,6 +140,25 @@ func (r *OrderReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int3
 	return r.getBaseURL(ctx)
 }
 
+// buildResourceURL builds the URL for resource operations with path and query parameters
+// BasePath is the base path without path parameter placeholders (e.g., /pet, not /pet/{petId})
+// The resourceID is appended to the path for GET/PUT/DELETE operations
+func (r *OrderReconciler) buildResourceURL(baseURL string, instance *v1alpha1.Order, resourceID string) string {
+	builder := runtime.NewURLBuilder("/store/order")
+
+	// Add resource ID for operations that need it (appended to path)
+	builder.WithResourceID(resourceID)
+
+	return builder.Build(baseURL)
+}
+
+// buildResourceURLForCreate builds the URL for resource creation (POST) with query parameters only
+func (r *OrderReconciler) buildResourceURLForCreate(baseURL string, instance *v1alpha1.Order) string {
+	builder := runtime.NewURLBuilder("/store/order")
+
+	return builder.BuildForCreate(baseURL)
+}
+
 // getExternalID returns the external ID to use for GET/PUT/DELETE operations.
 // It prefers ExternalIDRef from spec (for importing existing resources),
 // then falls back to ExternalID from status (for resources created by the controller).
@@ -151,10 +171,10 @@ func (r *OrderReconciler) getExternalID(instance *v1alpha1.Order) string {
 
 // getResource performs a GET request to fetch the current state of the resource from the REST API.
 // Returns the response body as a map, or nil if the resource doesn't exist (404).
-func (r *OrderReconciler) getResource(ctx context.Context, baseURL string, externalID string) (map[string]interface{}, []byte, error) {
+func (r *OrderReconciler) getResource(ctx context.Context, baseURL string, externalID string, instance *v1alpha1.Order) (map[string]interface{}, []byte, error) {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/store/order/" + externalID
+	url := r.buildResourceURL(baseURL, instance, externalID)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create GET request: %w", err)
@@ -258,7 +278,7 @@ func (r *OrderReconciler) observeResource(ctx context.Context, instance *v1alpha
 					LastUpdated: &now,
 				}
 
-				respData, body, err := r.getResource(ctx, baseURL, externalID)
+				respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 				if err != nil {
 					endpointResp.Success = false
 					endpointResp.Error = err.Error()
@@ -271,7 +291,7 @@ func (r *OrderReconciler) observeResource(ctx context.Context, instance *v1alpha
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = 200
-					endpointResp.Data = &runtime.RawExtension{Raw: body}
+					endpointResp.Data = &k8sruntime.RawExtension{Raw: body}
 					successCount++
 					if firstSuccessBody == nil {
 						firstSuccessBody = body
@@ -293,7 +313,7 @@ func (r *OrderReconciler) observeResource(ctx context.Context, instance *v1alpha
 				instance.Status.Response = &v1alpha1.OrderEndpointResponse{
 					Success:     true,
 					StatusCode:  200,
-					Data:        &runtime.RawExtension{Raw: firstSuccessBody},
+					Data:        &k8sruntime.RawExtension{Raw: firstSuccessBody},
 					LastUpdated: &now,
 				}
 			}
@@ -316,7 +336,7 @@ func (r *OrderReconciler) observeResource(ctx context.Context, instance *v1alpha
 		return err
 	}
 
-	respData, body, err := r.getResource(ctx, baseURL, externalID)
+	respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 	if err != nil {
 		return err
 	}
@@ -331,7 +351,7 @@ func (r *OrderReconciler) observeResource(ctx context.Context, instance *v1alpha
 	instance.Status.Response = &v1alpha1.OrderEndpointResponse{
 		Success:     true,
 		StatusCode:  200,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.LastGetTime = &now
@@ -386,7 +406,7 @@ func (r *OrderReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1
 
 	// If we have an external ID (from spec.externalIDRef or status.externalID), try GET first
 	if externalID != "" {
-		respData, body, err := r.getResource(ctx, baseURL, externalID)
+		respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get resource: %w", err)
 		}
@@ -405,7 +425,7 @@ func (r *OrderReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1
 				instance.Status.Response = &v1alpha1.OrderEndpointResponse{
 					Success:     true,
 					StatusCode:  200,
-					Data:        &runtime.RawExtension{Raw: body},
+					Data:        &k8sruntime.RawExtension{Raw: body},
 					LastUpdated: &now,
 				}
 				return nil
@@ -434,7 +454,7 @@ func (r *OrderReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1
 func (r *OrderReconciler) createResource(ctx context.Context, instance *v1alpha1.Order, baseURL string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/store/order"
+	url := r.buildResourceURLForCreate(baseURL, instance)
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
@@ -481,7 +501,7 @@ func (r *OrderReconciler) createResource(ctx context.Context, instance *v1alpha1
 	instance.Status.Response = &v1alpha1.OrderEndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.DriftDetected = false
@@ -495,7 +515,7 @@ func (r *OrderReconciler) createResource(ctx context.Context, instance *v1alpha1
 func (r *OrderReconciler) updateResource(ctx context.Context, instance *v1alpha1.Order, baseURL string, externalID string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/store/order/" + externalID
+	url := r.buildResourceURL(baseURL, instance, externalID)
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
@@ -530,7 +550,7 @@ func (r *OrderReconciler) updateResource(ctx context.Context, instance *v1alpha1
 	instance.Status.Response = &v1alpha1.OrderEndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
-		Data:        &runtime.RawExtension{Raw: body},
+		Data:        &k8sruntime.RawExtension{Raw: body},
 		LastUpdated: &now,
 	}
 	instance.Status.DriftDetected = false
@@ -560,6 +580,8 @@ func (r *OrderReconciler) marshalSpecForAPI(instance *v1alpha1.Order) ([]byte, e
 	delete(specMap, "targetNamespace")
 	delete(specMap, "externalIDRef")
 	delete(specMap, "readOnly")
+	// Remove path parameter fields (they're used in URL, not body)
+	delete(specMap, "orderId")
 
 	return json.Marshal(specMap)
 }
@@ -621,7 +643,7 @@ func (r *OrderReconciler) syncResource(ctx context.Context, instance *v1alpha1.O
 func (r *OrderReconciler) deleteFromEndpoint(ctx context.Context, instance *v1alpha1.Order, baseURL string) error {
 	logger := log.FromContext(ctx)
 
-	url := baseURL + "/store/order/" + instance.Status.ExternalID
+	url := r.buildResourceURL(baseURL, instance, instance.Status.ExternalID)
 	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create delete request: %w", err)

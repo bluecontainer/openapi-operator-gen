@@ -52,16 +52,34 @@ spec:
           spec:
             description: PetSpec defines the desired state of Pet
             properties:
-              data:
-                description: Resource data as JSON
+              category:
+                description: PetCategory is a nested type used by CRD specs
+                properties:
+                  id:
+                    format: int64
+                    type: integer
+                  name:
+                    type: string
                 type: object
-                x-kubernetes-preserve-unknown-fields: true
               externalIDRef:
                 description: |-
                   ExternalIDRef references an existing resource in the external REST API by its ID.
                   When set, the controller will GET this resource instead of creating a new one.
                   This is useful for importing existing resources or for read-only observation.
                 type: string
+              id:
+                format: int64
+                type: integer
+              name:
+                type: string
+              petId:
+                description: ID of pet to return
+                format: int64
+                type: integer
+              photoUrls:
+                items:
+                  type: string
+                type: array
               readOnly:
                 description: |-
                   ReadOnly indicates that this CR is for observation only.
@@ -69,6 +87,24 @@ spec:
                   without performing any create, update, or delete operations.
                   Requires ExternalIDRef to be set.
                 type: boolean
+              status:
+                description: pet status in the store
+                enum:
+                - available
+                - pending
+                - sold
+                type: string
+              tags:
+                items:
+                  description: PetTagsItem is a nested type used by CRD specs
+                  properties:
+                    id:
+                      format: int64
+                      type: integer
+                    name:
+                      type: string
+                  type: object
+                type: array
               targetDeployment:
                 description: |-
                   TargetDeployment specifies a Deployment name to route requests to.
@@ -97,6 +133,10 @@ spec:
                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                   When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
+            required:
+            - name
+            - petId
+            - photoUrls
             type: object
           status:
             description: PetStatus defines the observed state of Pet

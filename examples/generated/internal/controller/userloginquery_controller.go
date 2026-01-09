@@ -20,7 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,7 +37,7 @@ const (
 // UserLoginQueryReconciler reconciles a UserLoginQuery query object
 type UserLoginQueryReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
+	Scheme           *k8sruntime.Scheme
 	HTTPClient       *http.Client
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
@@ -262,7 +262,7 @@ func (r *UserLoginQueryReconciler) executeQuery(ctx context.Context, instance *v
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = statusCode
-					endpointResp.Data = &runtime.RawExtension{Raw: body}
+					endpointResp.Data = &k8sruntime.RawExtension{Raw: body}
 					successCount++
 					resultCount := r.countResults(body)
 					if firstSuccessResp == nil {
@@ -322,7 +322,7 @@ func (r *UserLoginQueryReconciler) executeQuery(ctx context.Context, instance *v
 	}
 
 	endpointResp.Success = true
-	endpointResp.Data = &runtime.RawExtension{Raw: body}
+	endpointResp.Data = &k8sruntime.RawExtension{Raw: body}
 	resultCount := r.countResults(body)
 
 	// Update status with results

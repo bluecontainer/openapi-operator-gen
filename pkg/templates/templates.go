@@ -34,17 +34,12 @@ var ActionControllerTemplate string
 //go:embed crd.yaml.tmpl
 var CRDYAMLTemplate string
 
-// EndpointResolverTemplate is the template for StatefulSet endpoint discovery
-//
-//go:embed endpoint_resolver.go.tmpl
-var EndpointResolverTemplate string
-
 // MainTemplate is the template for the main.go of generated operator
 //
 //go:embed main.go.tmpl
 var MainTemplate string
 
-// UtilsTemplate is the template for utility functions shared across controllers
+// ControllerTestTemplate is the template for generating controller test files
 //
-//go:embed utils.go.tmpl
-var UtilsTemplate string
+//go:embed controller_test.go.tmpl
+var ControllerTestTemplate string
