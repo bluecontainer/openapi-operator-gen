@@ -103,3 +103,18 @@ var GoModTemplate string
 //
 //go:embed boilerplate.go.txt.tmpl
 var BoilerplateTemplate string
+
+// ExampleCRTemplate is the template for generating example CR YAML files
+//
+//go:embed example_cr.yaml.tmpl
+var ExampleCRTemplate string
+
+// ExampleCRRefTemplate is the template for generating example CR YAML files with externalIDRef
+//
+//go:embed example_cr_ref.yaml.tmpl
+var ExampleCRRefTemplate string
+
+// KustomizationSamplesTemplate is the template for config/samples/kustomization.yaml
+//
+//go:embed kustomization_samples.yaml.tmpl
+var KustomizationSamplesTemplate string

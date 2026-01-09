@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- v1alpha1_order.yaml
+- v1alpha1_order_ref.yaml
+- v1alpha1_pet.yaml
+- v1alpha1_pet_ref.yaml
+- v1alpha1_user.yaml
+- v1alpha1_user_ref.yaml
+- v1alpha1_petfindbystatusquery.yaml
+- v1alpha1_petfindbytagsquery.yaml
+- v1alpha1_storeinventoryquery.yaml
+- v1alpha1_userloginquery.yaml
+- v1alpha1_userlogoutquery.yaml
+- v1alpha1_petuploadimageaction.yaml
+- v1alpha1_usercreatewithlistaction.yaml

@@ -1,0 +1,20 @@
+# Example Order - Reference existing resource
+# Use this to import/sync an existing resource from the REST API
+apiVersion: petstore.example.com/v1alpha1
+kind: Order
+metadata:
+  name: order-existing
+  namespace: default
+spec:
+  # Reference an existing resource by its external ID
+  externalIDRef: "existing-resource-id"
+
+  # Set readOnly to true to only observe without modifications
+  # readOnly: true
+
+  # Endpoint targeting (optional - uncomment if needed)
+  # targetNamespace: "target-namespace"
+  # targetStatefulSet: "my-statefulset"
+  # targetDeployment: "my-deployment"
+  # targetHelmRelease: "my-release"
+  # targetPodOrdinal: 0

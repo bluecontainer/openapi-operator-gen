@@ -1,0 +1,16 @@
+# Example PetUploadimageAction Custom Resource
+apiVersion: petstore.example.com/v1alpha1
+kind: PetUploadimageAction
+metadata:
+  name: petuploadimageaction-sample
+  namespace: default
+spec:
+  petId: "example-petId"
+  reExecuteInterval: {}
+  additionalMetadata: "example-additionalMetadata"
+  # Endpoint targeting (optional - uncomment if needed)
+  # targetNamespace: "target-namespace"
+  # targetStatefulSet: "my-statefulset"
+  # targetDeployment: "my-deployment"
+  # targetHelmRelease: "my-release"
+  # targetPodOrdinal: 0

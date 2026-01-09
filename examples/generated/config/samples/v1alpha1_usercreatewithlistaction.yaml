@@ -1,0 +1,14 @@
+# Example UserCreatewithlistAction Custom Resource
+apiVersion: petstore.example.com/v1alpha1
+kind: UserCreatewithlistAction
+metadata:
+  name: usercreatewithlistaction-sample
+  namespace: default
+spec:
+  reExecuteInterval: {}
+  # Endpoint targeting (optional - uncomment if needed)
+  # targetNamespace: "target-namespace"
+  # targetStatefulSet: "my-statefulset"
+  # targetDeployment: "my-deployment"
+  # targetHelmRelease: "my-release"
+  # targetPodOrdinal: 0

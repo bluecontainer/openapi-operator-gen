@@ -120,6 +120,42 @@ func (r *UserLogoutQueryReconciler) resolveBaseURL(ctx context.Context, instance
 	return r.getBaseURL(ctx)
 }
 
+// resolveAllHealthyEndpoints returns all healthy endpoint URLs based on CR targeting fields.
+// This is used for all-healthy strategy fan-out operations.
+func (r *UserLogoutQueryReconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *v1alpha1.UserLogoutQuery) ([]string, error) {
+	if r.EndpointResolver == nil {
+		// No resolver - return single static URL
+		url, err := r.getBaseURL(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return []string{url}, nil
+	}
+
+	namespace := instance.Spec.TargetNamespace
+	if namespace == "" {
+		namespace = instance.Namespace
+	}
+
+	// Per-CR Helm release targeting
+	if instance.Spec.TargetHelmRelease != "" {
+		return r.EndpointResolver.GetAllEndpointsForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace)
+	}
+
+	// Per-CR StatefulSet targeting
+	if instance.Spec.TargetStatefulSet != "" {
+		return r.EndpointResolver.GetAllEndpointsForStatefulSet(ctx, instance.Spec.TargetStatefulSet, namespace)
+	}
+
+	// Per-CR Deployment targeting
+	if instance.Spec.TargetDeployment != "" {
+		return r.EndpointResolver.GetAllEndpointsForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
+	}
+
+	// Fall back to global all-healthy endpoints
+	return r.EndpointResolver.GetAllHealthyEndpoints()
+}
+
 // buildQueryURL builds the query URL from the spec parameters
 func (r *UserLogoutQueryReconciler) buildQueryURL(baseURL string, instance *v1alpha1.UserLogoutQuery) string {
 	queryURL := baseURL + "/user/logout"
@@ -236,7 +272,7 @@ func (r *UserLogoutQueryReconciler) executeQuery(ctx context.Context, instance *
 
 	// Check if using all-healthy strategy (fan out to multiple endpoints)
 	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
-		baseURLs, err := r.EndpointResolver.GetAllHealthyEndpoints()
+		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}

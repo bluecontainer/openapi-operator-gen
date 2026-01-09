@@ -232,7 +232,7 @@ type PetSpec struct {
 	// +optional
 	Tags []PetTagsItem `json:"tags,omitempty"`
 
-	// Pet id to delete
+	// ID of pet to return
 	// +kubebuilder:validation:Required
 	PetId int64 `json:"petId"`
 

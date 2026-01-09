@@ -1,0 +1,13 @@
+# Example UserLogoutQuery Custom Resource
+apiVersion: petstore.example.com/v1alpha1
+kind: UserLogoutQuery
+metadata:
+  name: userlogoutquery-sample
+  namespace: default
+spec:
+  # Endpoint targeting (optional - uncomment if needed)
+  # targetNamespace: "target-namespace"
+  # targetStatefulSet: "my-statefulset"
+  # targetDeployment: "my-deployment"
+  # targetHelmRelease: "my-release"
+  # targetPodOrdinal: 0

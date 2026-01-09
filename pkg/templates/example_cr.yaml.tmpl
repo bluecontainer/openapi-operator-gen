@@ -1,0 +1,18 @@
+# Example {{ .Kind }} Custom Resource
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .Kind }}
+metadata:
+  name: {{ .KindLower }}-sample
+  namespace: default
+spec:
+{{- range .SpecFields }}
+{{- if not .IsTargeting }}
+  {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
+  # Endpoint targeting (optional - uncomment if needed)
+  # targetNamespace: "target-namespace"
+  # targetStatefulSet: "my-statefulset"
+  # targetDeployment: "my-deployment"
+  # targetHelmRelease: "my-release"
+  # targetPodOrdinal: 0

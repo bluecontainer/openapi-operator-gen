@@ -147,6 +147,15 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	// Generate example CR samples (always generated)
+	fmt.Println("Generating example CR samples...")
+	samplesGen := generator.NewSamplesGenerator(cfg)
+	if err := samplesGen.Generate(crds); err != nil {
+		return fmt.Errorf("failed to generate example CRs: %w", err)
+	}
+	fmt.Println("  Generated config/samples/*.yaml")
+	fmt.Println()
+
 	// Generate controllers
 	fmt.Println("Generating controller reconciliation logic...")
 	controllerGen := generator.NewControllerGenerator(cfg)
