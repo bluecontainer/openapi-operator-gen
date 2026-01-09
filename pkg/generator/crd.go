@@ -55,10 +55,45 @@ func (g *CRDGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	// Collect CRD filenames for kustomization.yaml
+	crdFiles := make([]string, 0, len(crds))
+
 	for _, crd := range crds {
 		if err := g.generateCRD(outputDir, crd); err != nil {
 			return fmt.Errorf("failed to generate CRD for %s: %w", crd.Kind, err)
 		}
+		crdFiles = append(crdFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIGroup, crd.Plural))
+	}
+
+	// Generate kustomization.yaml for CRDs
+	if err := g.generateKustomization(outputDir, crdFiles); err != nil {
+		return fmt.Errorf("failed to generate CRD kustomization.yaml: %w", err)
+	}
+
+	return nil
+}
+
+func (g *CRDGenerator) generateKustomization(outputDir string, crdFiles []string) error {
+	data := struct {
+		CRDFiles []string
+	}{
+		CRDFiles: crdFiles,
+	}
+
+	tmpl, err := template.New("kustomization").Parse(templates.KustomizationCRDTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	kustomizationPath := filepath.Join(outputDir, "kustomization.yaml")
+	file, err := os.Create(kustomizationPath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
 	return nil

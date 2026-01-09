@@ -13,8 +13,14 @@ import (
 )
 
 var (
+	// version is set at build time via -ldflags
 	version = "dev"
-	cfg     = &config.Config{}
+	// commit is the git commit hash, set at build time via -ldflags
+	commit = "none"
+	// date is the build date, set at build time via -ldflags
+	date = "unknown"
+
+	cfg = &config.Config{}
 )
 
 func main() {
@@ -38,7 +44,11 @@ It takes a REST API specification and generates:
 Example:
   openapi-operator-gen generate --spec api.yaml --output ./generated \
     --group myapp.example.com --version v1alpha1`,
-	Version: version,
+}
+
+func init() {
+	rootCmd.Version = version
+	rootCmd.SetVersionTemplate(fmt.Sprintf("openapi-operator-gen version %s\n  commit: %s\n  built:  %s\n", version, commit, date))
 }
 
 var generateCmd = &cobra.Command{

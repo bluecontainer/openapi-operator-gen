@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - petstore.example.com_orders.yaml
+  - petstore.example.com_petfindbystatusqueries.yaml
+  - petstore.example.com_petfindbytagsqueries.yaml
+  - petstore.example.com_pets.yaml
+  - petstore.example.com_petuploadimageactions.yaml
+  - petstore.example.com_storeinventoryqueries.yaml
+  - petstore.example.com_usercreatewithlistactions.yaml
+  - petstore.example.com_userloginqueries.yaml
+  - petstore.example.com_userlogoutqueries.yaml
+  - petstore.example.com_users.yaml

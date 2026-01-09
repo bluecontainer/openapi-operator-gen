@@ -43,3 +43,63 @@ var MainTemplate string
 //
 //go:embed controller_test.go.tmpl
 var ControllerTestTemplate string
+
+// NamespaceYAMLTemplate is the template for generating namespace.yaml
+//
+//go:embed namespace.yaml.tmpl
+var NamespaceYAMLTemplate string
+
+// ServiceAccountYAMLTemplate is the template for generating service_account.yaml
+//
+//go:embed service_account.yaml.tmpl
+var ServiceAccountYAMLTemplate string
+
+// RoleBindingYAMLTemplate is the template for generating role_binding.yaml
+//
+//go:embed role_binding.yaml.tmpl
+var RoleBindingYAMLTemplate string
+
+// ManagerYAMLTemplate is the template for generating manager.yaml (Deployment)
+//
+//go:embed manager.yaml.tmpl
+var ManagerYAMLTemplate string
+
+// KustomizationManagerTemplate is the template for config/manager/kustomization.yaml
+//
+//go:embed kustomization_manager.yaml.tmpl
+var KustomizationManagerTemplate string
+
+// KustomizationRBACTemplate is the template for config/rbac/kustomization.yaml
+//
+//go:embed kustomization_rbac.yaml.tmpl
+var KustomizationRBACTemplate string
+
+// KustomizationCRDTemplate is the template for config/crd/bases/kustomization.yaml
+//
+//go:embed kustomization_crd.yaml.tmpl
+var KustomizationCRDTemplate string
+
+// KustomizationDefaultTemplate is the template for config/default/kustomization.yaml
+//
+//go:embed kustomization_default.yaml.tmpl
+var KustomizationDefaultTemplate string
+
+// DockerfileTemplate is the template for generating the Dockerfile
+//
+//go:embed dockerfile.tmpl
+var DockerfileTemplate string
+
+// MakefileTemplate is the template for generating the Makefile
+//
+//go:embed makefile.tmpl
+var MakefileTemplate string
+
+// GoModTemplate is the template for generating the go.mod file
+//
+//go:embed go.mod.tmpl
+var GoModTemplate string
+
+// BoilerplateTemplate is the template for generating hack/boilerplate.go.txt
+//
+//go:embed boilerplate.go.txt.tmpl
+var BoilerplateTemplate string

@@ -3,7 +3,7 @@ module github.com/bluecontainer/petstore-operator
 go 1.25
 
 require (
-	github.com/bluecontainer/openapi-operator-gen v0.0.1
+	github.com/bluecontainer/openapi-operator-gen v0.0.2
 	k8s.io/apimachinery v0.32.0
 	k8s.io/client-go v0.32.0
 	sigs.k8s.io/controller-runtime v0.20.0
@@ -68,4 +68,4 @@ require (
 
 // For local development, uncomment and adjust the path below:
 // replace github.com/bluecontainer/openapi-operator-gen => /path/to/openapi-operator-gen
-replace github.com/bluecontainer/openapi-operator-gen => ../..
+// replace github.com/bluecontainer/openapi-operator-gen => ../..

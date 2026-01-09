@@ -73,7 +73,7 @@ spec:
               name:
                 type: string
               petId:
-                description: ID of pet to return
+                description: Pet id to delete
                 format: int64
                 type: integer
               photoUrls:

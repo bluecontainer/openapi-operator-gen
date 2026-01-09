@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -140,6 +141,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 	// Generate hack/boilerplate.go.txt for controller-gen
 	if err := g.generateBoilerplate(); err != nil {
 		return fmt.Errorf("failed to generate boilerplate: %w", err)
+	}
+
+	// Generate deployment manifests (namespace, service account, deployment, role binding)
+	if err := g.generateDeploymentManifests(); err != nil {
+		return fmt.Errorf("failed to generate deployment manifests: %w", err)
 	}
 
 	return nil
@@ -375,155 +381,28 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 }
 
 func (g *ControllerGenerator) generateGoMod() error {
-	content := fmt.Sprintf(`module %s
-
-go 1.25
-
-require (
-	github.com/bluecontainer/openapi-operator-gen v0.0.1
-	k8s.io/api v0.32.0
-	k8s.io/apimachinery v0.32.0
-	k8s.io/client-go v0.32.0
-	sigs.k8s.io/controller-runtime v0.20.0
-)
-
-// For local development, uncomment and adjust the path below:
-// replace github.com/bluecontainer/openapi-operator-gen => /path/to/openapi-operator-gen
-`, g.config.ModuleName)
-
-	filepath := filepath.Join(g.config.OutputDir, "go.mod")
-	return os.WriteFile(filepath, []byte(content), 0644)
+	data := struct {
+		ModuleName string
+	}{
+		ModuleName: g.config.ModuleName,
+	}
+	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
+	return g.executeTemplate(templates.GoModTemplate, data, outputPath)
 }
 
 func (g *ControllerGenerator) generateDockerfile() error {
-	content := `# Build stage
-FROM golang:1.25 AS builder
-
-WORKDIR /workspace
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY cmd/ cmd/
-COPY api/ api/
-COPY internal/ internal/
-
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager cmd/manager/main.go
-
-# Runtime stage
-FROM gcr.io/distroless/static:nonroot
-WORKDIR /
-COPY --from=builder /workspace/manager .
-USER 65532:65532
-
-ENTRYPOINT ["/manager"]
-`
-
-	filepath := filepath.Join(g.config.OutputDir, "Dockerfile")
-	return os.WriteFile(filepath, []byte(content), 0644)
+	outputPath := filepath.Join(g.config.OutputDir, "Dockerfile")
+	return g.executeTemplate(templates.DockerfileTemplate, nil, outputPath)
 }
 
 func (g *ControllerGenerator) generateMakefile() error {
-	content := fmt.Sprintf(`# Image URL to use all building/pushing image targets
-IMG ?= controller:latest
-
-# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.29.0
-
-# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
-ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
-else
-GOBIN=$(shell go env GOBIN)
-endif
-
-# CONTAINER_TOOL defines the container tool to be used for building images.
-CONTAINER_TOOL ?= docker
-
-# Setting SHELL to bash allows bash commands to be executed by recipes.
-SHELL = /usr/bin/env bash -o pipefail
-.SHELLFLAGS = -ec
-
-.PHONY: all
-all: build
-
-##@ General
-
-.PHONY: help
-help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%%-15s\033[0m %%s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
-
-##@ Development
-
-.PHONY: manifests
-manifests: controller-gen ## Generate CRD manifests.
-	$(CONTROLLER_GEN) crd paths="./..." output:crd:artifacts:config=config/crd/bases
-
-.PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-.PHONY: fmt
-fmt: ## Run go fmt against code.
-	go fmt ./...
-
-.PHONY: vet
-vet: ## Run go vet against code.
-	go vet ./...
-
-.PHONY: test
-test: manifests generate fmt vet ## Run tests.
-	go test ./... -coverprofile cover.out
-
-##@ Build
-
-.PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build -buildvcs=false -o bin/manager cmd/manager/main.go
-
-.PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/manager/main.go
-
-.PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
-
-.PHONY: docker-push
-docker-push: ## Push docker image with the manager.
-	$(CONTAINER_TOOL) push ${IMG}
-
-##@ Deployment
-
-.PHONY: install
-install: manifests ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	kubectl apply -f config/crd/bases/
-
-.PHONY: uninstall
-uninstall: ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-	kubectl delete -f config/crd/bases/
-
-##@ Dependencies
-
-## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	mkdir -p $(LOCALBIN)
-
-## Tool Binaries
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-
-## Tool Versions
-CONTROLLER_TOOLS_VERSION ?= v0.17.0
-
-.PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
-	@test -s $(LOCALBIN)/controller-gen && $(LOCALBIN)/controller-gen --version | grep -q $(CONTROLLER_TOOLS_VERSION) || \
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
-`)
-
-	filepath := filepath.Join(g.config.OutputDir, "Makefile")
-	return os.WriteFile(filepath, []byte(content), 0644)
+	data := struct {
+		AppName string
+	}{
+		AppName: strings.Split(g.config.APIGroup, ".")[0],
+	}
+	outputPath := filepath.Join(g.config.OutputDir, "Makefile")
+	return g.executeTemplate(templates.MakefileTemplate, data, outputPath)
 }
 
 func (g *ControllerGenerator) generateBoilerplate() error {
@@ -532,23 +411,100 @@ func (g *ControllerGenerator) generateBoilerplate() error {
 		return fmt.Errorf("failed to create hack directory: %w", err)
 	}
 
-	content := fmt.Sprintf(`/*
-Copyright %d Generated by openapi-operator-gen.
+	data := struct {
+		Year int
+	}{
+		Year: time.Now().Year(),
+	}
+	outputPath := filepath.Join(hackDir, "boilerplate.go.txt")
+	return g.executeTemplate(templates.BoilerplateTemplate, data, outputPath)
+}
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+// DeploymentManifestData holds data for generating deployment YAML manifests
+type DeploymentManifestData struct {
+	Namespace string
+	AppName   string
+}
 
-    http://www.apache.org/licenses/LICENSE-2.0
+func (g *ControllerGenerator) generateDeploymentManifests() error {
+	// Derive namespace from API group (e.g., petstore.example.com -> petstore-system)
+	data := DeploymentManifestData{
+		Namespace: strings.Split(g.config.APIGroup, ".")[0] + "-system",
+		AppName:   strings.Split(g.config.APIGroup, ".")[0],
+	}
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-`, time.Now().Year())
+	// Create config directories
+	managerDir := filepath.Join(g.config.OutputDir, "config", "manager")
+	if err := os.MkdirAll(managerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create manager directory: %w", err)
+	}
 
-	filepath := filepath.Join(hackDir, "boilerplate.go.txt")
-	return os.WriteFile(filepath, []byte(content), 0644)
+	rbacDir := filepath.Join(g.config.OutputDir, "config", "rbac")
+	if err := os.MkdirAll(rbacDir, 0755); err != nil {
+		return fmt.Errorf("failed to create rbac directory: %w", err)
+	}
+
+	// Generate namespace.yaml
+	if err := g.executeTemplate(templates.NamespaceYAMLTemplate, data,
+		filepath.Join(g.config.OutputDir, "config", "namespace.yaml")); err != nil {
+		return fmt.Errorf("failed to generate namespace.yaml: %w", err)
+	}
+
+	// Generate config/rbac/service_account.yaml
+	if err := g.executeTemplate(templates.ServiceAccountYAMLTemplate, data,
+		filepath.Join(rbacDir, "service_account.yaml")); err != nil {
+		return fmt.Errorf("failed to generate service_account.yaml: %w", err)
+	}
+
+	// Generate config/rbac/role_binding.yaml
+	if err := g.executeTemplate(templates.RoleBindingYAMLTemplate, data,
+		filepath.Join(rbacDir, "role_binding.yaml")); err != nil {
+		return fmt.Errorf("failed to generate role_binding.yaml: %w", err)
+	}
+
+	// Generate config/manager/manager.yaml (Deployment)
+	if err := g.executeTemplate(templates.ManagerYAMLTemplate, data,
+		filepath.Join(managerDir, "manager.yaml")); err != nil {
+		return fmt.Errorf("failed to generate manager.yaml: %w", err)
+	}
+
+	// Generate config/manager/kustomization.yaml
+	if err := g.executeTemplate(templates.KustomizationManagerTemplate, data,
+		filepath.Join(managerDir, "kustomization.yaml")); err != nil {
+		return fmt.Errorf("failed to generate manager kustomization.yaml: %w", err)
+	}
+
+	// Generate config/rbac/kustomization.yaml
+	if err := g.executeTemplate(templates.KustomizationRBACTemplate, data,
+		filepath.Join(rbacDir, "kustomization.yaml")); err != nil {
+		return fmt.Errorf("failed to generate rbac kustomization.yaml: %w", err)
+	}
+
+	// Create config directory
+	defaultDir := filepath.Join(g.config.OutputDir, "config")
+	if err := os.MkdirAll(defaultDir, 0755); err != nil {
+		return fmt.Errorf("failed to create default directory: %w", err)
+	}
+
+	// Generate config/kustomization.yaml
+	if err := g.executeTemplate(templates.KustomizationDefaultTemplate, data,
+		filepath.Join(defaultDir, "kustomization.yaml")); err != nil {
+		return fmt.Errorf("failed to generate default kustomization.yaml: %w", err)
+	}
+
+	return nil
+}
+
+func (g *ControllerGenerator) executeTemplate(tmplContent string, data interface{}, outputPath string) error {
+	tmpl, err := template.New("yaml").Parse(tmplContent)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return os.WriteFile(outputPath, buf.Bytes(), 0644)
 }

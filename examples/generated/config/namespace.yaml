@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: petstore-system
+  labels:
+    app.kubernetes.io/name: petstore
+    app.kubernetes.io/managed-by: openapi-operator-gen
