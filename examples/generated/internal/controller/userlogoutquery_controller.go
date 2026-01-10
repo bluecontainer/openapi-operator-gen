@@ -17,6 +17,12 @@ import (
 	"reflect"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +34,56 @@ import (
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
+
+var (
+	userlogoutqueryTracer = otel.Tracer("github.com/bluecontainer/petstore-operator/controller/userlogoutquery")
+	userlogoutqueryMeter  = otel.Meter("github.com/bluecontainer/petstore-operator/controller/userlogoutquery")
+
+	userlogoutqueryReconcileTotal    metric.Int64Counter
+	userlogoutqueryReconcileDuration metric.Float64Histogram
+	userlogoutqueryQueryTotal        metric.Int64Counter
+	userlogoutqueryQueryDuration     metric.Float64Histogram
+)
+
+func init() {
+	var err error
+
+	userlogoutqueryReconcileTotal, err = userlogoutqueryMeter.Int64Counter(
+		"reconcile_total",
+		metric.WithDescription("Total number of reconciliations"),
+		metric.WithUnit("{reconcile}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userlogoutqueryReconcileDuration, err = userlogoutqueryMeter.Float64Histogram(
+		"reconcile_duration_seconds",
+		metric.WithDescription("Duration of reconciliation in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userlogoutqueryQueryTotal, err = userlogoutqueryMeter.Int64Counter(
+		"query_total",
+		metric.WithDescription("Total number of queries executed"),
+		metric.WithUnit("{query}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userlogoutqueryQueryDuration, err = userlogoutqueryMeter.Float64Histogram(
+		"query_duration_seconds",
+		metric.WithDescription("Duration of query execution in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+}
 
 const (
 	userlogoutqueryFinalizer    = "petstore.example.com/finalizer"
@@ -49,6 +105,40 @@ type UserLogoutQueryReconciler struct {
 
 // Reconcile executes the query and updates the status with results
 func (r *UserLogoutQueryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	ctx, span := userlogoutqueryTracer.Start(ctx, "Reconcile",
+		trace.WithAttributes(
+			attribute.String("resource.name", req.Name),
+			attribute.String("resource.namespace", req.Namespace),
+			attribute.String("resource.kind", "UserLogoutQuery"),
+		))
+	defer span.End()
+
+	start := time.Now()
+	result, err := r.reconcileInternal(ctx, req)
+	duration := time.Since(start).Seconds()
+
+	status := "success"
+	if err != nil {
+		status = "error"
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	userlogoutqueryReconcileTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("namespace", req.Namespace),
+		))
+	userlogoutqueryReconcileDuration.Record(ctx, duration,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("namespace", req.Namespace),
+		))
+
+	return result, err
+}
+
+func (r *UserLogoutQueryReconciler) reconcileInternal(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Fetch the UserLogoutQuery instance
@@ -73,13 +163,18 @@ func (r *UserLogoutQueryReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 func (r *UserLogoutQueryReconciler) getBaseURL(ctx context.Context) (string, error) {
+	// Try static BaseURL first
+	if r.BaseURL != "" {
+		return r.BaseURL, nil
+	}
+	// Try global endpoint resolver
 	if r.EndpointResolver != nil {
-		return r.EndpointResolver.GetEndpoint()
+		url, err := r.EndpointResolver.GetEndpoint()
+		if err == nil {
+			return url, nil
+		}
 	}
-	if r.BaseURL == "" {
-		return "", fmt.Errorf("no base URL configured")
-	}
-	return r.BaseURL, nil
+	return "", fmt.Errorf("no endpoint configured: set global endpoint (--base-url, --statefulset-name, --deployment-name, or --helm-release) or specify per-CR targeting (targetHelmRelease, targetStatefulSet, or targetDeployment)")
 }
 
 func (r *UserLogoutQueryReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
@@ -214,33 +309,71 @@ func (r *UserLogoutQueryReconciler) buildQueryURL(baseURL string, instance *v1al
 
 // executeQueryToEndpoint executes the query against a single endpoint
 func (r *UserLogoutQueryReconciler) executeQueryToEndpoint(ctx context.Context, instance *v1alpha1.UserLogoutQuery, baseURL string) ([]byte, int, error) {
+	ctx, span := userlogoutqueryTracer.Start(ctx, "Query",
+		trace.WithAttributes(
+			attribute.String("http.method", "GET"),
+			attribute.String("endpoint.url", baseURL),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+	start := time.Now()
 
 	queryURL := r.buildQueryURL(baseURL, instance)
+	span.SetAttributes(attribute.String("http.url", queryURL))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", queryURL, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	logger.Info("Executing query", "url", queryURL)
 	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		r.recordQueryMetrics(ctx, "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		r.recordQueryMetrics(ctx, "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, resp.StatusCode, fmt.Errorf("query failed: %s - %s", resp.Status, string(body))
+		r.recordQueryMetrics(ctx, "error", resp.StatusCode, duration)
+		err := fmt.Errorf("query failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, resp.StatusCode, err
 	}
 
+	r.recordQueryMetrics(ctx, "success", resp.StatusCode, duration)
 	return body, resp.StatusCode, nil
+}
+
+func (r *UserLogoutQueryReconciler) recordQueryMetrics(ctx context.Context, status string, statusCode int, duration float64) {
+	userlogoutqueryQueryTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.Int("status_code", statusCode),
+		))
+	userlogoutqueryQueryDuration.Record(ctx, duration,
+		metric.WithAttributes(
+			attribute.String("status", status),
+		))
 }
 
 // countResults attempts to count results in the response

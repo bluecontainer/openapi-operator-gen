@@ -17,6 +17,12 @@ import (
 	"reflect"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +36,67 @@ import (
 	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
+
+var (
+	userTracer = otel.Tracer("github.com/bluecontainer/petstore-operator/controller/user")
+	userMeter  = otel.Meter("github.com/bluecontainer/petstore-operator/controller/user")
+
+	// Metrics
+	userReconcileTotal    metric.Int64Counter
+	userReconcileDuration metric.Float64Histogram
+	userAPICallTotal      metric.Int64Counter
+	userAPICallDuration   metric.Float64Histogram
+	userDriftDetected     metric.Int64Counter
+)
+
+func init() {
+	var err error
+
+	userReconcileTotal, err = userMeter.Int64Counter(
+		"reconcile_total",
+		metric.WithDescription("Total number of reconciliations"),
+		metric.WithUnit("{reconcile}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userReconcileDuration, err = userMeter.Float64Histogram(
+		"reconcile_duration_seconds",
+		metric.WithDescription("Duration of reconciliation in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userAPICallTotal, err = userMeter.Int64Counter(
+		"api_call_total",
+		metric.WithDescription("Total number of REST API calls"),
+		metric.WithUnit("{call}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userAPICallDuration, err = userMeter.Float64Histogram(
+		"api_call_duration_seconds",
+		metric.WithDescription("Duration of REST API calls in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	userDriftDetected, err = userMeter.Int64Counter(
+		"drift_detected_total",
+		metric.WithDescription("Total number of drift detections"),
+		metric.WithUnit("{drift}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+}
 
 const (
 	userFinalizer    = "petstore.example.com/finalizer"
@@ -52,6 +119,43 @@ type UserReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop
 func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Start tracing span
+	ctx, span := userTracer.Start(ctx, "Reconcile",
+		trace.WithAttributes(
+			attribute.String("resource.name", req.Name),
+			attribute.String("resource.namespace", req.Namespace),
+			attribute.String("resource.kind", "User"),
+		))
+	defer span.End()
+
+	start := time.Now()
+	result, err := r.reconcileInternal(ctx, req)
+	duration := time.Since(start).Seconds()
+
+	// Record metrics
+	status := "success"
+	if err != nil {
+		status = "error"
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	userReconcileTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("namespace", req.Namespace),
+		))
+	userReconcileDuration.Record(ctx, duration,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("namespace", req.Namespace),
+		))
+
+	return result, err
+}
+
+// reconcileInternal contains the actual reconciliation logic
+func (r *UserReconciler) reconcileInternal(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Fetch the User instance
@@ -65,6 +169,13 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		logger.Error(err, "Failed to get User")
 		return ctrl.Result{}, err
 	}
+
+	// Add resource attributes to current span
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(
+		attribute.String("resource.externalID", r.getExternalID(instance)),
+		attribute.Bool("resource.readOnly", instance.Spec.ReadOnly),
+	)
 
 	// Check if this is a read-only resource
 	isReadOnly := instance.Spec.ReadOnly
@@ -120,13 +231,18 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 }
 
 func (r *UserReconciler) getBaseURL(ctx context.Context) (string, error) {
+	// Try static BaseURL first
+	if r.BaseURL != "" {
+		return r.BaseURL, nil
+	}
+	// Try global endpoint resolver
 	if r.EndpointResolver != nil {
-		return r.EndpointResolver.GetEndpoint()
+		url, err := r.EndpointResolver.GetEndpoint()
+		if err == nil {
+			return url, nil
+		}
 	}
-	if r.BaseURL == "" {
-		return "", fmt.Errorf("no base URL configured")
-	}
-	return r.BaseURL, nil
+	return "", fmt.Errorf("no endpoint configured: set global endpoint (--base-url, --statefulset-name, --deployment-name, or --helm-release) or specify per-CR targeting (targetHelmRelease, targetStatefulSet, or targetDeployment)")
 }
 
 func (r *UserReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
@@ -172,36 +288,66 @@ func (r *UserReconciler) getExternalID(instance *v1alpha1.User) string {
 // getResource performs a GET request to fetch the current state of the resource from the REST API.
 // Returns the response body as a map, or nil if the resource doesn't exist (404).
 func (r *UserReconciler) getResource(ctx context.Context, baseURL string, externalID string, instance *v1alpha1.User) (map[string]interface{}, []byte, error) {
+	ctx, span := userTracer.Start(ctx, "GET",
+		trace.WithAttributes(
+			attribute.String("http.method", "GET"),
+			attribute.String("http.url", baseURL),
+			attribute.String("resource.externalID", externalID),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+	start := time.Now()
 
 	url := r.buildResourceURL(baseURL, instance, externalID)
+	span.SetAttributes(attribute.String("http.url", url))
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, nil, fmt.Errorf("failed to create GET request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	logger.Info("Getting resource", "url", url)
 	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "GET", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, nil, fmt.Errorf("failed to execute GET request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "GET", "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, nil, fmt.Errorf("failed to read GET response: %w", err)
 	}
 
 	// 404 means resource doesn't exist
 	if resp.StatusCode == http.StatusNotFound {
+		r.recordAPICallMetrics(ctx, "GET", "not_found", resp.StatusCode, duration)
 		logger.Info("Resource not found in external API", "externalID", externalID)
 		return nil, nil, nil
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, nil, fmt.Errorf("GET failed: %s - %s", resp.Status, string(body))
+		r.recordAPICallMetrics(ctx, "GET", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("GET failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, nil, err
 	}
+
+	r.recordAPICallMetrics(ctx, "GET", "success", resp.StatusCode, duration)
 
 	var respData map[string]interface{}
 	if err := json.Unmarshal(body, &respData); err != nil {
@@ -209,6 +355,21 @@ func (r *UserReconciler) getResource(ctx context.Context, baseURL string, extern
 	}
 
 	return respData, body, nil
+}
+
+// recordAPICallMetrics records metrics for API calls
+func (r *UserReconciler) recordAPICallMetrics(ctx context.Context, method, status string, statusCode int, duration float64) {
+	userAPICallTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("method", method),
+			attribute.String("status", status),
+			attribute.Int("status_code", statusCode),
+		))
+	userAPICallDuration.Record(ctx, duration,
+		metric.WithAttributes(
+			attribute.String("method", method),
+			attribute.String("status", status),
+		))
 }
 
 // compareSpecWithResponse compares the CR spec with the API response to detect drift.
@@ -435,10 +596,17 @@ func (r *UserReconciler) resolveAllHealthyEndpoints(ctx context.Context, instanc
 // On success, it updates instance.Status.ExternalID, instance.Status.Response, and instance.Status.DriftDetected.
 // The caller is responsible for calling updateStatus after this returns.
 func (r *UserReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.User, baseURL string) error {
+	ctx, span := userTracer.Start(ctx, "SyncToEndpoint",
+		trace.WithAttributes(
+			attribute.String("endpoint.url", baseURL),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
 	externalID := r.getExternalID(instance)
+	span.SetAttributes(attribute.String("resource.externalID", externalID))
 
 	// If we have an external ID (from spec.externalIDRef or status.externalID), try GET first
 	if externalID != "" {
@@ -453,6 +621,16 @@ func (r *UserReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.
 			// Resource exists - check for drift
 			hasDrift := r.compareSpecWithResponse(instance, respData)
 			instance.Status.DriftDetected = hasDrift
+			span.SetAttributes(attribute.Bool("drift.detected", hasDrift))
+
+			if hasDrift {
+				// Record drift detection metric
+				userDriftDetected.Add(ctx, 1,
+					metric.WithAttributes(
+						attribute.String("resource.name", instance.Name),
+						attribute.String("resource.namespace", instance.Namespace),
+					))
+			}
 
 			if !hasDrift {
 				// No drift - skip update
@@ -488,37 +666,66 @@ func (r *UserReconciler) syncToEndpoint(ctx context.Context, instance *v1alpha1.
 
 // createResource performs a POST to create a new resource.
 func (r *UserReconciler) createResource(ctx context.Context, instance *v1alpha1.User, baseURL string) error {
+	ctx, span := userTracer.Start(ctx, "POST",
+		trace.WithAttributes(
+			attribute.String("http.method", "POST"),
+			attribute.String("http.url", baseURL),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+	start := time.Now()
 
 	url := r.buildResourceURLForCreate(baseURL, instance)
+	span.SetAttributes(attribute.String("http.url", url))
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to marshal spec: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(specData))
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to create POST request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	logger.Info("Creating resource", "url", url)
 	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "POST", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to execute POST request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "POST", "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to read POST response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("POST failed: %s - %s", resp.Status, string(body))
+		r.recordAPICallMetrics(ctx, "POST", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("POST failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
+
+	r.recordAPICallMetrics(ctx, "POST", "success", resp.StatusCode, duration)
 
 	// Parse response to extract ID
 	var respData map[string]interface{}
@@ -532,6 +739,8 @@ func (r *UserReconciler) createResource(ctx context.Context, instance *v1alpha1.
 			}
 		}
 	}
+
+	span.SetAttributes(attribute.String("resource.externalID", instance.Status.ExternalID))
 
 	now := metav1.Now()
 	instance.Status.Response = &v1alpha1.UserEndpointResponse{
@@ -549,37 +758,67 @@ func (r *UserReconciler) createResource(ctx context.Context, instance *v1alpha1.
 
 // updateResource performs a PUT to update an existing resource.
 func (r *UserReconciler) updateResource(ctx context.Context, instance *v1alpha1.User, baseURL string, externalID string) error {
+	ctx, span := userTracer.Start(ctx, "PUT",
+		trace.WithAttributes(
+			attribute.String("http.method", "PUT"),
+			attribute.String("http.url", baseURL),
+			attribute.String("resource.externalID", externalID),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+	start := time.Now()
 
 	url := r.buildResourceURL(baseURL, instance, externalID)
+	span.SetAttributes(attribute.String("http.url", url))
 
 	// Marshal spec, excluding controller-specific fields
 	specData, err := r.marshalSpecForAPI(instance)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to marshal spec: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(specData))
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to create PUT request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	logger.Info("Updating resource", "url", url)
 	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "PUT", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to execute PUT request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "PUT", "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to read PUT response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("PUT failed: %s - %s", resp.Status, string(body))
+		r.recordAPICallMetrics(ctx, "PUT", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("PUT failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
+
+	r.recordAPICallMetrics(ctx, "PUT", "success", resp.StatusCode, duration)
 
 	now := metav1.Now()
 	instance.Status.ExternalID = externalID
@@ -677,27 +916,52 @@ func (r *UserReconciler) syncResource(ctx context.Context, instance *v1alpha1.Us
 
 // deleteFromEndpoint deletes from a single endpoint URL
 func (r *UserReconciler) deleteFromEndpoint(ctx context.Context, instance *v1alpha1.User, baseURL string) error {
+	ctx, span := userTracer.Start(ctx, "DELETE",
+		trace.WithAttributes(
+			attribute.String("http.method", "DELETE"),
+			attribute.String("http.url", baseURL),
+			attribute.String("resource.externalID", instance.Status.ExternalID),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+	start := time.Now()
 
 	url := r.buildResourceURL(baseURL, instance, instance.Status.ExternalID)
+	span.SetAttributes(attribute.String("http.url", url))
+
 	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to create delete request: %w", err)
 	}
 
 	logger.Info("Deleting external resource", "url", url)
 	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		r.recordAPICallMetrics(ctx, "DELETE", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to delete resource: %w", err)
 	}
 	defer resp.Body.Close()
 
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
 	// 404 is OK - resource already deleted
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete: %s - %s", resp.Status, string(body))
+		r.recordAPICallMetrics(ctx, "DELETE", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("failed to delete: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
+	r.recordAPICallMetrics(ctx, "DELETE", "success", resp.StatusCode, duration)
 	logger.Info("Successfully deleted external resource")
 	return nil
 }

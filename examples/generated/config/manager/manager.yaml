@@ -35,6 +35,23 @@ spec:
         env:
         - name: API_BASE_URL
           value: "http://api-server:8080"  # TODO: Configure your API base URL
+        # OpenTelemetry configuration (optional)
+        # Uncomment and configure to enable tracing and metrics
+        # - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        #   value: "otel-collector:4317"
+        # - name: OTEL_SERVICE_NAME
+        #   value: "petstore-operator"
+        # - name: OTEL_INSECURE
+        #   value: "true"
+        # Kubernetes metadata for telemetry
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

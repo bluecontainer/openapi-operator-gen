@@ -11,9 +11,6 @@ spec:
     kind: PetFindbystatusQuery
     listKind: PetFindbystatusQueryList
     plural: petfindbystatusqueries
-    shortNames:
-    - pe
-    - pet
     singular: petfindbystatusquery
   scope: Namespaced
   versions:

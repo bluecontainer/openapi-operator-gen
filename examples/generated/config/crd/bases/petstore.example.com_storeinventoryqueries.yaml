@@ -11,9 +11,6 @@ spec:
     kind: StoreInventoryQuery
     listKind: StoreInventoryQueryList
     plural: storeinventoryqueries
-    shortNames:
-    - st
-    - sto
     singular: storeinventoryquery
   scope: Namespaced
   versions:

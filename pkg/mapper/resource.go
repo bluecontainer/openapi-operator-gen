@@ -135,7 +135,7 @@ func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, known
 			APIVersion:  m.config.APIVersion,
 			Kind:        qe.Name,
 			Plural:      strings.ToLower(qe.Name) + "s",
-			ShortNames:  m.generateShortNames(qe.Name),
+			ShortNames:  []string{}, // Query CRDs don't get short names to avoid conflicts
 			Scope:       "Namespaced",
 			Description: qe.Summary,
 			BasePath:    qe.BasePath,
@@ -178,7 +178,7 @@ func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, kn
 			APIVersion:     m.config.APIVersion,
 			Kind:           ae.Name,
 			Plural:         strings.ToLower(ae.Name) + "s",
-			ShortNames:     m.generateShortNames(ae.Name),
+			ShortNames:     []string{}, // Action CRDs don't get short names to avoid conflicts
 			Scope:          "Namespaced",
 			Description:    ae.Summary,
 			IsAction:       true,

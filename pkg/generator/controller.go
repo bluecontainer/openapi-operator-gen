@@ -90,6 +90,7 @@ type MainTemplateData struct {
 	Year       int
 	APIVersion string
 	ModuleName string
+	AppName    string
 	CRDs       []CRDMainData
 }
 
@@ -353,6 +354,7 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 		Year:       time.Now().Year(),
 		APIVersion: g.config.APIVersion,
 		ModuleName: g.config.ModuleName,
+		AppName:    strings.Split(g.config.APIGroup, ".")[0],
 		CRDs:       make([]CRDMainData, 0, len(crds)),
 	}
 

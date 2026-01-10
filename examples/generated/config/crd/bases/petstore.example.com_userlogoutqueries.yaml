@@ -11,9 +11,6 @@ spec:
     kind: UserLogoutQuery
     listKind: UserLogoutQueryList
     plural: userlogoutqueries
-    shortNames:
-    - us
-    - use
     singular: userlogoutquery
   scope: Namespaced
   versions:

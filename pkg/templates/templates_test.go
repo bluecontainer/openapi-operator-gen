@@ -842,6 +842,7 @@ type MainTemplateData struct {
 	Year       int
 	APIVersion string
 	ModuleName string
+	AppName    string
 	CRDs       []CRDMainData
 }
 
@@ -855,6 +856,7 @@ func TestMainTemplateExecution(t *testing.T) {
 		Year:       2024,
 		APIVersion: "v1alpha1",
 		ModuleName: "github.com/example/petstore-operator",
+		AppName:    "petstore",
 		CRDs: []CRDMainData{
 			{Kind: "Pet", IsQuery: false},
 			{Kind: "User", IsQuery: false},
@@ -896,6 +898,7 @@ func TestMainTemplateWithSingleCRD(t *testing.T) {
 		Year:       2024,
 		APIVersion: "v1alpha1",
 		ModuleName: "github.com/example/simple-operator",
+		AppName:    "simple",
 		CRDs: []CRDMainData{
 			{Kind: "Resource", IsQuery: false},
 		},

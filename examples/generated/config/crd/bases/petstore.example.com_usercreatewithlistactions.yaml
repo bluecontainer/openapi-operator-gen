@@ -11,9 +11,6 @@ spec:
     kind: UserCreatewithlistAction
     listKind: UserCreatewithlistActionList
     plural: usercreatewithlistactions
-    shortNames:
-    - us
-    - use
     singular: usercreatewithlistaction
   scope: Namespaced
   versions:

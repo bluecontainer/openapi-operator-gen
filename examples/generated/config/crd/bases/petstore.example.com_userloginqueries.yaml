@@ -11,9 +11,6 @@ spec:
     kind: UserLoginQuery
     listKind: UserLoginQueryList
     plural: userloginqueries
-    shortNames:
-    - us
-    - use
     singular: userloginquery
   scope: Namespaced
   versions:

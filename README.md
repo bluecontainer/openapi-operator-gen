@@ -36,6 +36,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [Generated Output](#generated-output)
 - [Building the Generated Operator](#building-the-generated-operator)
 - [Running the Operator](#running-the-operator)
+  - [No Global Configuration (Per-CR Targeting Only)](#no-global-configuration-per-cr-targeting-only)
   - [1. Static URL Mode](#1-static-url-mode)
   - [2. StatefulSet Discovery Mode](#2-statefulset-discovery-mode)
   - [3. Deployment Discovery Mode](#3-deployment-discovery-mode)
@@ -56,6 +57,11 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [Example: Petstore Operator](#example-petstore-operator)
   - [Sample CR](#sample-cr)
 - [Environment Variables](#environment-variables)
+- [Observability (OpenTelemetry)](#observability-opentelemetry)
+  - [Enabling OpenTelemetry](#enabling-opentelemetry)
+  - [Metrics](#metrics)
+  - [Tracing](#tracing)
+  - [Kubernetes Deployment](#kubernetes-deployment-with-opentelemetry)
 - [License](#license)
 
 ## Features
@@ -872,7 +878,39 @@ make kind-deploy IMG=controller:latest
 
 ## Running the Operator
 
-The generated operator supports multiple modes for discovering the REST API endpoint:
+The generated operator supports multiple modes for discovering the REST API endpoint. **All endpoint configuration is optional** - the operator can start without any endpoint flags, in which case each CR must specify its target via per-CR targeting fields.
+
+### No Global Configuration (Per-CR Targeting Only)
+
+You can run the operator without any endpoint flags:
+
+```bash
+./bin/manager
+```
+
+In this mode, every CR must specify where to send requests using one of these spec fields:
+- `targetHelmRelease` - Target a Helm release
+- `targetStatefulSet` - Target a StatefulSet by name
+- `targetDeployment` - Target a Deployment by name
+
+Example CR with per-CR targeting:
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: fluffy
+spec:
+  name: Fluffy
+  targetHelmRelease: petstore-prod   # Required when no global config
+  targetNamespace: production         # Optional: defaults to CR namespace
+```
+
+If a CR doesn't specify a target and no global configuration exists, reconciliation will fail with:
+```
+no endpoint configured: set global endpoint (--base-url, --statefulset-name,
+--deployment-name, or --helm-release) or specify per-CR targeting
+(targetHelmRelease, targetStatefulSet, or targetDeployment)
+```
 
 ### 1. Static URL Mode
 
@@ -929,12 +967,14 @@ Environment variable: `HELM_RELEASE`
 
 ## Operator Configuration Flags
 
+All endpoint flags are optional. If no global endpoint is configured, each CR must specify its target using per-CR targeting fields (`targetHelmRelease`, `targetStatefulSet`, or `targetDeployment`).
+
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--base-url` | Static REST API base URL | |
-| `--statefulset-name` | StatefulSet name for endpoint discovery | |
-| `--deployment-name` | Deployment name for endpoint discovery | |
-| `--helm-release` | Helm release name for endpoint discovery | |
+| `--base-url` | Static REST API base URL | (optional) |
+| `--statefulset-name` | StatefulSet name for endpoint discovery | (optional) |
+| `--deployment-name` | Deployment name for endpoint discovery | (optional) |
+| `--helm-release` | Helm release name for endpoint discovery | (optional) |
 | `--namespace` | Namespace of the workload | Operator namespace |
 | `--service` | Headless service name (for DNS mode, StatefulSet only) | StatefulSet name |
 | `--port` | REST API port on pods | `8080` |
@@ -975,6 +1015,8 @@ spec:
 ### Per-CR Workload Targeting
 
 Each CR can override the operator's global endpoint configuration by specifying a target workload. This allows a single operator instance to manage resources across multiple REST API backends.
+
+**Note:** When the operator is started without any global endpoint configuration, per-CR targeting becomes mandatory - every CR must specify one of these target fields.
 
 #### Target by Helm Release
 
@@ -1231,6 +1273,203 @@ All flags can be set via environment variables:
 | `HELM_RELEASE` | `--helm-release` |
 | `WORKLOAD_NAMESPACE` | `--namespace` |
 | `SERVICE_NAME` | `--service` |
+
+## Observability (OpenTelemetry)
+
+Generated operators include built-in OpenTelemetry instrumentation for distributed tracing and metrics. This provides deep visibility into reconciliation cycles, API calls, and operator health.
+
+### Enabling OpenTelemetry
+
+OpenTelemetry is configured via environment variables. By default, telemetry is disabled. To enable it, set the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (e.g., `otel-collector:4317`) | (disabled) |
+| `OTEL_SERVICE_NAME` | Service name for telemetry | `<app-name>-operator` |
+| `OTEL_INSECURE` | Use insecure gRPC connection | `false` |
+| `POD_NAME` | Pod name (auto-injected via downward API) | |
+| `POD_NAMESPACE` | Pod namespace (auto-injected via downward API) | |
+
+### Metrics
+
+The operator exposes the following metrics via the OpenTelemetry metrics pipeline:
+
+#### Reconciliation Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `reconcile_total` | Counter | `kind`, `result` | Total number of reconciliations |
+| `reconcile_duration_seconds` | Histogram | `kind` | Duration of reconciliation cycles |
+| `drift_detected_total` | Counter | `kind` | Number of drift detections (spec vs external state) |
+
+#### API Call Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `api_call_total` | Counter | `kind`, `method`, `status` | Total API calls to the REST backend |
+| `api_call_duration_seconds` | Histogram | `kind`, `method` | Duration of API calls |
+
+#### Query Controller Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `query_total` | Counter | `kind`, `result` | Total query executions |
+| `query_duration_seconds` | Histogram | `kind` | Duration of query operations |
+
+#### Action Controller Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `action_total` | Counter | `kind`, `result` | Total action executions |
+| `action_duration_seconds` | Histogram | `kind` | Duration of action operations |
+
+### Tracing
+
+The operator creates spans for key operations:
+
+| Span Name | Description |
+|-----------|-------------|
+| `Reconcile` | Top-level span for each reconciliation cycle |
+| `getResource` | GET request to fetch current external state |
+| `createResource` | POST request to create a new resource |
+| `updateResource` | PUT request to update an existing resource |
+| `deleteFromEndpoint` | DELETE request to remove a resource |
+| `syncToEndpoint` | Sync operation to a specific endpoint |
+| `executeQueryToEndpoint` | Query execution to a specific endpoint |
+| `executeActionToEndpoint` | Action execution to a specific endpoint |
+
+Spans include attributes for:
+- `kind`: The CRD kind being reconciled
+- `name`: The CR name
+- `namespace`: The CR namespace
+- `endpoint`: Target REST API endpoint URL
+- `method`: HTTP method (GET, POST, PUT, DELETE)
+- `status_code`: HTTP response status code
+
+HTTP client requests are automatically instrumented with `otelhttp`, providing detailed request/response tracing.
+
+### Kubernetes Deployment with OpenTelemetry
+
+To enable OpenTelemetry in your deployed operator, configure the environment variables in `config/manager/manager.yaml`:
+
+```yaml
+spec:
+  containers:
+  - name: manager
+    env:
+    # OpenTelemetry configuration
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "otel-collector.observability:4317"
+    - name: OTEL_SERVICE_NAME
+      value: "petstore-operator"
+    - name: OTEL_INSECURE
+      value: "true"
+    # Kubernetes metadata (already configured in generated manifest)
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+```
+
+#### Example: Deploying with Jaeger
+
+```bash
+# Deploy Jaeger for local development
+kubectl apply -f https://github.com/jaegertracing/jaeger-operator/releases/download/v1.51.0/jaeger-operator.yaml
+
+# Create a Jaeger instance with OTLP receiver
+kubectl apply -f - <<EOF
+apiVersion: jaegertracing.io/v1
+kind: Jaeger
+metadata:
+  name: jaeger
+spec:
+  strategy: allInOne
+  collector:
+    options:
+      collector.otlp.enabled: true
+      collector.otlp.grpc.host-port: ":4317"
+EOF
+
+# Update operator to point to Jaeger
+kubectl set env deployment/controller-manager \
+  OTEL_EXPORTER_OTLP_ENDPOINT=jaeger-collector:4317 \
+  OTEL_INSECURE=true
+```
+
+#### Example: Deploying with OpenTelemetry Collector
+
+```yaml
+# otel-collector.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      batch:
+    exporters:
+      logging:
+        loglevel: debug
+      # Add your backend exporter (Jaeger, Zipkin, etc.)
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [logging]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [logging]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: collector
+        image: otel/opentelemetry-collector:latest
+        args: ["--config=/conf/config.yaml"]
+        volumeMounts:
+        - name: config
+          mountPath: /conf
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+spec:
+  ports:
+  - port: 4317
+    name: otlp-grpc
+  selector:
+    app: otel-collector
+```
 
 ## License
 

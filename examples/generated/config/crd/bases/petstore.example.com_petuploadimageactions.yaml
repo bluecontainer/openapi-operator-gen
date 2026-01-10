@@ -11,9 +11,6 @@ spec:
     kind: PetUploadimageAction
     listKind: PetUploadimageActionList
     plural: petuploadimageactions
-    shortNames:
-    - pe
-    - pet
     singular: petuploadimageaction
   scope: Namespaced
   versions:

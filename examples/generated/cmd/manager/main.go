@@ -21,7 +21,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/telemetry"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/petstore-operator/internal/controller"
 )
@@ -85,6 +88,24 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Initialize OpenTelemetry (configured via environment variables)
+	ctx := context.Background()
+	otelProvider, err := telemetry.InitProviderFromEnv(ctx, "petstore-operator", "v0.0.1")
+	if err != nil {
+		setupLog.Error(err, "failed to initialize OpenTelemetry")
+		os.Exit(1)
+	}
+	if otelProvider != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := otelProvider.Shutdown(shutdownCtx); err != nil {
+				setupLog.Error(err, "failed to shutdown OpenTelemetry")
+			}
+		}()
+		setupLog.Info("OpenTelemetry initialized", "endpoint", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	}
+
 	// Check environment variables as fallback
 	if baseURL == "" {
 		baseURL = os.Getenv("REST_API_BASE_URL")
@@ -111,11 +132,12 @@ func main() {
 		stsServiceName = os.Getenv("SERVICE_NAME")
 	}
 
-	// Validate configuration - need either static URL, StatefulSet name, Deployment name, or Helm release
+	// Check if global endpoint configuration is provided
 	useWorkloadDiscovery := stsName != "" || deployName != "" || helmRelease != ""
-	if !useWorkloadDiscovery && baseURL == "" {
-		setupLog.Error(nil, "one of --base-url, --statefulset-name, --deployment-name, or --helm-release is required")
-		os.Exit(1)
+	hasGlobalConfig := useWorkloadDiscovery || baseURL != ""
+
+	if !hasGlobalConfig {
+		setupLog.Info("No global endpoint configuration provided - CRs must specify targetHelmRelease, targetStatefulSet, or targetDeployment")
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -127,34 +149,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	// Create HTTP client with OpenTelemetry instrumentation
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
 
-	// Set up endpoint resolver if using workload discovery mode
-	var resolver *endpoint.Resolver
+	// Only default service name if StatefulSet name is explicitly provided
+	if stsServiceName == "" && stsName != "" {
+		stsServiceName = stsName
+	}
+
+	// Always create endpoint resolver for per-CR targeting support
+	cfg := endpoint.Config{
+		StatefulSetName: stsName,
+		DeploymentName:  deployName,
+		Namespace:       namespace,
+		HelmRelease:     helmRelease,
+		WorkloadKind:    endpoint.WorkloadKind(workloadKind),
+		ServiceName:     stsServiceName,
+		Port:            port,
+		Scheme:          urlScheme,
+		Strategy:        endpoint.Strategy(strategy),
+		DiscoveryMode:   endpoint.DiscoveryMode(discoveryMode),
+		HealthCheckPath: healthPath,
+	}
+
+	resolver := endpoint.NewResolver(mgr.GetClient(), cfg)
+
+	// Start resolver's background refresh only if global workload discovery is configured
 	if useWorkloadDiscovery {
-		// Only default service name if StatefulSet name is explicitly provided
-		if stsServiceName == "" && stsName != "" {
-			stsServiceName = stsName
-		}
-
-		cfg := endpoint.Config{
-			StatefulSetName: stsName,
-			DeploymentName:  deployName,
-			Namespace:       namespace,
-			HelmRelease:     helmRelease,
-			WorkloadKind:    endpoint.WorkloadKind(workloadKind),
-			ServiceName:     stsServiceName,
-			Port:            port,
-			Scheme:          urlScheme,
-			Strategy:        endpoint.Strategy(strategy),
-			DiscoveryMode:   endpoint.DiscoveryMode(discoveryMode),
-			HealthCheckPath: healthPath,
-		}
-
-		resolver = endpoint.NewResolver(mgr.GetClient(), cfg)
-
-		// Start the resolver
-		ctx := context.Background()
 		if err := resolver.Start(ctx); err != nil {
 			setupLog.Error(err, "unable to start endpoint resolver")
 			os.Exit(1)
@@ -179,7 +203,7 @@ func main() {
 				"strategy", strategy,
 				"discovery", discoveryMode)
 		}
-	} else {
+	} else if baseURL != "" {
 		setupLog.Info("Using static base URL", "url", baseURL)
 	}
 

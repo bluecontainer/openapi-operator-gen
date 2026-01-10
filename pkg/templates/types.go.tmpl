@@ -196,7 +196,9 @@ type {{ .Kind }}EndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+{{- if .ShortNames }}
 // +kubebuilder:resource:shortName={{ range $i, $n := .ShortNames }}{{ if $i }};{{ end }}{{ $n }}{{ end }}
+{{- end }}
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -396,7 +398,9 @@ type {{ .Kind }}EndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+{{- if .ShortNames }}
 // +kubebuilder:resource:shortName={{ range $i, $n := .ShortNames }}{{ if $i }};{{ end }}{{ $n }}{{ end }}
+{{- end }}
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -586,7 +590,9 @@ type {{ .Kind }}EndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+{{- if .ShortNames }}
 // +kubebuilder:resource:shortName={{ range $i, $n := .ShortNames }}{{ if $i }};{{ end }}{{ $n }}{{ end }}
+{{- end }}
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="External-ID",type=string,JSONPath=`.status.externalID`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

@@ -11,9 +11,6 @@ spec:
     kind: PetFindbytagsQuery
     listKind: PetFindbytagsQueryList
     plural: petfindbytagsqueries
-    shortNames:
-    - pe
-    - pet
     singular: petfindbytagsquery
   scope: Namespaced
   versions:

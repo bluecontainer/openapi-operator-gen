@@ -57,7 +57,7 @@ type OrderSpec struct {
 	// +kubebuilder:validation:Enum=placed;approved;delivered
 	Status string `json:"status,omitempty"`
 
-	// ID of order that needs to be fetched
+	// ID of the order that needs to be deleted
 	// +kubebuilder:validation:Required
 	OrderId int64 `json:"orderId"`
 
@@ -662,7 +662,6 @@ type PetFindbystatusQueryEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=pe;pet
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -795,7 +794,6 @@ type PetFindbytagsQueryEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=pe;pet
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -925,7 +923,6 @@ type StoreInventoryQueryEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=st;sto
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -1063,7 +1060,6 @@ type UserLoginQueryEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=us;use
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -1193,7 +1189,6 @@ type UserLogoutQueryEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=us;use
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Results",type=integer,JSONPath=`.status.resultCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -1357,7 +1352,6 @@ type PetUploadimageActionEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=pe;pet
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
@@ -1524,7 +1518,6 @@ type UserCreatewithlistActionEndpointResponse struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=us;use
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="HTTP Status",type=integer,JSONPath=`.status.httpStatusCode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

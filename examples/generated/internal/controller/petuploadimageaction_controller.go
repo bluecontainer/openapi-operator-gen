@@ -16,6 +16,12 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +35,56 @@ import (
 	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
+
+var (
+	petuploadimageactionTracer = otel.Tracer("github.com/bluecontainer/petstore-operator/controller/petuploadimageaction")
+	petuploadimageactionMeter  = otel.Meter("github.com/bluecontainer/petstore-operator/controller/petuploadimageaction")
+
+	petuploadimageactionReconcileTotal    metric.Int64Counter
+	petuploadimageactionReconcileDuration metric.Float64Histogram
+	petuploadimageactionActionTotal       metric.Int64Counter
+	petuploadimageactionActionDuration    metric.Float64Histogram
+)
+
+func init() {
+	var err error
+
+	petuploadimageactionReconcileTotal, err = petuploadimageactionMeter.Int64Counter(
+		"reconcile_total",
+		metric.WithDescription("Total number of reconciliations"),
+		metric.WithUnit("{reconcile}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	petuploadimageactionReconcileDuration, err = petuploadimageactionMeter.Float64Histogram(
+		"reconcile_duration_seconds",
+		metric.WithDescription("Duration of reconciliation in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	petuploadimageactionActionTotal, err = petuploadimageactionMeter.Int64Counter(
+		"action_total",
+		metric.WithDescription("Total number of actions executed"),
+		metric.WithUnit("{action}"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+
+	petuploadimageactionActionDuration, err = petuploadimageactionMeter.Float64Histogram(
+		"action_duration_seconds",
+		metric.WithDescription("Duration of action execution in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+	}
+}
 
 const (
 	petuploadimageactionFinalizer = "petstore.example.com/finalizer"
@@ -49,6 +105,40 @@ type PetUploadimageActionReconciler struct {
 
 // Reconcile executes the action and updates the status
 func (r *PetUploadimageActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	ctx, span := petuploadimageactionTracer.Start(ctx, "Reconcile",
+		trace.WithAttributes(
+			attribute.String("resource.name", req.Name),
+			attribute.String("resource.namespace", req.Namespace),
+			attribute.String("resource.kind", "PetUploadimageAction"),
+		))
+	defer span.End()
+
+	start := time.Now()
+	result, err := r.reconcileInternal(ctx, req)
+	duration := time.Since(start).Seconds()
+
+	status := "success"
+	if err != nil {
+		status = "error"
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	petuploadimageactionReconcileTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("namespace", req.Namespace),
+		))
+	petuploadimageactionReconcileDuration.Record(ctx, duration,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.String("namespace", req.Namespace),
+		))
+
+	return result, err
+}
+
+func (r *PetUploadimageActionReconciler) reconcileInternal(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Fetch the PetUploadimageAction instance
@@ -145,13 +235,18 @@ func (r *PetUploadimageActionReconciler) Reconcile(ctx context.Context, req ctrl
 }
 
 func (r *PetUploadimageActionReconciler) getBaseURL(ctx context.Context) (string, error) {
+	// Try static BaseURL first
+	if r.BaseURL != "" {
+		return r.BaseURL, nil
+	}
+	// Try global endpoint resolver
 	if r.EndpointResolver != nil {
-		return r.EndpointResolver.GetEndpoint()
+		url, err := r.EndpointResolver.GetEndpoint()
+		if err == nil {
+			return url, nil
+		}
 	}
-	if r.BaseURL == "" {
-		return "", fmt.Errorf("no base URL configured")
-	}
-	return r.BaseURL, nil
+	return "", fmt.Errorf("no endpoint configured: set global endpoint (--base-url, --statefulset-name, --deployment-name, or --helm-release) or specify per-CR targeting (targetHelmRelease, targetStatefulSet, or targetDeployment)")
 }
 
 func (r *PetUploadimageActionReconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
@@ -263,9 +358,18 @@ func (r *PetUploadimageActionReconciler) parseResult(body []byte) (*v1alpha1.Pet
 
 // executeActionToEndpoint executes the action against a single endpoint
 func (r *PetUploadimageActionReconciler) executeActionToEndpoint(ctx context.Context, instance *v1alpha1.PetUploadimageAction, baseURL string, body []byte) ([]byte, int, error) {
+	ctx, span := petuploadimageactionTracer.Start(ctx, "POST",
+		trace.WithAttributes(
+			attribute.String("http.method", "POST"),
+			attribute.String("endpoint.url", baseURL),
+		))
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+	start := time.Now()
 
 	actionURL := r.buildActionURL(baseURL, instance)
+	span.SetAttributes(attribute.String("http.url", actionURL))
 
 	var bodyReader io.Reader
 	if body != nil {
@@ -274,6 +378,8 @@ func (r *PetUploadimageActionReconciler) executeActionToEndpoint(ctx context.Con
 
 	req, err := http.NewRequestWithContext(ctx, "POST", actionURL, bodyReader)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -281,21 +387,48 @@ func (r *PetUploadimageActionReconciler) executeActionToEndpoint(ctx context.Con
 
 	logger.Info("Executing action", "url", actionURL, "method", "POST")
 	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		r.recordActionMetrics(ctx, "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		r.recordActionMetrics(ctx, "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return respBody, resp.StatusCode, fmt.Errorf("action failed: %s - %s", resp.Status, string(respBody))
+		r.recordActionMetrics(ctx, "error", resp.StatusCode, duration)
+		err := fmt.Errorf("action failed: %s - %s", resp.Status, string(respBody))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return respBody, resp.StatusCode, err
 	}
 
+	r.recordActionMetrics(ctx, "success", resp.StatusCode, duration)
 	return respBody, resp.StatusCode, nil
+}
+
+func (r *PetUploadimageActionReconciler) recordActionMetrics(ctx context.Context, status string, statusCode int, duration float64) {
+	petuploadimageactionActionTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("status", status),
+			attribute.Int("status_code", statusCode),
+		))
+	petuploadimageactionActionDuration.Record(ctx, duration,
+		metric.WithAttributes(
+			attribute.String("status", status),
+		))
 }
 
 func (r *PetUploadimageActionReconciler) executeAction(ctx context.Context, instance *v1alpha1.PetUploadimageAction) error {

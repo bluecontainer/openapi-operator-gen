@@ -107,12 +107,12 @@ kind-deploy: kind-load deploy ## Build, load to kind, and deploy controller.
 ##@ Deployment
 
 .PHONY: install
-install: manifests ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	kubectl apply -f config/crd/bases/
+install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/crd/bases | kubectl apply -f -
 
 .PHONY: uninstall
-uninstall: ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-	kubectl delete -f config/crd/bases/
+uninstall: kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/crd/bases | kubectl delete --ignore-not-found=true -f -
 
 .PHONY: deploy
 deploy: generate-yaml kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
