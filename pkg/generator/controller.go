@@ -139,6 +139,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		return fmt.Errorf("failed to generate Makefile: %w", err)
 	}
 
+	// Generate README.md
+	if err := g.generateReadme(crds); err != nil {
+		return fmt.Errorf("failed to generate README: %w", err)
+	}
+
 	// Generate hack/boilerplate.go.txt for controller-gen
 	if err := g.generateBoilerplate(); err != nil {
 		return fmt.Errorf("failed to generate boilerplate: %w", err)
@@ -405,6 +410,57 @@ func (g *ControllerGenerator) generateMakefile() error {
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "Makefile")
 	return g.executeTemplate(templates.MakefileTemplate, data, outputPath)
+}
+
+func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition) error {
+	// Build CRD info for template
+	type CRDInfo struct {
+		Kind     string
+		IsQuery  bool
+		IsAction bool
+	}
+	crdInfos := make([]CRDInfo, 0, len(crds))
+	for _, crd := range crds {
+		crdInfos = append(crdInfos, CRDInfo{
+			Kind:     crd.Kind,
+			IsQuery:  crd.IsQuery,
+			IsAction: crd.IsAction,
+		})
+	}
+
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+	// Capitalize first letter for title
+	titleAppName := appName
+	if len(appName) > 0 {
+		titleAppName = strings.ToUpper(appName[:1]) + appName[1:]
+	}
+
+	// Build generator command line
+	generatorCmd := fmt.Sprintf("openapi-operator-gen generate \\\n  --spec %s \\\n  --output %s \\\n  --group %s \\\n  --version %s \\\n  --module %s",
+		g.config.SpecPath,
+		g.config.OutputDir,
+		g.config.APIGroup,
+		g.config.APIVersion,
+		g.config.ModuleName,
+	)
+
+	data := struct {
+		AppName      string
+		TitleAppName string
+		APIGroup     string
+		APIVersion   string
+		CRDs         []CRDInfo
+		GeneratorCmd string
+	}{
+		AppName:      appName,
+		TitleAppName: titleAppName,
+		APIGroup:     g.config.APIGroup,
+		APIVersion:   g.config.APIVersion,
+		CRDs:         crdInfos,
+		GeneratorCmd: generatorCmd,
+	}
+	outputPath := filepath.Join(g.config.OutputDir, "README.md")
+	return g.executeTemplate(templates.ReadmeTemplate, data, outputPath)
 }
 
 func (g *ControllerGenerator) generateBoilerplate() error {

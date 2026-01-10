@@ -32,9 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
-	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
 var (
@@ -517,7 +517,7 @@ func (r *UserReconciler) observeResource(ctx context.Context, instance *v1alpha1
 	}
 	instance.Status.LastGetTime = &now
 	instance.Status.DriftDetected = false // No drift concept for read-only
-	instance.Status.Responses = nil       // Clear multi-endpoint responses for single endpoint
+	instance.Status.Responses = nil // Clear multi-endpoint responses for single endpoint
 
 	logger.Info("Successfully observed resource", "externalID", externalID)
 	r.updateStatus(ctx, instance, "Observed", "Successfully fetched resource from REST API")

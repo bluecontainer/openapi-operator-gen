@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 )
 
 var (
@@ -86,8 +86,7 @@ func init() {
 }
 
 const (
-	petfindbytagsqueryFinalizer    = "petstore.example.com/finalizer"
-	petfindbytagsqueryRequeueAfter = time.Second * 30
+	petfindbytagsqueryFinalizer = "petstore.example.com/finalizer"
 )
 
 // PetFindbytagsQueryReconciler reconciles a PetFindbytagsQuery query object
@@ -153,13 +152,64 @@ func (r *PetFindbytagsQueryReconciler) reconcileInternal(ctx context.Context, re
 		return ctrl.Result{}, err
 	}
 
-	// Execute the query
-	if err := r.executeQuery(ctx, instance); err != nil {
-		r.updateStatus(ctx, instance, "Failed", err.Error(), 0)
-		return ctrl.Result{RequeueAfter: petfindbytagsqueryRequeueAfter}, err
+	// Determine if query should be executed
+	shouldExecute := false
+	var requeueAfter time.Duration
+
+	if instance.Status.State == "" || instance.Status.State == "Pending" {
+		// First execution
+		shouldExecute = true
+	} else if instance.Status.State == "Queried" || instance.Status.State == "Failed" {
+		// Check if spec changed (always re-execute on spec change)
+		if instance.Status.ObservedGeneration != instance.Generation {
+			logger.Info("Spec changed, re-executing query")
+			shouldExecute = true
+		} else if instance.Spec.QueryInterval != nil && instance.Spec.QueryInterval.Duration > 0 {
+			// Check if re-execution interval has elapsed
+			if instance.Status.LastExecutionTime == nil {
+				// Should not happen, but handle gracefully
+				shouldExecute = true
+			} else {
+				elapsed := time.Since(instance.Status.LastExecutionTime.Time)
+				interval := instance.Spec.QueryInterval.Duration
+
+				if elapsed >= interval {
+					logger.Info("Query interval elapsed, re-executing",
+						"interval", interval, "elapsed", elapsed)
+					shouldExecute = true
+				} else {
+					// Schedule next execution
+					requeueAfter = interval - elapsed
+					logger.V(1).Info("Scheduling next query execution", "requeueAfter", requeueAfter)
+				}
+			}
+		} else {
+			// No interval set - one-shot mode, already executed
+			logger.V(1).Info("Query already executed and no interval set (one-shot mode), skipping")
+			return ctrl.Result{}, nil
+		}
 	}
 
-	return ctrl.Result{RequeueAfter: petfindbytagsqueryRequeueAfter}, nil
+	if !shouldExecute {
+		// Not time to execute yet, requeue for next interval
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
+	// Execute the query
+	if err := r.executeQuery(ctx, instance); err != nil {
+		// On error, still schedule next re-execution if interval is set
+		if instance.Spec.QueryInterval != nil && instance.Spec.QueryInterval.Duration > 0 {
+			return ctrl.Result{RequeueAfter: instance.Spec.QueryInterval.Duration}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// After successful execution, schedule next re-execution if interval is set
+	if instance.Spec.QueryInterval != nil && instance.Spec.QueryInterval.Duration > 0 {
+		return ctrl.Result{RequeueAfter: instance.Spec.QueryInterval.Duration}, nil
+	}
+
+	return ctrl.Result{}, nil
 }
 
 func (r *PetFindbytagsQueryReconciler) getBaseURL(ctx context.Context) (string, error) {
@@ -375,7 +425,6 @@ func (r *PetFindbytagsQueryReconciler) recordQueryMetrics(ctx context.Context, s
 			attribute.String("status", status),
 		))
 }
-
 // parseResults parses the response body into typed results
 func (r *PetFindbytagsQueryReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int, error) {
 	var results []v1alpha1.Pet
@@ -514,6 +563,21 @@ func (r *PetFindbytagsQueryReconciler) updateStatus(ctx context.Context, instanc
 
 	if instance.Status.LastQueryTime == nil {
 		instance.Status.LastQueryTime = &now
+	}
+
+	// Track execution for one-shot/periodic support
+	if state == "Queried" || state == "Failed" {
+		instance.Status.LastExecutionTime = &now
+		instance.Status.ExecutionCount++
+
+		// Calculate next execution time if interval is configured
+		if instance.Spec.QueryInterval != nil && instance.Spec.QueryInterval.Duration > 0 {
+			nextTime := metav1.NewTime(now.Add(instance.Spec.QueryInterval.Duration))
+			instance.Status.NextExecutionTime = &nextTime
+		} else {
+			// Clear next execution time for one-shot mode
+			instance.Status.NextExecutionTime = nil
+		}
 	}
 
 	// Update condition

@@ -118,3 +118,8 @@ var ExampleCRRefTemplate string
 //
 //go:embed kustomization_samples.yaml.tmpl
 var KustomizationSamplesTemplate string
+
+// ReadmeTemplate is the template for generating the README.md file
+//
+//go:embed readme.md.tmpl
+var ReadmeTemplate string

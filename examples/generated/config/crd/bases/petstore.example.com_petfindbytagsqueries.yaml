@@ -50,6 +50,12 @@ spec:
           spec:
             description: PetFindbytagsQuerySpec defines the query parameters for PetFindbytagsQuery
             properties:
+              queryInterval:
+                description: |-
+                  QueryInterval specifies how often to re-execute the query.
+                  If not set, the query executes once and stores results (one-shot mode).
+                  Examples: "30s", "5m", "1h"
+                type: string
               tags:
                 description: Tags to filter by
                 items:

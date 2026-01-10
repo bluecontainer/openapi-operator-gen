@@ -51,6 +51,12 @@ spec:
             description: PetFindbystatusQuerySpec defines the query parameters for
               PetFindbystatusQuery
             properties:
+              queryInterval:
+                description: |-
+                  QueryInterval specifies how often to re-execute the query.
+                  If not set, the query executes once and stores results (one-shot mode).
+                  Examples: "30s", "5m", "1h"
+                type: string
               status:
                 description: Status values that need to be considered for filter
                 type: string

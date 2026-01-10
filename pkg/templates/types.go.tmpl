@@ -113,6 +113,12 @@ type {{ .Kind }}Spec struct {
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// QueryInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}

@@ -584,6 +584,12 @@ type PetFindbystatusQuerySpec struct {
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// QueryInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
 }
 
 // PetFindbystatusQueryStatus defines the observed state of PetFindbystatusQuery
@@ -716,6 +722,12 @@ type PetFindbytagsQuerySpec struct {
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// QueryInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
 }
 
 // PetFindbytagsQueryStatus defines the observed state of PetFindbytagsQuery
@@ -844,6 +856,12 @@ type StoreInventoryQuerySpec struct {
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// QueryInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
 }
 
 // StoreInventoryQueryStatus defines the observed state of StoreInventoryQuery
@@ -981,6 +999,12 @@ type UserLoginQuerySpec struct {
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// QueryInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
 }
 
 // UserLoginQueryStatus defines the observed state of UserLoginQuery
@@ -1110,6 +1134,12 @@ type UserLogoutQuerySpec struct {
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// QueryInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
 }
 
 // UserLogoutQueryStatus defines the observed state of UserLogoutQuery
