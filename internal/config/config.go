@@ -1,6 +1,8 @@
 package config
 
 import (
+	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -64,11 +66,30 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// deriveRootKindFromSpecPath extracts a Kind name from the spec file name
+// deriveRootKindFromSpecPath extracts a Kind name from the spec file name or URL
 // e.g., "petstore.yaml" -> "Petstore", "my-api.json" -> "MyApi"
+// e.g., "https://example.com/api/petstore.yaml" -> "Petstore"
 func (c *Config) deriveRootKindFromSpecPath() string {
-	// Get base name without directory
-	base := filepath.Base(c.SpecPath)
+	var base string
+
+	// Check if it's a URL
+	if strings.HasPrefix(c.SpecPath, "http://") || strings.HasPrefix(c.SpecPath, "https://") {
+		parsedURL, err := url.Parse(c.SpecPath)
+		if err != nil {
+			// Fall back to using the whole string
+			base = c.SpecPath
+		} else {
+			// Get the filename from the URL path
+			urlPath := parsedURL.Path
+			if urlPath == "" || urlPath == "/" {
+				return ""
+			}
+			base = path.Base(urlPath)
+		}
+	} else {
+		// Get base name without directory for file paths
+		base = filepath.Base(c.SpecPath)
+	}
 
 	// Remove extension
 	ext := filepath.Ext(base)

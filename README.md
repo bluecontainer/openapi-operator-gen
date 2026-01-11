@@ -11,6 +11,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [Usage](#usage)
   - [Options](#options)
   - [Example](#example)
+  - [Swagger 2.0 Support](#swagger-20-support)
 - [OpenAPI Schema Support](#openapi-schema-support)
   - [Nested Objects](#nested-objects)
   - [Supported Types](#supported-types)
@@ -66,7 +67,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 
 ## Features
 
-- Parses OpenAPI 3.0/3.1 specifications
+- Parses OpenAPI 3.0/3.1 and Swagger 2.0 specifications (auto-detected)
 - Generates Go types for CRDs with kubebuilder markers
 - Handles nested schemas and `$ref` references (generates named types)
 - Generates CRD YAML manifests
@@ -306,14 +307,15 @@ openapi-operator-gen generate \
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--spec`, `-s` | Path to OpenAPI specification (YAML or JSON) | Required |
+| `--spec`, `-s` | Path or URL to OpenAPI specification (YAML or JSON) | Required |
 | `--output`, `-o` | Output directory for generated code | Required |
 | `--group`, `-g` | Kubernetes API group (e.g., `myapp.example.com`) | Required |
 | `--version`, `-v` | API version (e.g., `v1alpha1`) | `v1alpha1` |
 | `--module`, `-m` | Go module name for generated code | Required |
 | `--mapping` | Resource mapping mode: `per-resource` or `single-crd` | `per-resource` |
+| `--root-kind` | Kind name for root `/` endpoint | Derived from spec filename |
 
-### Example
+### Example: Local File
 
 ```bash
 openapi-operator-gen generate \
@@ -323,6 +325,53 @@ openapi-operator-gen generate \
   --version v1alpha1 \
   --module github.com/bluecontainer/petstore-operator
 ```
+
+### Example: URL
+
+The generator can fetch OpenAPI specs directly from URLs:
+
+```bash
+openapi-operator-gen generate \
+  --spec https://petstore3.swagger.io/api/v3/openapi.json \
+  --output examples/generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/bluecontainer/petstore-operator
+```
+
+This is useful for generating operators from publicly available API specs or from specs hosted on internal servers.
+
+### Swagger 2.0 Support
+
+The generator automatically detects and converts Swagger 2.0 specifications to OpenAPI 3.0 internally. No additional flags or configuration is needed - just pass your Swagger 2.0 spec file or URL:
+
+```bash
+# From a local Swagger 2.0 file
+openapi-operator-gen generate \
+  --spec swagger.yaml \
+  --output examples/generated \
+  --group myapp.example.com \
+  --version v1alpha1 \
+  --module github.com/example/myapp-operator
+
+# From the Swagger Petstore v2 URL
+openapi-operator-gen generate \
+  --spec https://petstore.swagger.io/v2/swagger.json \
+  --output examples/generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator
+```
+
+**Version Detection:**
+- Files containing `"swagger": "2.0"` or `swagger: "2.0"` are detected as Swagger 2.0
+- Files containing `"openapi": "3.x.x"` or `openapi: "3.x.x"` are detected as OpenAPI 3.x
+- Both YAML and JSON formats are supported for either version
+
+**Conversion Notes:**
+- Swagger 2.0 specs are converted to OpenAPI 3.0 using the [kin-openapi](https://github.com/getkin/kin-openapi) library
+- The conversion handles path parameters, query parameters, request bodies, and response schemas
+- Most Swagger 2.0 features map cleanly to OpenAPI 3.0 equivalents
 
 ## OpenAPI Schema Support
 

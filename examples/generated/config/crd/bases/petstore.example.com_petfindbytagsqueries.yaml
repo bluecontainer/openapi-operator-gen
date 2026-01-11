@@ -229,7 +229,7 @@ spec:
                               name:
                                 type: string
                               petId:
-                                description: ID of pet to return
+                                description: ID of pet that needs to be updated
                                 format: int64
                                 type: integer
                               photoUrls:
@@ -542,7 +542,7 @@ spec:
                             name:
                               type: string
                             petId:
-                              description: ID of pet to return
+                              description: ID of pet that needs to be updated
                               format: int64
                               type: integer
                             photoUrls:

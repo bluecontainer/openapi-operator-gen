@@ -41,9 +41,14 @@ It takes a REST API specification and generates:
   - CRD YAML manifests
   - Controller reconciliation logic with full CRUD sync
 
-Example:
+Examples:
+  # Generate from local file
   openapi-operator-gen generate --spec api.yaml --output ./generated \
-    --group myapp.example.com --version v1alpha1`,
+    --group myapp.example.com --version v1alpha1
+
+  # Generate from URL
+  openapi-operator-gen generate --spec https://example.com/api/openapi.yaml \
+    --output ./generated --group myapp.example.com`,
 }
 
 func init() {
@@ -71,7 +76,7 @@ func init() {
 	rootCmd.AddCommand(generateCmd)
 
 	// Generate command flags
-	generateCmd.Flags().StringVarP(&cfg.SpecPath, "spec", "s", "", "Path to OpenAPI specification file (required)")
+	generateCmd.Flags().StringVarP(&cfg.SpecPath, "spec", "s", "", "Path or URL to OpenAPI specification file (required)")
 	generateCmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./generated", "Output directory for generated code")
 	generateCmd.Flags().StringVarP(&cfg.APIGroup, "group", "g", "", "Kubernetes API group (e.g., myapp.example.com) (required)")
 	generateCmd.Flags().StringVarP(&cfg.APIVersion, "version", "v", "v1alpha1", "Kubernetes API version")
@@ -167,6 +172,7 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Println("  Generated go.mod")
 	fmt.Println("  Generated Dockerfile")
 	fmt.Println("  Generated Makefile")
+	fmt.Println("  Copied OpenAPI spec file")
 	fmt.Println()
 
 	fmt.Println("Code generation complete!")

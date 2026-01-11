@@ -64,7 +64,7 @@ spec:
                 format: int64
                 type: integer
               orderId:
-                description: ID of order that needs to be fetched
+                description: ID of the order that needs to be deleted
                 format: int64
                 type: integer
               petId:
