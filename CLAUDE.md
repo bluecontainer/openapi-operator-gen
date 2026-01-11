@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Requirements
+
+- **Go version: 1.25** - This project requires Go 1.25. Always use `go-version: '1.25'` in GitHub Actions workflows.
+
 ## Build Commands
 
 ```bash
