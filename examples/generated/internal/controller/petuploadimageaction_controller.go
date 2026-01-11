@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
-	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
 var (
@@ -346,7 +346,6 @@ func (r *PetUploadimageActionReconciler) buildRequestBody(instance *v1alpha1.Pet
 	}
 	return json.Marshal(body)
 }
-
 // parseResult parses the response body into typed result
 func (r *PetUploadimageActionReconciler) parseResult(body []byte) (*v1alpha1.PetUploadimageActionResult, error) {
 	var result v1alpha1.PetUploadimageActionResult

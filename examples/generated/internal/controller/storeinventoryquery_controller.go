@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 )
 
 var (
@@ -425,7 +425,6 @@ func (r *StoreInventoryQueryReconciler) recordQueryMetrics(ctx context.Context, 
 			attribute.String("status", status),
 		))
 }
-
 // countResults attempts to count results in the response
 func (r *StoreInventoryQueryReconciler) countResults(body []byte) int {
 	// Try to parse as array

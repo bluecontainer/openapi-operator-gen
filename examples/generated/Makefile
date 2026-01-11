@@ -142,11 +142,13 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+HELMIFY ?= $(LOCALBIN)/helmify
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.17.0
 KUSTOMIZE_VERSION ?= v5.4.1
 ENVTEST_VERSION ?= release-0.19
+HELMIFY_VERSION ?= v0.4.18
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
@@ -165,3 +167,39 @@ envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	@test -s $(LOCALBIN)/setup-envtest || \
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary.
+$(HELMIFY): $(LOCALBIN)
+	@test -s $(LOCALBIN)/helmify || \
+	GOBIN=$(LOCALBIN) go install github.com/arttor/helmify/cmd/helmify@$(HELMIFY_VERSION)
+
+##@ Helm
+
+# Helm chart name (defaults to app name)
+CHART_NAME ?= petstore
+
+.PHONY: helm
+helm: generate-yaml kustomize helmify ## Generate Helm chart from kustomize manifests.
+	@mkdir -p chart
+	$(KUSTOMIZE) build config | $(HELMIFY) -crd-dir chart/$(CHART_NAME)
+	@echo ""
+	@echo "Helm chart generated in chart/$(CHART_NAME)/"
+	@echo ""
+	@echo "To install:"
+	@echo "  helm install $(CHART_NAME) ./chart/$(CHART_NAME) -n $(NAMESPACE) --create-namespace"
+	@echo ""
+	@echo "To package:"
+	@echo "  helm package ./chart/$(CHART_NAME)"
+
+.PHONY: helm-install
+helm-install: helm ## Generate and install Helm chart.
+	helm install $(CHART_NAME) ./chart/$(CHART_NAME) -n $(NAMESPACE) --create-namespace --set image.repository=$(word 1,$(subst :, ,$(IMG))) --set image.tag=$(word 2,$(subst :, ,$(IMG)))
+
+.PHONY: helm-upgrade
+helm-upgrade: helm ## Generate and upgrade Helm chart.
+	helm upgrade $(CHART_NAME) ./chart/$(CHART_NAME) -n $(NAMESPACE) --set image.repository=$(word 1,$(subst :, ,$(IMG))) --set image.tag=$(word 2,$(subst :, ,$(IMG)))
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall Helm chart.
+	helm uninstall $(CHART_NAME) -n $(NAMESPACE)

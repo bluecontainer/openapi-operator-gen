@@ -771,7 +771,8 @@ func TestUserCreatewithlistActionReconciler_URLAndResponseConsistency(t *testing
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -865,7 +866,6 @@ func TestUserCreatewithlistActionReconciler_URLAndResponseConsistency(t *testing
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-
 // TestUserCreatewithlistActionReconciler_ActionPathParams verifies that action endpoints
 // correctly use path parameters from spec in the URL
 func TestUserCreatewithlistActionReconciler_ActionPathParams(t *testing.T) {
@@ -905,7 +905,8 @@ func TestUserCreatewithlistActionReconciler_ActionPathParams(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -992,3 +993,4 @@ func TestUserCreatewithlistActionReconciler_ActionPathParams(t *testing.T) {
 		}
 	}
 }
+

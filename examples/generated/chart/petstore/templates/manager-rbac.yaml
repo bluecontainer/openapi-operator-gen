@@ -1,0 +1,53 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "petstore.fullname" . }}-manager-role
+  labels:
+  {{- include "petstore.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - petstore.example.com
+  resources:
+  - orders
+  - petfindbystatusquerys
+  - petfindbytagsquerys
+  - pets
+  - petuploadimageactions
+  - storeinventoryquerys
+  - usercreatewithlistactions
+  - userloginquerys
+  - userlogoutquerys
+  - users
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - petstore.example.com
+  resources:
+  - orders/finalizers
+  - pets/finalizers
+  - users/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - petstore.example.com
+  resources:
+  - orders/status
+  - petfindbystatusquerys/status
+  - petfindbytagsquerys/status
+  - pets/status
+  - petuploadimageactions/status
+  - storeinventoryquerys/status
+  - usercreatewithlistactions/status
+  - userloginquerys/status
+  - userlogoutquerys/status
+  - users/status
+  verbs:
+  - get
+  - patch
+  - update

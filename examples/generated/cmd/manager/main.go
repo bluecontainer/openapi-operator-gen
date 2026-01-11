@@ -23,10 +23,10 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
-	"github.com/bluecontainer/openapi-operator-gen/pkg/telemetry"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/petstore-operator/internal/controller"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/telemetry"
 )
 
 var (
@@ -207,6 +207,7 @@ func main() {
 		setupLog.Info("Using static base URL", "url", baseURL)
 	}
 
+
 	if err = (&controller.OrderReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
@@ -316,6 +317,7 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "UserCreatewithlistAction")
 		os.Exit(1)
 	}
+
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

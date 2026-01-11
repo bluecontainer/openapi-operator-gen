@@ -344,6 +344,54 @@ make undeploy
 make uninstall
 ```
 
+## Helm Chart
+
+This operator can be packaged as a Helm chart for easier distribution and deployment.
+
+### Generate Helm Chart
+
+```bash
+# Generate Helm chart from kustomize manifests
+make helm
+```
+
+This creates a Helm chart in `chart/petstore/` using [helmify](https://github.com/arttor/helmify).
+
+### Install with Helm
+
+```bash
+# Build and push the operator image first
+make docker-build docker-push IMG=<your-registry>/petstore-operator:latest
+
+# Install the Helm chart
+make helm-install IMG=<your-registry>/petstore-operator:latest
+
+# Or install manually
+helm install petstore ./chart/petstore \
+  -n petstore-system \
+  --create-namespace \
+  --set image.repository=<your-registry>/petstore-operator \
+  --set image.tag=latest
+```
+
+### Upgrade
+
+```bash
+make helm-upgrade IMG=<your-registry>/petstore-operator:latest
+```
+
+### Uninstall
+
+```bash
+make helm-uninstall
+```
+
+### Package for Distribution
+
+```bash
+helm package ./chart/petstore
+```
+
 ## Environment Variables
 
 | Variable | Flag Equivalent |
