@@ -1,5 +1,10 @@
 # OpenAPI Operator Generator
 
+[![Latest Release](https://img.shields.io/github/v/release/bluecontainer/openapi-operator-gen)](https://github.com/bluecontainer/openapi-operator-gen/releases/latest)
+[![CI](https://github.com/bluecontainer/openapi-operator-gen/actions/workflows/ci.yaml/badge.svg)](https://github.com/bluecontainer/openapi-operator-gen/actions/workflows/ci.yaml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/bluecontainer/openapi-operator-gen)](https://go.dev/)
+[![License](https://img.shields.io/github/license/bluecontainer/openapi-operator-gen)](LICENSE)
+
 A code generator that creates Kubernetes operators from OpenAPI specifications. It maps REST API resources to Kubernetes Custom Resource Definitions (CRDs) and generates controller reconciliation logic that syncs CRs with the backing REST API.
 
 ## Table of Contents
@@ -272,7 +277,38 @@ openapi-operator-gen/
 
 ## Installation
 
-### Via go install (recommended)
+### Download pre-built binary (easiest)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/bluecontainer/openapi-operator-gen/releases):
+
+```bash
+# Linux (amd64)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-linux-amd64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# Linux (arm64)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-linux-arm64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-darwin-arm64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# macOS (Intel)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-darwin-amd64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# Verify installation
+openapi-operator-gen --version
+```
+
+### Via go install
+
+If you have Go 1.25+ installed:
 
 ```bash
 go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest
@@ -281,6 +317,9 @@ go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-ge
 ### Building from source
 
 ```bash
+git clone https://github.com/bluecontainer/openapi-operator-gen.git
+cd openapi-operator-gen
+
 # Build the generator
 make build
 
