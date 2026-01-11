@@ -864,6 +864,7 @@ func TestOrderReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
 // TestOrderReconciler_PathParamInURL verifies that path parameters from spec
 // are correctly substituted in the HTTP request URL
 func TestOrderReconciler_PathParamInURL(t *testing.T) {
@@ -986,4 +987,3 @@ func TestOrderReconciler_PathParamInURL(t *testing.T) {
 		t.Errorf("expected status.ExternalID to be %q, got %q", expectedExternalID, updated.Status.ExternalID)
 	}
 }
-

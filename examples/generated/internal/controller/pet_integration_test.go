@@ -70,7 +70,7 @@ var _ = Describe("Pet Controller Integration", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: v1alpha1.PetSpec{
-					Name: "test-value",
+					Name:      "test-value",
 					PhotoUrls: []string{"test-value"},
 				},
 			}
@@ -97,7 +97,7 @@ var _ = Describe("Pet Controller Integration", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: v1alpha1.PetSpec{
-					Name: "test-value",
+					Name:      "test-value",
 					PhotoUrls: []string{"test-value"},
 				},
 			}
@@ -135,7 +135,7 @@ var _ = Describe("Pet Controller Integration", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: v1alpha1.PetSpec{
-					Name: "test-value",
+					Name:      "test-value",
 					PhotoUrls: []string{"test-value"},
 				},
 			}

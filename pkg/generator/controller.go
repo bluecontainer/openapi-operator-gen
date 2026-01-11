@@ -521,14 +521,11 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 
 func (g *ControllerGenerator) generateGoMod() error {
 	// Use the generator version for the dependency
-	// If not set or "dev", use v0.0.0 as placeholder (go mod tidy will resolve to latest)
+	// Only use clean semver versions (vX.Y.Z), otherwise fall back to v0.0.0
+	// which will be resolved to latest by go mod tidy
 	version := g.config.GeneratorVersion
-	if version == "" || version == "dev" {
+	if !isValidSemver(version) {
 		version = "v0.0.0"
-	}
-	// Ensure version starts with 'v' for go.mod compatibility
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
 	}
 
 	data := struct {
@@ -540,6 +537,39 @@ func (g *ControllerGenerator) generateGoMod() error {
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
 	return g.executeTemplate(templates.GoModTemplate, data, outputPath)
+}
+
+// isValidSemver checks if a version string is a clean semver (vX.Y.Z)
+// Returns false for dev builds, dirty versions, or versions with extra commits
+func isValidSemver(version string) bool {
+	if version == "" || version == "dev" {
+		return false
+	}
+	// Must start with 'v'
+	if !strings.HasPrefix(version, "v") {
+		return false
+	}
+	// Check for dirty or extra commit indicators (e.g., v0.0.6-1-g783aaa8-dirty)
+	if strings.Contains(version, "-") {
+		return false
+	}
+	// Basic check: should be vX.Y.Z format
+	parts := strings.Split(strings.TrimPrefix(version, "v"), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	// Each part should be numeric
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, c := range part {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (g *ControllerGenerator) generateDockerfile() error {

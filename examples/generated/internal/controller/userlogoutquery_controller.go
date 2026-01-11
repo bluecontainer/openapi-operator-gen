@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
 var (
@@ -425,6 +425,7 @@ func (r *UserLogoutQueryReconciler) recordQueryMetrics(ctx context.Context, stat
 			attribute.String("status", status),
 		))
 }
+
 // countResults attempts to count results in the response
 func (r *UserLogoutQueryReconciler) countResults(body []byte) int {
 	// Try to parse as array

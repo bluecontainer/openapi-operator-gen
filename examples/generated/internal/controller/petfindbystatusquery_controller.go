@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 )
 
 var (
@@ -425,6 +425,7 @@ func (r *PetFindbystatusQueryReconciler) recordQueryMetrics(ctx context.Context,
 			attribute.String("status", status),
 		))
 }
+
 // parseResults parses the response body into typed results
 func (r *PetFindbystatusQueryReconciler) parseResults(body []byte) ([]v1alpha1.Pet, int, error) {
 	var results []v1alpha1.Pet

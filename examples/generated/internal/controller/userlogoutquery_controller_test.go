@@ -864,6 +864,7 @@ func TestUserLogoutQueryReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
 // TestUserLogoutQueryReconciler_QueryParams verifies that query parameters from spec
 // are correctly appended to the HTTP request URL
 func TestUserLogoutQueryReconciler_QueryParams(t *testing.T) {
@@ -973,4 +974,3 @@ func TestUserLogoutQueryReconciler_QueryParams(t *testing.T) {
 		t.Errorf("expected query path pattern %q in URL (prefix=%q, suffix=%q)", expectedQueryPath, staticPrefix, staticSuffix)
 	}
 }
-
