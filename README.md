@@ -68,6 +68,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Metrics](#metrics)
   - [Tracing](#tracing)
   - [Kubernetes Deployment](#kubernetes-deployment-with-opentelemetry)
+- [Helm Chart Generation](#helm-chart-generation)
 - [Releasing](#releasing)
 - [License](#license)
 
@@ -85,6 +86,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - Helm release discovery (auto-detects StatefulSet or Deployment)
 - Multiple endpoint selection strategies
 - Per-CR workload targeting for multi-tenant scenarios
+- Helm chart generation via [helmify](https://github.com/arttor/helmify)
+- OpenTelemetry instrumentation for observability
 
 ## Architecture
 
@@ -1559,6 +1562,60 @@ spec:
   selector:
     app: otel-collector
 ```
+
+## Helm Chart Generation
+
+Generated operators include built-in support for creating Helm charts using [helmify](https://github.com/arttor/helmify). This makes it easy to package and distribute your operator.
+
+### Generate a Helm Chart
+
+```bash
+cd examples/generated
+
+# Generate Helm chart from kustomize manifests
+make helm
+```
+
+This creates a complete Helm chart in `chart/<app-name>/` with:
+- CRDs in `crds/` directory
+- Deployment, ServiceAccount, and RBAC templates
+- Configurable `values.yaml`
+
+### Install with Helm
+
+```bash
+# Build and push the operator image
+make docker-build docker-push IMG=<your-registry>/petstore-operator:latest
+
+# Install using the generated Makefile target
+make helm-install IMG=<your-registry>/petstore-operator:latest
+
+# Or install manually with helm
+helm install petstore ./chart/petstore \
+  -n petstore-system \
+  --create-namespace \
+  --set image.repository=<your-registry>/petstore-operator \
+  --set image.tag=latest
+```
+
+### Package for Distribution
+
+```bash
+# Package the chart
+helm package ./chart/petstore
+
+# Push to a Helm repository (example using OCI registry)
+helm push petstore-0.1.0.tgz oci://<your-registry>/charts
+```
+
+### Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make helm` | Generate Helm chart from kustomize manifests |
+| `make helm-install` | Generate and install Helm chart |
+| `make helm-upgrade` | Upgrade existing Helm release |
+| `make helm-uninstall` | Uninstall Helm release |
 
 ## Releasing
 
