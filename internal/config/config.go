@@ -37,6 +37,9 @@ type Config struct {
 	// RootKind is the Kind name to use for the root "/" endpoint.
 	// If not specified, it's derived from the OpenAPI spec file name.
 	RootKind string
+	// GeneratorVersion is the version of openapi-operator-gen used to generate the code.
+	// This is embedded in the generated go.mod to ensure correct dependency versions.
+	GeneratorVersion string
 }
 
 // Validate checks if the configuration is valid

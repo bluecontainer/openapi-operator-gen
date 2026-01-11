@@ -739,8 +739,16 @@ func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []pa
 	}
 
 	// Collect unique path params from all operations
+	// Sort operations by method to ensure deterministic output (GET first for better descriptions)
+	sortedOps := make([]parser.Operation, len(operations))
+	copy(sortedOps, operations)
+	sort.Slice(sortedOps, func(i, j int) bool {
+		methodOrder := map[string]int{"GET": 0, "POST": 1, "PUT": 2, "PATCH": 3, "DELETE": 4}
+		return methodOrder[sortedOps[i].Method] < methodOrder[sortedOps[j].Method]
+	})
+
 	pathParamsSeen := make(map[string]bool)
-	for _, op := range operations {
+	for _, op := range sortedOps {
 		for _, param := range op.PathParams {
 			paramKey := strings.ToLower(param.Name)
 			if pathParamsSeen[paramKey] || existingFields[paramKey] {
@@ -760,9 +768,9 @@ func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []pa
 		}
 	}
 
-	// Collect unique query params from all operations
+	// Collect unique query params from all operations (using sorted ops for consistent descriptions)
 	queryParamsSeen := make(map[string]bool)
-	for _, op := range operations {
+	for _, op := range sortedOps {
 		for _, param := range op.QueryParams {
 			paramKey := strings.ToLower(param.Name)
 			if queryParamsSeen[paramKey] || existingFields[paramKey] {

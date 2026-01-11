@@ -520,10 +520,23 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 }
 
 func (g *ControllerGenerator) generateGoMod() error {
+	// Use the generator version for the dependency
+	// If not set or "dev", use v0.0.0 as placeholder (go mod tidy will resolve to latest)
+	version := g.config.GeneratorVersion
+	if version == "" || version == "dev" {
+		version = "v0.0.0"
+	}
+	// Ensure version starts with 'v' for go.mod compatibility
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+
 	data := struct {
-		ModuleName string
+		ModuleName       string
+		GeneratorVersion string
 	}{
-		ModuleName: g.config.ModuleName,
+		ModuleName:       g.config.ModuleName,
+		GeneratorVersion: version,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
 	return g.executeTemplate(templates.GoModTemplate, data, outputPath)

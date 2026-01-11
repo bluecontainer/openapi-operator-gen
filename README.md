@@ -63,6 +63,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Metrics](#metrics)
   - [Tracing](#tracing)
   - [Kubernetes Deployment](#kubernetes-deployment-with-opentelemetry)
+- [Releasing](#releasing)
 - [License](#license)
 
 ## Features
@@ -265,7 +266,7 @@ openapi-operator-gen/
 
 ## Requirements
 
-- Go 1.21+ (tested with Go 1.22)
+- Go 1.25+
 - controller-gen (automatically installed by generated Makefile)
 - kustomize (automatically installed by generated Makefile)
 
@@ -1519,6 +1520,55 @@ spec:
   selector:
     app: otel-collector
 ```
+
+## Releasing
+
+To create a new release:
+
+### 1. Update Version and Create Tag
+
+```bash
+# Ensure you're on main with latest changes
+git checkout main
+git pull origin main
+
+# Create an annotated tag
+git tag -a v0.1.0 -m "Release v0.1.0"
+
+# Push the tag
+git push origin v0.1.0
+```
+
+### 2. Automated Release Process
+
+When you push a tag matching `v*`, GitHub Actions automatically:
+
+1. Runs all tests
+2. Builds binaries for multiple platforms:
+   - Linux (amd64, arm64)
+   - macOS (amd64, arm64)
+   - Windows (amd64)
+3. Creates SHA256 checksums
+4. Creates a GitHub Release with all binaries attached
+
+### 3. Version Embedding
+
+The release version is automatically embedded in:
+
+- **CLI binary**: Shown via `openapi-operator-gen --version`
+- **Generated go.mod**: Operators generated with a released version will have:
+  ```
+  require github.com/bluecontainer/openapi-operator-gen v0.1.0
+  ```
+
+This ensures generated operators reference the exact version of the generator that created them.
+
+### Release Checklist
+
+- [ ] All tests passing (`make test`)
+- [ ] CHANGELOG updated (if maintained)
+- [ ] Version follows [Semantic Versioning](https://semver.org/)
+- [ ] Tag pushed to trigger release workflow
 
 ## License
 

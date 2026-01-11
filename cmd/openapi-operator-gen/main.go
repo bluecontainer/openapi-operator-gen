@@ -90,6 +90,9 @@ func init() {
 }
 
 func runGenerate(cmd *cobra.Command, args []string) error {
+	// Set the generator version for embedding in generated go.mod
+	cfg.GeneratorVersion = version
+
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
