@@ -108,10 +108,13 @@ spec:
                   type: object
                 type: array
               resourceSelectors:
-                description: ResourceSelectors specifies which resources to aggregate
+                description: |-
+                  ResourceSelectors specifies patterns to dynamically select resources for aggregation.
+                  Use this to aggregate resources matching labels or name patterns.
+                  At least one of Resources or ResourceSelectors must be specified.
                 items:
                   description: ResourceSelector defines how to select resources for
-                    aggregation
+                    aggregation using patterns and labels
                   properties:
                     kind:
                       description: Kind specifies the resource kind to select (e.g.,
@@ -129,10 +132,32 @@ spec:
                   required:
                   - kind
                   type: object
-                minItems: 1
                 type: array
-            required:
-            - resourceSelectors
+              resources:
+                description: |-
+                  Resources specifies explicit resource references to aggregate by name.
+                  Use this for precise control over which specific resources to include.
+                  At least one of Resources or ResourceSelectors must be specified.
+                items:
+                  description: ResourceReference explicitly references a resource
+                    by name for aggregation
+                  properties:
+                    kind:
+                      description: Kind specifies the resource kind (e.g., "Pet",
+                        "Order")
+                      type: string
+                    name:
+                      description: Name is the resource name
+                      type: string
+                    namespace:
+                      description: Namespace is the resource namespace (defaults to
+                        the aggregate's namespace if not specified)
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
             type: object
           status:
             description: PetstoreAggregateStatus defines the observed state of PetstoreAggregate

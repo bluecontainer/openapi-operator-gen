@@ -95,7 +95,7 @@ type {{ .Kind }}Reconciler struct {
 // +kubebuilder:rbac:groups={{ .APIGroup }},resources={{ .Plural }},verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups={{ .APIGroup }},resources={{ .Plural }}/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups={{ .APIGroup }},resources={{ .Plural }}/finalizers,verbs=update
-{{- range .ResourceKinds }}
+{{- range .AllKinds }}
 // +kubebuilder:rbac:groups={{ $.APIGroup }},resources={{ . | lower }}s,verbs=get;list;watch
 {{- end }}
 
@@ -165,17 +165,72 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) error {
 	logger := log.FromContext(ctx)
 
+	// Validate that at least one selection method is specified
+	if len(instance.Spec.Resources) == 0 && len(instance.Spec.ResourceSelectors) == 0 {
+		return fmt.Errorf("at least one of resources or resourceSelectors must be specified")
+	}
+
 	var allResources []{{ .APIVersion }}.AggregatedResourceStatus
 	var allCELData []map[string]interface{} // Full resource data for CEL expressions
-	// Kind-specific CEL data maps (e.g., "orders", "pets", "users")
+	// Kind-specific CEL data maps (e.g., "orders", "pets", "users", queries, actions)
 	celDataByKind := map[string][]map[string]interface{}{
-		{{- range .ResourceKinds }}
+		{{- range .AllKinds }}
 		"{{ . | lower }}s": {},
 		{{- end }}
 	}
 	var totalCount, syncedCount, failedCount, pendingCount int
 
-	// Process each resource selector
+	// Helper to process a resource and update counters
+	// Handles different state names for CRUD (Synced/Observed), Query (Queried), and Action (Completed) CRDs
+	processResource := func(res {{ .APIVersion }}.AggregatedResourceStatus, celData map[string]interface{}) {
+		allResources = append(allResources, res)
+		if celData != nil {
+			allCELData = append(allCELData, celData)
+			// Add to kind-specific list (lowercase plural)
+			kindKey := strings.ToLower(res.Kind) + "s"
+			celDataByKind[kindKey] = append(celDataByKind[kindKey], celData)
+		}
+		totalCount++
+
+		switch res.State {
+		case "Synced", "Observed", "Queried", "Completed":
+			// CRUD: Synced/Observed, Query: Queried, Action: Completed
+			syncedCount++
+		case "Failed":
+			failedCount++
+		default:
+			pendingCount++
+		}
+	}
+
+	// Process explicit resource references first (Option 1: Reference-Based)
+	for _, ref := range instance.Spec.Resources {
+		namespace := ref.Namespace
+		if namespace == "" {
+			namespace = instance.Namespace // Default to aggregate's namespace
+		}
+		res, celData, err := r.getResourceByReference(ctx, namespace, ref)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Resource not found - add a placeholder with error state
+				allResources = append(allResources, {{ .APIVersion }}.AggregatedResourceStatus{
+					Kind:      ref.Kind,
+					Name:      ref.Name,
+					Namespace: namespace,
+					State:     "NotFound",
+					Message:   "Referenced resource not found",
+				})
+				totalCount++
+				failedCount++
+				continue
+			}
+			logger.Error(err, "Failed to get resource", "kind", ref.Kind, "name", ref.Name)
+			continue
+		}
+		processResource(res, celData)
+	}
+
+	// Process resource selectors (Option 4: Selector-Based)
 	for _, selector := range instance.Spec.ResourceSelectors {
 		resources, celData, err := r.listResourcesBySelector(ctx, instance.Namespace, selector)
 		if err != nil {
@@ -184,23 +239,11 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 		}
 
 		for i, res := range resources {
-			allResources = append(allResources, res)
+			var itemCelData map[string]interface{}
 			if i < len(celData) {
-				allCELData = append(allCELData, celData[i])
-				// Add to kind-specific list (lowercase plural)
-				kindKey := strings.ToLower(res.Kind) + "s"
-				celDataByKind[kindKey] = append(celDataByKind[kindKey], celData[i])
+				itemCelData = celData[i]
 			}
-			totalCount++
-
-			switch res.State {
-			case "Synced", "Observed":
-				syncedCount++
-			case "Failed":
-				failedCount++
-			default:
-				pendingCount++
-			}
+			processResource(res, itemCelData)
 		}
 	}
 
@@ -275,6 +318,7 @@ func (r *{{ .Kind }}Reconciler) listResourcesBySelector(ctx context.Context, nam
 	}
 
 	// List resources based on kind
+	// Handles CRUD resources, Query CRDs, and Action CRDs with different status fields
 	switch selector.Kind {
 	{{- range .ResourceKinds }}
 	case "{{ . }}":
@@ -288,21 +332,132 @@ func (r *{{ .Kind }}Reconciler) listResourcesBySelector(ctx context.Context, nam
 				continue
 			}
 			results = append(results, {{ $.APIVersion }}.AggregatedResourceStatus{
-				Kind:       "{{ . }}",
-				Name:       item.Name,
-				Namespace:  item.Namespace,
-				State:      item.Status.State,
-				ExternalID: item.Status.ExternalID,
-				Message:    item.Status.Message,
+				Kind:         "{{ . }}",
+				Name:         item.Name,
+				Namespace:    item.Namespace,
+				State:        item.Status.State,
+				ExternalID:   item.Status.ExternalID,
+				Message:      item.Status.Message,
 				LastSyncTime: item.Status.LastSyncTime,
 			})
-			// Build full resource data for CEL expressions
+			celData = append(celData, r.resourceToCELData("{{ . }}", &item))
+		}
+	{{- end }}
+	{{- range .QueryKinds }}
+	case "{{ . }}":
+		list := &{{ $.APIVersion }}.{{ . }}List{}
+		if err := r.List(ctx, list, listOpts); err != nil {
+			return nil, nil, err
+		}
+		for _, item := range list.Items {
+			if nameRegex != nil && !nameRegex.MatchString(item.Name) {
+				continue
+			}
+			results = append(results, {{ $.APIVersion }}.AggregatedResourceStatus{
+				Kind:         "{{ . }}",
+				Name:         item.Name,
+				Namespace:    item.Namespace,
+				State:        item.Status.State,
+				Message:      item.Status.Message,
+				LastSyncTime: item.Status.LastQueryTime, // Map LastQueryTime to LastSyncTime
+			})
+			celData = append(celData, r.resourceToCELData("{{ . }}", &item))
+		}
+	{{- end }}
+	{{- range .ActionKinds }}
+	case "{{ . }}":
+		list := &{{ $.APIVersion }}.{{ . }}List{}
+		if err := r.List(ctx, list, listOpts); err != nil {
+			return nil, nil, err
+		}
+		for _, item := range list.Items {
+			if nameRegex != nil && !nameRegex.MatchString(item.Name) {
+				continue
+			}
+			results = append(results, {{ $.APIVersion }}.AggregatedResourceStatus{
+				Kind:         "{{ . }}",
+				Name:         item.Name,
+				Namespace:    item.Namespace,
+				State:        item.Status.State,
+				Message:      item.Status.Message,
+				LastSyncTime: item.Status.LastExecutionTime, // Map LastExecutionTime to LastSyncTime
+			})
 			celData = append(celData, r.resourceToCELData("{{ . }}", &item))
 		}
 	{{- end }}
 	}
 
 	return results, celData, nil
+}
+
+// getResourceByReference fetches a specific resource by explicit reference
+// Returns the aggregated status for display and full resource data for CEL expressions
+func (r *{{ .Kind }}Reconciler) getResourceByReference(ctx context.Context, namespace string, ref {{ .APIVersion }}.ResourceReference) ({{ .APIVersion }}.AggregatedResourceStatus, map[string]interface{}, error) {
+	var result {{ .APIVersion }}.AggregatedResourceStatus
+	var celData map[string]interface{}
+
+	key := client.ObjectKey{
+		Name:      ref.Name,
+		Namespace: namespace,
+	}
+
+	// Fetch resource based on kind
+	// Handles CRUD resources, Query CRDs, and Action CRDs with different status fields
+	switch ref.Kind {
+	{{- range .ResourceKinds }}
+	case "{{ . }}":
+		item := &{{ $.APIVersion }}.{{ . }}{}
+		if err := r.Get(ctx, key, item); err != nil {
+			return result, nil, err
+		}
+		result = {{ $.APIVersion }}.AggregatedResourceStatus{
+			Kind:         "{{ . }}",
+			Name:         item.Name,
+			Namespace:    item.Namespace,
+			State:        item.Status.State,
+			ExternalID:   item.Status.ExternalID,
+			Message:      item.Status.Message,
+			LastSyncTime: item.Status.LastSyncTime,
+		}
+		celData = r.resourceToCELData("{{ . }}", item)
+	{{- end }}
+	{{- range .QueryKinds }}
+	case "{{ . }}":
+		item := &{{ $.APIVersion }}.{{ . }}{}
+		if err := r.Get(ctx, key, item); err != nil {
+			return result, nil, err
+		}
+		result = {{ $.APIVersion }}.AggregatedResourceStatus{
+			Kind:         "{{ . }}",
+			Name:         item.Name,
+			Namespace:    item.Namespace,
+			State:        item.Status.State,
+			Message:      item.Status.Message,
+			LastSyncTime: item.Status.LastQueryTime,
+		}
+		celData = r.resourceToCELData("{{ . }}", item)
+	{{- end }}
+	{{- range .ActionKinds }}
+	case "{{ . }}":
+		item := &{{ $.APIVersion }}.{{ . }}{}
+		if err := r.Get(ctx, key, item); err != nil {
+			return result, nil, err
+		}
+		result = {{ $.APIVersion }}.AggregatedResourceStatus{
+			Kind:         "{{ . }}",
+			Name:         item.Name,
+			Namespace:    item.Namespace,
+			State:        item.Status.State,
+			Message:      item.Status.Message,
+			LastSyncTime: item.Status.LastExecutionTime,
+		}
+		celData = r.resourceToCELData("{{ . }}", item)
+	{{- end }}
+	default:
+		return result, nil, fmt.Errorf("unsupported resource kind: %s", ref.Kind)
+	}
+
+	return result, celData, nil
 }
 
 // evaluateAggregationStrategy determines the overall state based on the configured strategy
@@ -367,8 +522,8 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, insta
 	envOpts := []cel.EnvOption{
 		cel.Variable("resources", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
 		cel.Variable("summary", cel.MapType(cel.StringType, cel.IntType)),
-		// Kind-specific variables (e.g., orders, pets, users)
-		{{- range .ResourceKinds }}
+		// Kind-specific variables for all kinds (CRUD, Query, Action)
+		{{- range .AllKinds }}
 		cel.Variable("{{ . | lower }}s", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
 		{{- end }}
 		// Custom aggregate functions for numeric lists
@@ -648,6 +803,7 @@ func (r *{{ .Kind }}Reconciler) resourceToCELData(kind string, obj interface{}) 
 	}
 
 	// Use JSON marshaling to convert structs to maps (handles all field types)
+	// Handles CRUD resources, Query CRDs, and Action CRDs
 	switch kind {
 	{{- range .ResourceKinds }}
 	case "{{ . }}":
@@ -658,14 +814,58 @@ func (r *{{ .Kind }}Reconciler) resourceToCELData(kind string, obj interface{}) 
 				"labels":      item.Labels,
 				"annotations": item.Annotations,
 			}
-			// Convert spec to map
 			if specBytes, err := json.Marshal(item.Spec); err == nil {
 				var specMap map[string]interface{}
 				if json.Unmarshal(specBytes, &specMap) == nil {
 					result["spec"] = specMap
 				}
 			}
-			// Convert status to map
+			if statusBytes, err := json.Marshal(item.Status); err == nil {
+				var statusMap map[string]interface{}
+				if json.Unmarshal(statusBytes, &statusMap) == nil {
+					result["status"] = statusMap
+				}
+			}
+		}
+	{{- end }}
+	{{- range .QueryKinds }}
+	case "{{ . }}":
+		if item, ok := obj.(*{{ $.APIVersion }}.{{ . }}); ok {
+			result["metadata"] = map[string]interface{}{
+				"name":        item.Name,
+				"namespace":   item.Namespace,
+				"labels":      item.Labels,
+				"annotations": item.Annotations,
+			}
+			if specBytes, err := json.Marshal(item.Spec); err == nil {
+				var specMap map[string]interface{}
+				if json.Unmarshal(specBytes, &specMap) == nil {
+					result["spec"] = specMap
+				}
+			}
+			if statusBytes, err := json.Marshal(item.Status); err == nil {
+				var statusMap map[string]interface{}
+				if json.Unmarshal(statusBytes, &statusMap) == nil {
+					result["status"] = statusMap
+				}
+			}
+		}
+	{{- end }}
+	{{- range .ActionKinds }}
+	case "{{ . }}":
+		if item, ok := obj.(*{{ $.APIVersion }}.{{ . }}); ok {
+			result["metadata"] = map[string]interface{}{
+				"name":        item.Name,
+				"namespace":   item.Namespace,
+				"labels":      item.Labels,
+				"annotations": item.Annotations,
+			}
+			if specBytes, err := json.Marshal(item.Spec); err == nil {
+				var specMap map[string]interface{}
+				if json.Unmarshal(specBytes, &specMap) == nil {
+					result["spec"] = specMap
+				}
+			}
 			if statusBytes, err := json.Marshal(item.Status); err == nil {
 				var statusMap map[string]interface{}
 				if json.Unmarshal(statusBytes, &statusMap) == nil {
@@ -757,9 +957,9 @@ func (r *{{ .Kind }}Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&{{ .APIVersion }}.{{ .Kind }}{})
 
-	// Watch all resource types that can be aggregated
+	// Watch all resource types that can be aggregated (CRUD, Query, Action)
 	// When any of these resources change, find aggregates that might be affected
-	{{- range .ResourceKinds }}
+	{{- range .AllKinds }}
 	builder = builder.Watches(
 		&{{ $.APIVersion }}.{{ . }}{},
 		handler.EnqueueRequestsFromMapFunc(r.findAggregatesFor{{ . }}),
@@ -769,7 +969,7 @@ func (r *{{ .Kind }}Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return builder.Complete(r)
 }
 
-{{- range .ResourceKinds }}
+{{- range .AllKinds }}
 // findAggregatesFor{{ . }} finds all {{ $.Kind }} resources that might be affected by a {{ . }} change
 func (r *{{ $.Kind }}Reconciler) findAggregatesFor{{ . }}(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
@@ -782,8 +982,40 @@ func (r *{{ $.Kind }}Reconciler) findAggregatesFor{{ . }}(ctx context.Context, o
 	}
 
 	var requests []reconcile.Request
+	seenAggregates := make(map[string]bool) // Track which aggregates we've already added
+
 	for _, aggregate := range aggregateList.Items {
-		// Check if this aggregate watches {{ . }} resources
+		aggregateKey := aggregate.Namespace + "/" + aggregate.Name
+
+		// Check if this aggregate explicitly references this resource (Option 1)
+		for _, ref := range aggregate.Spec.Resources {
+			if ref.Kind == "{{ . }}" && ref.Name == obj.GetName() {
+				// Check namespace match (empty ref.Namespace means same namespace as aggregate)
+				refNamespace := ref.Namespace
+				if refNamespace == "" {
+					refNamespace = aggregate.Namespace
+				}
+				if refNamespace == obj.GetNamespace() {
+					if !seenAggregates[aggregateKey] {
+						requests = append(requests, reconcile.Request{
+							NamespacedName: client.ObjectKey{
+								Name:      aggregate.Name,
+								Namespace: aggregate.Namespace,
+							},
+						})
+						seenAggregates[aggregateKey] = true
+					}
+					break
+				}
+			}
+		}
+
+		// Skip selector check if already added
+		if seenAggregates[aggregateKey] {
+			continue
+		}
+
+		// Check if this aggregate watches {{ . }} resources via selectors (Option 4)
 		for _, selector := range aggregate.Spec.ResourceSelectors {
 			if selector.Kind == "{{ . }}" {
 				// Check if labels match (if selector has matchLabels)
@@ -801,12 +1033,15 @@ func (r *{{ $.Kind }}Reconciler) findAggregatesFor{{ . }}(ctx context.Context, o
 					}
 				}
 				// This aggregate watches this resource
-				requests = append(requests, reconcile.Request{
-					NamespacedName: client.ObjectKey{
-						Name:      aggregate.Name,
-						Namespace: aggregate.Namespace,
-					},
-				})
+				if !seenAggregates[aggregateKey] {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: client.ObjectKey{
+							Name:      aggregate.Name,
+							Namespace: aggregate.Namespace,
+						},
+					})
+					seenAggregates[aggregateKey] = true
+				}
 				break
 			}
 		}

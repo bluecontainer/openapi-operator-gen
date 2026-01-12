@@ -787,7 +787,10 @@ type AggregateControllerTemplateData struct {
 	Kind             string
 	KindLower        string
 	Plural           string
-	ResourceKinds    []string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
 }
 
 // GenerateAggregateController generates the aggregate controller
@@ -807,6 +810,9 @@ func (g *ControllerGenerator) GenerateAggregateController(aggregate *mapper.Aggr
 		KindLower:        strings.ToLower(aggregate.Kind),
 		Plural:           aggregate.Plural,
 		ResourceKinds:    aggregate.ResourceKinds,
+		QueryKinds:       aggregate.QueryKinds,
+		ActionKinds:      aggregate.ActionKinds,
+		AllKinds:         aggregate.AllKinds,
 	}
 
 	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(aggregate.Kind))

@@ -48,7 +48,10 @@ type ExampleAggregateCRData struct {
 	APIVersion       string
 	Kind             string
 	KindLower        string
-	ResourceKinds    []string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
 }
 
 // Generate generates example CR YAML files for all CRDs
@@ -259,9 +262,14 @@ func (g *SamplesGenerator) generateExampleAggregateCR(samplesDir string, aggrega
 		Kind:             aggregate.Kind,
 		KindLower:        strings.ToLower(aggregate.Kind),
 		ResourceKinds:    aggregate.ResourceKinds,
+		QueryKinds:       aggregate.QueryKinds,
+		ActionKinds:      aggregate.ActionKinds,
+		AllKinds:         aggregate.AllKinds,
 	}
 
-	tmpl, err := template.New("example-aggregate").Parse(templates.ExampleAggregateCRTemplate)
+	tmpl, err := template.New("example-aggregate").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.ExampleAggregateCRTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}

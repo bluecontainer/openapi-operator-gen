@@ -1136,8 +1136,14 @@ type AggregateDefinition struct {
 	APIVersion string
 	Kind       string
 	Plural     string
-	// ResourceKinds are the CRD kinds this aggregate observes
+	// ResourceKinds are the CRUD CRD kinds this aggregate can observe
 	ResourceKinds []string
+	// QueryKinds are the Query CRD kinds this aggregate can observe
+	QueryKinds []string
+	// ActionKinds are the Action CRD kinds this aggregate can observe
+	ActionKinds []string
+	// AllKinds is the combined list of all kinds (for iteration convenience)
+	AllKinds []string
 }
 
 // ResourceSelector defines how to select resources to aggregate
@@ -1176,10 +1182,19 @@ const (
 
 // CreateAggregateDefinition creates an aggregate CRD definition from existing CRDs
 func (m *Mapper) CreateAggregateDefinition(crds []*CRDDefinition) *AggregateDefinition {
-	// Collect resource kinds (excluding query and action CRDs)
+	// Collect resource kinds by type
 	resourceKinds := make([]string, 0)
+	queryKinds := make([]string, 0)
+	actionKinds := make([]string, 0)
+	allKinds := make([]string, 0)
+
 	for _, crd := range crds {
-		if !crd.IsQuery && !crd.IsAction {
+		allKinds = append(allKinds, crd.Kind)
+		if crd.IsQuery {
+			queryKinds = append(queryKinds, crd.Kind)
+		} else if crd.IsAction {
+			actionKinds = append(actionKinds, crd.Kind)
+		} else {
 			resourceKinds = append(resourceKinds, crd.Kind)
 		}
 	}
@@ -1195,5 +1210,8 @@ func (m *Mapper) CreateAggregateDefinition(crds []*CRDDefinition) *AggregateDefi
 		Kind:          aggregateKind,
 		Plural:        strings.ToLower(aggregateKind) + "s",
 		ResourceKinds: resourceKinds,
+		QueryKinds:    queryKinds,
+		ActionKinds:   actionKinds,
+		AllKinds:      allKinds,
 	}
 }
