@@ -1596,3 +1596,492 @@ paths:
 		t.Errorf("expected 1 action endpoint, got %d", len(spec.ActionEndpoints))
 	}
 }
+
+// =============================================================================
+// isURL Tests
+// =============================================================================
+
+func TestIsURL(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"https://example.com/api/openapi.yaml", true},
+		{"http://localhost:8080/api.json", true},
+		{"https://raw.githubusercontent.com/user/repo/main/openapi.yaml", true},
+		{"./openapi.yaml", false},
+		{"/home/user/openapi.yaml", false},
+		{"openapi.yaml", false},
+		{"file:///path/to/openapi.yaml", false},
+		{"ftp://example.com/api.yaml", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := isURL(tt.path)
+			if result != tt.expected {
+				t.Errorf("isURL(%q) = %v, expected %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// URL Loading Integration Tests
+// =============================================================================
+
+func TestParse_FromURL(t *testing.T) {
+	// Skip this test if running in short mode (no network)
+	if testing.Short() {
+		t.Skip("skipping URL test in short mode")
+	}
+
+	// Use a well-known public OpenAPI spec (Petstore)
+	specURL := "https://petstore3.swagger.io/api/v3/openapi.json"
+
+	p := NewParser()
+	spec, err := p.Parse(specURL)
+	if err != nil {
+		// If the URL is unreachable, skip the test rather than fail
+		t.Skipf("could not load spec from URL (network issue?): %v", err)
+	}
+
+	// Verify we got some data
+	if spec.Title == "" {
+		t.Error("expected Title to be set")
+	}
+	if spec.Version == "" {
+		t.Error("expected Version to be set")
+	}
+
+	// Petstore should have resources
+	if len(spec.Resources) == 0 && len(spec.QueryEndpoints) == 0 && len(spec.ActionEndpoints) == 0 {
+		t.Error("expected at least some resources, queries, or actions")
+	}
+}
+
+func TestParse_InvalidURL(t *testing.T) {
+	p := NewParser()
+
+	// Test with an invalid URL scheme
+	_, err := p.Parse("https://invalid-domain-that-does-not-exist-12345.example/api.yaml")
+	if err == nil {
+		t.Error("expected error for invalid URL")
+	}
+}
+
+func TestParse_MalformedURL(t *testing.T) {
+	p := NewParser()
+
+	// Test with a malformed URL (still has http:// prefix but invalid format)
+	// Note: url.Parse is very permissive, so we test the actual fetch failure
+	_, err := p.Parse("http://[::1]:namedport/api.yaml")
+	if err == nil {
+		t.Error("expected error for malformed URL")
+	}
+}
+
+// =============================================================================
+// Swagger 2.0 Support Tests
+// =============================================================================
+
+func TestDetectSpecVersion_Swagger2(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected string
+	}{
+		{
+			name:     "Swagger 2.0 JSON",
+			content:  `{"swagger": "2.0", "info": {"title": "Test", "version": "1.0"}}`,
+			expected: "2.0",
+		},
+		{
+			name:     "Swagger 2.0 YAML",
+			content:  "swagger: \"2.0\"\ninfo:\n  title: Test\n  version: \"1.0\"",
+			expected: "2.0",
+		},
+		{
+			name:     "OpenAPI 3.0 JSON",
+			content:  `{"openapi": "3.0.0", "info": {"title": "Test", "version": "1.0"}}`,
+			expected: "3.x",
+		},
+		{
+			name:     "OpenAPI 3.0 YAML",
+			content:  "openapi: \"3.0.0\"\ninfo:\n  title: Test\n  version: \"1.0\"",
+			expected: "3.x",
+		},
+		{
+			name:     "OpenAPI 3.1 YAML",
+			content:  "openapi: \"3.1.0\"\ninfo:\n  title: Test\n  version: \"1.0\"",
+			expected: "3.x",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectSpecVersion([]byte(tt.content))
+			if result != tt.expected {
+				t.Errorf("detectSpecVersion() = %q, expected %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParse_Swagger2Spec(t *testing.T) {
+	// Create a temporary Swagger 2.0 spec file
+	specContent := `
+swagger: "2.0"
+info:
+  title: "Pet Store API"
+  version: "1.0.0"
+  description: "A sample Swagger 2.0 API"
+host: "api.example.com"
+basePath: "/v1"
+schemes:
+  - https
+paths:
+  /pets:
+    get:
+      summary: "List all pets"
+      operationId: "listPets"
+      produces:
+        - application/json
+      responses:
+        200:
+          description: "A list of pets"
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Pet"
+    post:
+      summary: "Create a pet"
+      operationId: "createPet"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: pet
+          schema:
+            $ref: "#/definitions/Pet"
+      responses:
+        201:
+          description: "Pet created"
+          schema:
+            $ref: "#/definitions/Pet"
+  /pets/{petId}:
+    get:
+      summary: "Get a pet by ID"
+      operationId: "getPet"
+      produces:
+        - application/json
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          type: integer
+          format: int64
+      responses:
+        200:
+          description: "A pet"
+          schema:
+            $ref: "#/definitions/Pet"
+    put:
+      summary: "Update a pet"
+      operationId: "updatePet"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          type: integer
+          format: int64
+        - in: body
+          name: pet
+          schema:
+            $ref: "#/definitions/Pet"
+      responses:
+        200:
+          description: "Pet updated"
+          schema:
+            $ref: "#/definitions/Pet"
+    delete:
+      summary: "Delete a pet"
+      operationId: "deletePet"
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          type: integer
+          format: int64
+      responses:
+        204:
+          description: "Pet deleted"
+definitions:
+  Pet:
+    type: object
+    required:
+      - name
+    properties:
+      id:
+        type: integer
+        format: int64
+      name:
+        type: string
+      tag:
+        type: string
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "swagger.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Verify basic info was parsed
+	if spec.Title != "Pet Store API" {
+		t.Errorf("expected Title 'Pet Store API', got %q", spec.Title)
+	}
+	if spec.Version != "1.0.0" {
+		t.Errorf("expected Version '1.0.0', got %q", spec.Version)
+	}
+
+	// Verify resources were extracted
+	if len(spec.Resources) == 0 {
+		t.Error("expected at least one resource")
+	}
+
+	// Find Pet resource
+	var petResource *Resource
+	for _, r := range spec.Resources {
+		if r.Name == "Pet" {
+			petResource = r
+			break
+		}
+	}
+
+	if petResource == nil {
+		t.Fatal("expected Pet resource")
+	}
+
+	// Verify Pet resource has operations
+	if len(petResource.Operations) == 0 {
+		t.Error("expected Pet resource to have operations")
+	}
+
+	// Verify schemas were parsed
+	if len(spec.Schemas) == 0 {
+		t.Error("expected at least one schema")
+	}
+
+	if _, ok := spec.Schemas["Pet"]; !ok {
+		t.Error("expected Pet schema to be parsed")
+	}
+}
+
+func TestParse_Swagger2JSON(t *testing.T) {
+	// Create a temporary Swagger 2.0 JSON spec
+	specContent := `{
+  "swagger": "2.0",
+  "info": {
+    "title": "Simple API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/users": {
+      "get": {
+        "summary": "List users",
+        "operationId": "listUsers",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create user",
+        "operationId": "createUser",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/users/{userId}": {
+      "get": {
+        "summary": "Get user",
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    }
+  }
+}`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "swagger.json")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if spec.Title != "Simple API" {
+		t.Errorf("expected Title 'Simple API', got %q", spec.Title)
+	}
+
+	// Should have User resource
+	found := false
+	for _, r := range spec.Resources {
+		if r.Name == "User" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected User resource to be extracted")
+	}
+}
+
+func TestParse_Swagger2WithQueryParams(t *testing.T) {
+	specContent := `
+swagger: "2.0"
+info:
+  title: "API with Query Params"
+  version: "1.0.0"
+paths:
+  /pets/findByStatus:
+    get:
+      summary: "Find pets by status"
+      operationId: "findPetsByStatus"
+      parameters:
+        - name: status
+          in: query
+          required: true
+          type: string
+          enum:
+            - available
+            - pending
+            - sold
+      responses:
+        200:
+          description: "Success"
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+`
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "swagger.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// Should have a query endpoint for findByStatus
+	if len(spec.QueryEndpoints) == 0 {
+		t.Error("expected at least one query endpoint")
+	}
+
+	// Find the query endpoint
+	var queryEndpoint *QueryEndpoint
+	for _, qe := range spec.QueryEndpoints {
+		if qe.Path == "/pets/findByStatus" {
+			queryEndpoint = qe
+			break
+		}
+	}
+
+	if queryEndpoint == nil {
+		t.Fatal("expected query endpoint for /pets/findByStatus")
+	}
+
+	// Verify query params were extracted
+	if len(queryEndpoint.QueryParams) == 0 {
+		t.Error("expected query parameters to be extracted")
+	}
+
+	// Verify status parameter exists
+	found := false
+	for _, p := range queryEndpoint.QueryParams {
+		if p.Name == "status" {
+			found = true
+			if !p.Required {
+				t.Error("expected status parameter to be required")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected status query parameter")
+	}
+}
+
+func TestParse_Swagger2FromURL(t *testing.T) {
+	// Skip this test if running in short mode (no network)
+	if testing.Short() {
+		t.Skip("skipping URL test in short mode")
+	}
+
+	// Use the classic Swagger 2.0 Petstore
+	specURL := "https://petstore.swagger.io/v2/swagger.json"
+
+	p := NewParser()
+	spec, err := p.Parse(specURL)
+	if err != nil {
+		// If the URL is unreachable, skip the test rather than fail
+		t.Skipf("could not load spec from URL (network issue?): %v", err)
+	}
+
+	// Verify we got some data
+	if spec.Title == "" {
+		t.Error("expected Title to be set")
+	}
+	if spec.Version == "" {
+		t.Error("expected Version to be set")
+	}
+
+	// Petstore should have resources
+	if len(spec.Resources) == 0 && len(spec.QueryEndpoints) == 0 && len(spec.ActionEndpoints) == 0 {
+		t.Error("expected at least some resources, queries, or actions")
+	}
+}

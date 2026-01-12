@@ -1,14 +1,145 @@
 package parser
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 
+	"github.com/getkin/kin-openapi/openapi2"
+	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
+	"gopkg.in/yaml.v3"
 )
+
+// isURL checks if the given path is a URL
+func isURL(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
+}
+
+// readSpec reads the spec content from a file or URL
+func readSpec(specPath string) ([]byte, error) {
+	if isURL(specPath) {
+		resp, err := http.Get(specPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch spec from URL: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("failed to fetch spec: HTTP %d", resp.StatusCode)
+		}
+
+		return io.ReadAll(resp.Body)
+	}
+	return os.ReadFile(specPath)
+}
+
+// detectSpecVersion detects whether the spec is Swagger 2.0 or OpenAPI 3.x
+// Returns "2.0" for Swagger 2.0, "3.x" for OpenAPI 3.0/3.1
+func detectSpecVersion(data []byte) string {
+	// Check for swagger key (Swagger 2.0)
+	if bytes.Contains(data, []byte(`"swagger"`)) || bytes.Contains(data, []byte(`swagger:`)) {
+		return "2.0"
+	}
+	// Default to OpenAPI 3.x
+	return "3.x"
+}
+
+// parseSwagger2 parses a Swagger 2.0 spec and converts it to OpenAPI 3.0
+func parseSwagger2(data []byte) (*openapi3.T, error) {
+	var swagger openapi2.T
+
+	// Try JSON first
+	if err := json.Unmarshal(data, &swagger); err != nil {
+		// If JSON fails, convert YAML to JSON first then parse
+		// This avoids YAML unmarshalling issues with kin-openapi types
+		var yamlData interface{}
+		if err := yaml.Unmarshal(data, &yamlData); err != nil {
+			return nil, fmt.Errorf("failed to parse Swagger 2.0 spec as YAML: %w", err)
+		}
+
+		// Convert map[interface{}]interface{} to map[string]interface{} for JSON marshalling
+		converted := convertYAMLMapKeys(yamlData)
+
+		// Normalize "type" fields from string to array format for openapi3.Types compatibility
+		// Swagger 2.0 uses "type": "string" but openapi3.Types expects array format
+		normalizeTypeFields(converted)
+
+		// Convert to JSON
+		jsonData, err := json.Marshal(converted)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert YAML to JSON: %w", err)
+		}
+
+		// Parse as JSON
+		if err := json.Unmarshal(jsonData, &swagger); err != nil {
+			return nil, fmt.Errorf("failed to parse Swagger 2.0 spec: %w", err)
+		}
+	}
+
+	// Convert to OpenAPI 3.0
+	doc, err := openapi2conv.ToV3(&swagger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert Swagger 2.0 to OpenAPI 3.0: %w", err)
+	}
+
+	return doc, nil
+}
+
+// normalizeTypeFields recursively finds "type" fields and converts string values to arrays
+// This is needed because openapi3.Types expects array format but Swagger 2.0 uses string format
+func normalizeTypeFields(v interface{}) {
+	switch x := v.(type) {
+	case map[string]interface{}:
+		for k, val := range x {
+			if k == "type" {
+				// Convert string type to array format
+				if s, ok := val.(string); ok {
+					x[k] = []interface{}{s}
+				}
+			} else {
+				normalizeTypeFields(val)
+			}
+		}
+	case []interface{}:
+		for _, item := range x {
+			normalizeTypeFields(item)
+		}
+	}
+}
+
+// convertYAMLMapKeys recursively converts map[interface{}]interface{} to map[string]interface{}
+// This is needed because YAML unmarshalling creates interface{} keys which JSON can't handle
+func convertYAMLMapKeys(v interface{}) interface{} {
+	switch x := v.(type) {
+	case map[interface{}]interface{}:
+		m := make(map[string]interface{})
+		for k, val := range x {
+			m[fmt.Sprintf("%v", k)] = convertYAMLMapKeys(val)
+		}
+		return m
+	case map[string]interface{}:
+		m := make(map[string]interface{})
+		for k, val := range x {
+			m[k] = convertYAMLMapKeys(val)
+		}
+		return m
+	case []interface{}:
+		for i, val := range x {
+			x[i] = convertYAMLMapKeys(val)
+		}
+		return x
+	default:
+		return v
+	}
+}
 
 // Resource represents a REST API resource extracted from OpenAPI spec
 type Resource struct {
@@ -124,18 +255,63 @@ func NewParserWithRootKind(rootKind string) *Parser {
 	return &Parser{RootKind: rootKind}
 }
 
-// Parse parses an OpenAPI specification file
+// Parse parses an OpenAPI specification file or URL
+// Supports both Swagger 2.0 and OpenAPI 3.0/3.1 specifications
 func (p *Parser) Parse(specPath string) (*ParsedSpec, error) {
-	loader := openapi3.NewLoader()
-	loader.IsExternalRefsAllowed = true
-
-	doc, err := loader.LoadFromFile(specPath)
+	// Read the raw spec first to detect version
+	data, err := readSpec(specPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load OpenAPI spec: %w", err)
+		return nil, fmt.Errorf("failed to read spec: %w", err)
 	}
 
-	if err := doc.Validate(context.Background()); err != nil {
-		return nil, fmt.Errorf("invalid OpenAPI spec: %w", err)
+	version := detectSpecVersion(data)
+
+	var doc *openapi3.T
+	isSwagger2 := false
+
+	if version == "2.0" {
+		// Parse as Swagger 2.0 and convert to OpenAPI 3.0
+		fmt.Println("Detected Swagger 2.0 specification, converting to OpenAPI 3.0...")
+		doc, err = parseSwagger2(data)
+		if err != nil {
+			return nil, err
+		}
+		isSwagger2 = true
+	} else {
+		// Parse as OpenAPI 3.x
+		loader := openapi3.NewLoader()
+		loader.IsExternalRefsAllowed = true
+
+		if isURL(specPath) {
+			// Load from URL
+			specURL, parseErr := url.Parse(specPath)
+			if parseErr != nil {
+				return nil, fmt.Errorf("failed to parse spec URL: %w", parseErr)
+			}
+			doc, err = loader.LoadFromURI(specURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load OpenAPI spec from URL: %w", err)
+			}
+		} else {
+			// Load from file
+			doc, err = loader.LoadFromFile(specPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load OpenAPI spec from file: %w", err)
+			}
+		}
+	}
+
+	// Validate the spec - use lenient validation for converted Swagger 2.0 specs
+	// since they may have incomplete response definitions
+	if isSwagger2 {
+		// Skip strict validation for Swagger 2.0 specs - just do minimal checks
+		if doc.Paths == nil {
+			return nil, fmt.Errorf("invalid OpenAPI spec: no paths defined")
+		}
+	} else {
+		if err := doc.Validate(context.Background()); err != nil {
+			return nil, fmt.Errorf("invalid OpenAPI spec: %w", err)
+		}
 	}
 
 	spec := &ParsedSpec{

@@ -3,7 +3,11 @@ package generator
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -61,6 +65,10 @@ type ControllerTemplateData struct {
 	ResourcePathParams  []ActionPathParam    // Path parameters for resource endpoints
 	ResourceQueryParams []ResourceQueryParam // Query parameters for resource endpoints
 	HasResourceParams   bool                 // True if there are path or query params to handle
+
+	// Integration test fields
+	RequiredFields    []RequiredFieldInfo // Required fields that need sample values in tests
+	HasRequiredFields bool                // True if there are required fields
 }
 
 // ActionPathParam represents a path parameter in action templates
@@ -83,6 +91,14 @@ type ResourceQueryParam struct {
 	GoName   string // Go field name (e.g., "Status")
 	GoType   string // Go type (e.g., "string", "int64")
 	IsArray  bool   // True if this is an array parameter
+}
+
+// RequiredFieldInfo holds information about a required field for test generation
+type RequiredFieldInfo struct {
+	GoName       string // Go field name (e.g., "PhotoUrls")
+	GoType       string // Go type (e.g., "[]string")
+	IsArray      bool   // True if field is an array type
+	IsStringType bool   // True if field or array item is string type
 }
 
 // MainTemplateData holds data for main.go template
@@ -117,6 +133,15 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		if err := g.generateControllerTest(controllerDir, crd); err != nil {
 			return fmt.Errorf("failed to generate controller test for %s: %w", crd.Kind, err)
 		}
+		// Generate integration test file for the controller
+		if err := g.generateIntegrationTest(controllerDir, crd); err != nil {
+			return fmt.Errorf("failed to generate integration test for %s: %w", crd.Kind, err)
+		}
+	}
+
+	// Generate suite_test.go for envtest (only once, not per CRD)
+	if err := g.generateSuiteTest(controllerDir); err != nil {
+		return fmt.Errorf("failed to generate suite_test.go: %w", err)
 	}
 
 	// Generate main.go
@@ -152,6 +177,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 	// Generate deployment manifests (namespace, service account, deployment, role binding)
 	if err := g.generateDeploymentManifests(); err != nil {
 		return fmt.Errorf("failed to generate deployment manifests: %w", err)
+	}
+
+	// Copy the OpenAPI spec file to the output directory
+	if err := g.copySpecFile(); err != nil {
+		return fmt.Errorf("failed to copy spec file: %w", err)
 	}
 
 	return nil
@@ -349,6 +379,108 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 	return nil
 }
 
+// SuiteTestTemplateData holds data for the suite_test.go template
+type SuiteTestTemplateData struct {
+	Year        int
+	APIVersion  string
+	ModuleName  string
+	KubeVersion string
+}
+
+func (g *ControllerGenerator) generateSuiteTest(outputDir string) error {
+	data := SuiteTestTemplateData{
+		Year:        time.Now().Year(),
+		APIVersion:  g.config.APIVersion,
+		ModuleName:  g.config.ModuleName,
+		KubeVersion: "1.29.0",
+	}
+
+	fp := filepath.Join(outputDir, "suite_test.go")
+
+	tmpl, err := template.New("suite_test").Parse(templates.SuiteTestTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *mapper.CRDDefinition) error {
+	// Extract required fields from the CRD spec
+	var requiredFields []RequiredFieldInfo
+	if crd.Spec != nil {
+		for _, field := range crd.Spec.Fields {
+			if field.Required {
+				isArray := strings.HasPrefix(field.GoType, "[]")
+				itemType := strings.TrimPrefix(field.GoType, "[]")
+				isStringType := itemType == "string" || field.GoType == "string"
+				requiredFields = append(requiredFields, RequiredFieldInfo{
+					GoName:       strcase.ToCamel(field.Name),
+					GoType:       field.GoType,
+					IsArray:      isArray,
+					IsStringType: isStringType,
+				})
+			}
+		}
+	}
+
+	data := ControllerTemplateData{
+		Year:            time.Now().Year(),
+		APIGroup:        crd.APIGroup,
+		APIVersion:      crd.APIVersion,
+		ModuleName:      g.config.ModuleName,
+		Kind:            crd.Kind,
+		KindLower:       strings.ToLower(crd.Kind),
+		Plural:          crd.Plural,
+		BasePath:        crd.BasePath,
+		IsQuery:         crd.IsQuery,
+		QueryPath:       crd.QueryPath,
+		IsAction:        crd.IsAction,
+		ActionPath:      crd.ActionPath,
+		ActionMethod:    crd.ActionMethod,
+		ResponseIsArray: crd.ResponseIsArray,
+
+		ParentResource: crd.ParentResource,
+		ParentIDParam:  crd.ParentIDParam,
+		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
+		HasParentID:    crd.ParentIDParam != "",
+		ActionName:     crd.ActionName,
+
+		RequiredFields:    requiredFields,
+		HasRequiredFields: len(requiredFields) > 0,
+	}
+
+	filename := fmt.Sprintf("%s_integration_test.go", strings.ToLower(crd.Kind))
+	fp := filepath.Join(outputDir, filename)
+
+	tmpl, err := template.New("integration_test").Parse(templates.IntegrationTestTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
 func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 	cmdDir := filepath.Join(g.config.OutputDir, "cmd", "manager")
 	if err := os.MkdirAll(cmdDir, 0755); err != nil {
@@ -388,13 +520,56 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 }
 
 func (g *ControllerGenerator) generateGoMod() error {
+	// Use the generator version for the dependency
+	// Only use clean semver versions (vX.Y.Z), otherwise fall back to v0.0.0
+	// which will be resolved to latest by go mod tidy
+	version := g.config.GeneratorVersion
+	if !isValidSemver(version) {
+		version = "v0.0.0"
+	}
+
 	data := struct {
-		ModuleName string
+		ModuleName       string
+		GeneratorVersion string
 	}{
-		ModuleName: g.config.ModuleName,
+		ModuleName:       g.config.ModuleName,
+		GeneratorVersion: version,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
 	return g.executeTemplate(templates.GoModTemplate, data, outputPath)
+}
+
+// isValidSemver checks if a version string is a clean semver (vX.Y.Z)
+// Returns false for dev builds, dirty versions, or versions with extra commits
+func isValidSemver(version string) bool {
+	if version == "" || version == "dev" {
+		return false
+	}
+	// Must start with 'v'
+	if !strings.HasPrefix(version, "v") {
+		return false
+	}
+	// Check for dirty or extra commit indicators (e.g., v0.0.6-1-g783aaa8-dirty)
+	if strings.Contains(version, "-") {
+		return false
+	}
+	// Basic check: should be vX.Y.Z format
+	parts := strings.Split(strings.TrimPrefix(version, "v"), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	// Each part should be numeric
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, c := range part {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (g *ControllerGenerator) generateDockerfile() error {
@@ -565,4 +740,64 @@ func (g *ControllerGenerator) executeTemplate(tmplContent string, data interface
 	}
 
 	return os.WriteFile(outputPath, buf.Bytes(), 0644)
+}
+
+// copySpecFile copies the OpenAPI spec file to the output directory.
+// If the spec is a URL, it downloads the content. If it's a local file, it copies it.
+func (g *ControllerGenerator) copySpecFile() error {
+	specPath := g.config.SpecPath
+	if specPath == "" {
+		// No spec file path configured, skip copy
+		return nil
+	}
+	var destFilename string
+	var content []byte
+
+	if strings.HasPrefix(specPath, "http://") || strings.HasPrefix(specPath, "https://") {
+		// Download from URL
+		parsedURL, err := url.Parse(specPath)
+		if err != nil {
+			return fmt.Errorf("failed to parse spec URL: %w", err)
+		}
+
+		// Get filename from URL path
+		destFilename = path.Base(parsedURL.Path)
+		if destFilename == "" || destFilename == "/" || destFilename == "." {
+			// Use a default name if we can't extract one
+			destFilename = "openapi-spec.yaml"
+		}
+
+		// Download the file
+		resp, err := http.Get(specPath)
+		if err != nil {
+			return fmt.Errorf("failed to download spec from URL: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to download spec: HTTP %d", resp.StatusCode)
+		}
+
+		content, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read spec content: %w", err)
+		}
+	} else {
+		// Copy local file
+		destFilename = filepath.Base(specPath)
+
+		var err error
+		content, err = os.ReadFile(specPath)
+		if err != nil {
+			return fmt.Errorf("failed to read spec file: %w", err)
+		}
+	}
+
+	// Write to output directory
+	destPath := filepath.Join(g.config.OutputDir, destFilename)
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write spec file: %w", err)
+	}
+
+	return nil
 }

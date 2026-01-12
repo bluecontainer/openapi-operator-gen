@@ -116,6 +116,16 @@ func TestConfig_deriveRootKindFromSpecPath(t *testing.T) {
 		{"PetStore.yaml", "Petstore"},
 		{"pet-store-api.yaml", "PetStoreApi"},
 		{"", ""},
+		// URL-based spec paths
+		{"https://example.com/api/petstore.yaml", "Petstore"},
+		{"https://example.com/api/petstore.json", "Petstore"},
+		{"http://localhost:8080/my-api.yaml", "MyApi"},
+		{"https://raw.githubusercontent.com/user/repo/main/openapi.yaml", "Openapi"},
+		{"https://petstore3.swagger.io/api/v3/openapi.json", "Openapi"},
+		{"https://example.com/specs/my-service-api.1.0.0.yaml", "MyServiceApi"},
+		{"https://example.com/", ""}, // URL with no filename
+		{"https://example.com", ""},  // URL with no path
+		{"http://api.example.com/spec.yaml", "Spec"},
 	}
 
 	for _, tt := range tests {

@@ -57,7 +57,7 @@ type OrderSpec struct {
 	// +kubebuilder:validation:Enum=placed;approved;delivered
 	Status string `json:"status,omitempty"`
 
-	// ID of the order that needs to be deleted
+	// ID of order that needs to be fetched
 	// +kubebuilder:validation:Required
 	OrderId int64 `json:"orderId"`
 

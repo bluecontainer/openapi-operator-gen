@@ -1,5 +1,10 @@
 # OpenAPI Operator Generator
 
+[![Latest Release](https://img.shields.io/github/v/release/bluecontainer/openapi-operator-gen)](https://github.com/bluecontainer/openapi-operator-gen/releases/latest)
+[![CI](https://github.com/bluecontainer/openapi-operator-gen/actions/workflows/ci.yaml/badge.svg)](https://github.com/bluecontainer/openapi-operator-gen/actions/workflows/ci.yaml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/bluecontainer/openapi-operator-gen)](https://go.dev/)
+[![License](https://img.shields.io/github/license/bluecontainer/openapi-operator-gen)](LICENSE)
+
 A code generator that creates Kubernetes operators from OpenAPI specifications. It maps REST API resources to Kubernetes Custom Resource Definitions (CRDs) and generates controller reconciliation logic that syncs CRs with the backing REST API.
 
 ## Table of Contents
@@ -11,6 +16,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [Usage](#usage)
   - [Options](#options)
   - [Example](#example)
+  - [Swagger 2.0 Support](#swagger-20-support)
 - [OpenAPI Schema Support](#openapi-schema-support)
   - [Nested Objects](#nested-objects)
   - [Supported Types](#supported-types)
@@ -62,11 +68,13 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Metrics](#metrics)
   - [Tracing](#tracing)
   - [Kubernetes Deployment](#kubernetes-deployment-with-opentelemetry)
+- [Helm Chart Generation](#helm-chart-generation)
+- [Releasing](#releasing)
 - [License](#license)
 
 ## Features
 
-- Parses OpenAPI 3.0/3.1 specifications
+- Parses OpenAPI 3.0/3.1 and Swagger 2.0 specifications (auto-detected)
 - Generates Go types for CRDs with kubebuilder markers
 - Handles nested schemas and `$ref` references (generates named types)
 - Generates CRD YAML manifests
@@ -78,6 +86,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - Helm release discovery (auto-detects StatefulSet or Deployment)
 - Multiple endpoint selection strategies
 - Per-CR workload targeting for multi-tenant scenarios
+- Helm chart generation via [helmify](https://github.com/arttor/helmify)
+- OpenTelemetry instrumentation for observability
 
 ## Architecture
 
@@ -264,13 +274,44 @@ openapi-operator-gen/
 
 ## Requirements
 
-- Go 1.21+ (tested with Go 1.22)
+- Go 1.25+
 - controller-gen (automatically installed by generated Makefile)
 - kustomize (automatically installed by generated Makefile)
 
 ## Installation
 
-### Via go install (recommended)
+### Download pre-built binary (easiest)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/bluecontainer/openapi-operator-gen/releases):
+
+```bash
+# Linux (amd64)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-linux-amd64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# Linux (arm64)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-linux-arm64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-darwin-arm64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# macOS (Intel)
+curl -sL https://github.com/bluecontainer/openapi-operator-gen/releases/latest/download/openapi-operator-gen-darwin-amd64 -o openapi-operator-gen
+chmod +x openapi-operator-gen
+sudo mv openapi-operator-gen /usr/local/bin/
+
+# Verify installation
+openapi-operator-gen --version
+```
+
+### Via go install
+
+If you have Go 1.25+ installed:
 
 ```bash
 go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest
@@ -279,6 +320,9 @@ go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-ge
 ### Building from source
 
 ```bash
+git clone https://github.com/bluecontainer/openapi-operator-gen.git
+cd openapi-operator-gen
+
 # Build the generator
 make build
 
@@ -306,14 +350,15 @@ openapi-operator-gen generate \
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--spec`, `-s` | Path to OpenAPI specification (YAML or JSON) | Required |
+| `--spec`, `-s` | Path or URL to OpenAPI specification (YAML or JSON) | Required |
 | `--output`, `-o` | Output directory for generated code | Required |
 | `--group`, `-g` | Kubernetes API group (e.g., `myapp.example.com`) | Required |
 | `--version`, `-v` | API version (e.g., `v1alpha1`) | `v1alpha1` |
 | `--module`, `-m` | Go module name for generated code | Required |
 | `--mapping` | Resource mapping mode: `per-resource` or `single-crd` | `per-resource` |
+| `--root-kind` | Kind name for root `/` endpoint | Derived from spec filename |
 
-### Example
+### Example: Local File
 
 ```bash
 openapi-operator-gen generate \
@@ -323,6 +368,53 @@ openapi-operator-gen generate \
   --version v1alpha1 \
   --module github.com/bluecontainer/petstore-operator
 ```
+
+### Example: URL
+
+The generator can fetch OpenAPI specs directly from URLs:
+
+```bash
+openapi-operator-gen generate \
+  --spec https://petstore3.swagger.io/api/v3/openapi.json \
+  --output examples/generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/bluecontainer/petstore-operator
+```
+
+This is useful for generating operators from publicly available API specs or from specs hosted on internal servers.
+
+### Swagger 2.0 Support
+
+The generator automatically detects and converts Swagger 2.0 specifications to OpenAPI 3.0 internally. No additional flags or configuration is needed - just pass your Swagger 2.0 spec file or URL:
+
+```bash
+# From a local Swagger 2.0 file
+openapi-operator-gen generate \
+  --spec swagger.yaml \
+  --output examples/generated \
+  --group myapp.example.com \
+  --version v1alpha1 \
+  --module github.com/example/myapp-operator
+
+# From the Swagger Petstore v2 URL
+openapi-operator-gen generate \
+  --spec https://petstore.swagger.io/v2/swagger.json \
+  --output examples/generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator
+```
+
+**Version Detection:**
+- Files containing `"swagger": "2.0"` or `swagger: "2.0"` are detected as Swagger 2.0
+- Files containing `"openapi": "3.x.x"` or `openapi: "3.x.x"` are detected as OpenAPI 3.x
+- Both YAML and JSON formats are supported for either version
+
+**Conversion Notes:**
+- Swagger 2.0 specs are converted to OpenAPI 3.0 using the [kin-openapi](https://github.com/getkin/kin-openapi) library
+- The conversion handles path parameters, query parameters, request bodies, and response schemas
+- Most Swagger 2.0 features map cleanly to OpenAPI 3.0 equivalents
 
 ## OpenAPI Schema Support
 
@@ -1470,6 +1562,109 @@ spec:
   selector:
     app: otel-collector
 ```
+
+## Helm Chart Generation
+
+Generated operators include built-in support for creating Helm charts using [helmify](https://github.com/arttor/helmify). This makes it easy to package and distribute your operator.
+
+### Generate a Helm Chart
+
+```bash
+cd examples/generated
+
+# Generate Helm chart from kustomize manifests
+make helm
+```
+
+This creates a complete Helm chart in `chart/<app-name>/` with:
+- CRDs in `crds/` directory
+- Deployment, ServiceAccount, and RBAC templates
+- Configurable `values.yaml`
+
+### Install with Helm
+
+```bash
+# Build and push the operator image
+make docker-build docker-push IMG=<your-registry>/petstore-operator:latest
+
+# Install using the generated Makefile target
+make helm-install IMG=<your-registry>/petstore-operator:latest
+
+# Or install manually with helm
+helm install petstore ./chart/petstore \
+  -n petstore-system \
+  --create-namespace \
+  --set image.repository=<your-registry>/petstore-operator \
+  --set image.tag=latest
+```
+
+### Package for Distribution
+
+```bash
+# Package the chart
+helm package ./chart/petstore
+
+# Push to a Helm repository (example using OCI registry)
+helm push petstore-0.1.0.tgz oci://<your-registry>/charts
+```
+
+### Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make helm` | Generate Helm chart from kustomize manifests |
+| `make helm-install` | Generate and install Helm chart |
+| `make helm-upgrade` | Upgrade existing Helm release |
+| `make helm-uninstall` | Uninstall Helm release |
+
+## Releasing
+
+To create a new release:
+
+### 1. Update Version and Create Tag
+
+```bash
+# Ensure you're on main with latest changes
+git checkout main
+git pull origin main
+
+# Create an annotated tag
+git tag -a v0.1.0 -m "Release v0.1.0"
+
+# Push the tag
+git push origin v0.1.0
+```
+
+### 2. Automated Release Process
+
+When you push a tag matching `v*`, GitHub Actions automatically:
+
+1. Runs all tests
+2. Builds binaries for multiple platforms:
+   - Linux (amd64, arm64)
+   - macOS (amd64, arm64)
+   - Windows (amd64)
+3. Creates SHA256 checksums
+4. Creates a GitHub Release with all binaries attached
+
+### 3. Version Embedding
+
+The release version is automatically embedded in:
+
+- **CLI binary**: Shown via `openapi-operator-gen --version`
+- **Generated go.mod**: Operators generated with a released version will have:
+  ```
+  require github.com/bluecontainer/openapi-operator-gen v0.1.0
+  ```
+
+This ensures generated operators reference the exact version of the generator that created them.
+
+### Release Checklist
+
+- [ ] All tests passing (`make test`)
+- [ ] CHANGELOG updated (if maintained)
+- [ ] Version follows [Semantic Versioning](https://semver.org/)
+- [ ] Tag pushed to trigger release workflow
 
 ## License
 

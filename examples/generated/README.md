@@ -53,6 +53,60 @@ make build
 make docker-build IMG=<your-registry>/petstore-operator:latest
 ```
 
+## Testing
+
+This operator includes comprehensive tests using Go's testing framework and Ginkgo/Gomega for BDD-style integration tests.
+
+### Unit Tests
+
+Unit tests run quickly without external dependencies and use mock HTTP servers to simulate the REST API:
+
+```bash
+make test
+```
+
+Unit tests cover:
+- Controller reconciliation logic
+- HTTP request/response handling
+- Error scenarios (404, 500, timeouts, rate limiting)
+- URL construction and path parameter handling
+- Status updates and state transitions
+
+### Integration Tests
+
+Integration tests use [envtest](https://book.kubebuilder.io/reference/envtest.html) to run a real Kubernetes API server (etcd + kube-apiserver) locally. This validates CRD schemas, RBAC, and controller behavior against a real Kubernetes environment.
+
+```bash
+# Install envtest binaries (first time only)
+make envtest
+
+# Run integration tests
+make test-integration
+```
+
+Integration tests cover:
+- CRD creation with schema validation
+- Resource updates and spec changes
+- Resource deletion and cleanup
+- Required field validation
+
+### All Tests
+
+Run both unit and integration tests together:
+
+```bash
+make test-all
+```
+
+### Test Coverage
+
+Test coverage reports are generated in `cover.out`:
+
+```bash
+make test
+go tool cover -html=cover.out -o coverage.html
+```
+
 ## Custom Resource Definitions
 
 This operator manages the following CRDs:
@@ -288,6 +342,54 @@ make kind-deploy IMG=petstore-operator:latest
 ```bash
 make undeploy
 make uninstall
+```
+
+## Helm Chart
+
+This operator can be packaged as a Helm chart for easier distribution and deployment.
+
+### Generate Helm Chart
+
+```bash
+# Generate Helm chart from kustomize manifests
+make helm
+```
+
+This creates a Helm chart in `chart/petstore/` using [helmify](https://github.com/arttor/helmify).
+
+### Install with Helm
+
+```bash
+# Build and push the operator image first
+make docker-build docker-push IMG=<your-registry>/petstore-operator:latest
+
+# Install the Helm chart
+make helm-install IMG=<your-registry>/petstore-operator:latest
+
+# Or install manually
+helm install petstore ./chart/petstore \
+  -n petstore-system \
+  --create-namespace \
+  --set image.repository=<your-registry>/petstore-operator \
+  --set image.tag=latest
+```
+
+### Upgrade
+
+```bash
+make helm-upgrade IMG=<your-registry>/petstore-operator:latest
+```
+
+### Uninstall
+
+```bash
+make helm-uninstall
+```
+
+### Package for Distribution
+
+```bash
+helm package ./chart/petstore
 ```
 
 ## Environment Variables

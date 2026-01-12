@@ -123,3 +123,13 @@ var KustomizationSamplesTemplate string
 //
 //go:embed readme.md.tmpl
 var ReadmeTemplate string
+
+// SuiteTestTemplate is the template for generating the envtest suite_test.go file
+//
+//go:embed suite_test.go.tmpl
+var SuiteTestTemplate string
+
+// IntegrationTestTemplate is the template for generating integration tests with envtest
+//
+//go:embed integration_test.go.tmpl
+var IntegrationTestTemplate string

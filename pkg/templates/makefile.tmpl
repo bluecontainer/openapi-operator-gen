@@ -71,8 +71,16 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet ## Run tests.
-	go test ./... -coverprofile cover.out
+test: manifests generate fmt vet ## Run unit tests (no envtest).
+	go test ./... -coverprofile cover.out -short
+
+.PHONY: test-integration
+test-integration: manifests generate fmt vet envtest ## Run integration tests with envtest.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./internal/controller/... -coverprofile cover.out -v -ginkgo.v
+
+.PHONY: test-all
+test-all: manifests generate fmt vet envtest ## Run all tests (unit + integration).
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out -v -ginkgo.v
 
 ##@ Build
 
@@ -133,10 +141,14 @@ $(LOCALBIN):
 ## Tool Binaries
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+HELMIFY ?= $(LOCALBIN)/helmify
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.17.0
 KUSTOMIZE_VERSION ?= v5.4.1
+ENVTEST_VERSION ?= release-0.19
+HELMIFY_VERSION ?= v0.4.18
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
@@ -149,3 +161,45 @@ kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
 	@test -s $(LOCALBIN)/kustomize || \
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@$(KUSTOMIZE_VERSION)
+
+.PHONY: envtest
+envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
+$(ENVTEST): $(LOCALBIN)
+	@test -s $(LOCALBIN)/setup-envtest || \
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary.
+$(HELMIFY): $(LOCALBIN)
+	@test -s $(LOCALBIN)/helmify || \
+	GOBIN=$(LOCALBIN) go install github.com/arttor/helmify/cmd/helmify@$(HELMIFY_VERSION)
+
+##@ Helm
+
+# Helm chart name (defaults to app name)
+CHART_NAME ?= {{ .AppName }}
+
+.PHONY: helm
+helm: generate-yaml kustomize helmify ## Generate Helm chart from kustomize manifests.
+	@mkdir -p chart
+	$(KUSTOMIZE) build config | $(HELMIFY) -crd-dir chart/$(CHART_NAME)
+	@echo ""
+	@echo "Helm chart generated in chart/$(CHART_NAME)/"
+	@echo ""
+	@echo "To install:"
+	@echo "  helm install $(CHART_NAME) ./chart/$(CHART_NAME) -n $(NAMESPACE) --create-namespace"
+	@echo ""
+	@echo "To package:"
+	@echo "  helm package ./chart/$(CHART_NAME)"
+
+.PHONY: helm-install
+helm-install: helm ## Generate and install Helm chart.
+	helm install $(CHART_NAME) ./chart/$(CHART_NAME) -n $(NAMESPACE) --create-namespace --set image.repository=$(word 1,$(subst :, ,$(IMG))) --set image.tag=$(word 2,$(subst :, ,$(IMG)))
+
+.PHONY: helm-upgrade
+helm-upgrade: helm ## Generate and upgrade Helm chart.
+	helm upgrade $(CHART_NAME) ./chart/$(CHART_NAME) -n $(NAMESPACE) --set image.repository=$(word 1,$(subst :, ,$(IMG))) --set image.tag=$(word 2,$(subst :, ,$(IMG)))
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall Helm chart.
+	helm uninstall $(CHART_NAME) -n $(NAMESPACE)
