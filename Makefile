@@ -47,7 +47,8 @@ example: build
 		--output examples/generated \
 		--group petstore.example.com \
 		--version v1alpha1 \
-		--module github.com/bluecontainer/petstore-operator
+		--module github.com/bluecontainer/petstore-operator \
+		--aggregate
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
 

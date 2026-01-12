@@ -26,12 +26,13 @@ func NewTypesGenerator(cfg *config.Config) *TypesGenerator {
 
 // TypesTemplateData holds data for the types template
 type TypesTemplateData struct {
-	Year        int
-	APIVersion  string
-	APIGroup    string
-	ModuleName  string
-	CRDs        []CRDTypeData
-	NestedTypes []NestedTypeData // Nested types to generate (for Category, Tag, etc.)
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	APIGroup         string
+	ModuleName       string
+	CRDs             []CRDTypeData
+	NestedTypes      []NestedTypeData // Nested types to generate (for Category, Tag, etc.)
 }
 
 // CRDTypeData holds CRD-specific data for template
@@ -94,11 +95,12 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 	// Prepare template data
 	data := TypesTemplateData{
-		Year:       time.Now().Year(),
-		APIVersion: g.config.APIVersion,
-		APIGroup:   g.config.APIGroup,
-		ModuleName: g.config.ModuleName,
-		CRDs:       make([]CRDTypeData, 0, len(crds)),
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		APIGroup:         g.config.APIGroup,
+		ModuleName:       g.config.ModuleName,
+		CRDs:             make([]CRDTypeData, 0, len(crds)),
 	}
 
 	for _, crd := range crds {
@@ -157,15 +159,17 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 	// Generate groupversion_info.go
 	gvData := struct {
-		Year       int
-		APIVersion string
-		APIGroup   string
-		GroupName  string
+		Year             int
+		GeneratorVersion string
+		APIVersion       string
+		APIGroup         string
+		GroupName        string
 	}{
-		Year:       time.Now().Year(),
-		APIVersion: g.config.APIVersion,
-		APIGroup:   g.config.APIGroup,
-		GroupName:  strings.Split(g.config.APIGroup, ".")[0],
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		APIGroup:         g.config.APIGroup,
+		GroupName:        strings.Split(g.config.APIGroup, ".")[0],
 	}
 
 	if err := g.generateFile(
@@ -272,11 +276,12 @@ func (g *TypesGenerator) generateFile(path, tmplContent string, data interface{}
 
 // AggregateTypesTemplateData holds data for the aggregate types template
 type AggregateTypesTemplateData struct {
-	Year          int
-	APIVersion    string
-	Kind          string
-	Plural        string
-	ResourceKinds []string
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	Kind             string
+	Plural           string
+	ResourceKinds    []string
 }
 
 // GenerateAggregateTypes generates the aggregate CRD types
@@ -287,11 +292,12 @@ func (g *TypesGenerator) GenerateAggregateTypes(aggregate *mapper.AggregateDefin
 	}
 
 	data := AggregateTypesTemplateData{
-		Year:          time.Now().Year(),
-		APIVersion:    g.config.APIVersion,
-		Kind:          aggregate.Kind,
-		Plural:        aggregate.Plural,
-		ResourceKinds: aggregate.ResourceKinds,
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		Kind:             aggregate.Kind,
+		Plural:           aggregate.Plural,
+		ResourceKinds:    aggregate.ResourceKinds,
 	}
 
 	outputPath := filepath.Join(outputDir, "aggregate_types.go")

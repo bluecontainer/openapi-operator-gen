@@ -39,6 +39,14 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Multi-Endpoint Action Execution](#multi-endpoint-action-execution)
   - [Typed Results](#typed-results)
   - [Action vs Resource vs Query Endpoints](#action-vs-resource-vs-query-endpoints)
+- [Status Aggregator CRD](#status-aggregator-crd)
+  - [Enabling the Aggregator CRD](#enabling-the-aggregator-crd)
+  - [Aggregation Strategies](#aggregation-strategies)
+  - [Resource Selectors](#resource-selectors)
+  - [CEL Derived Values](#cel-derived-values)
+  - [CEL Variables](#cel-variables)
+  - [CEL Aggregate Functions](#cel-aggregate-functions)
+  - [Aggregator Status Fields](#aggregator-status-fields)
 - [Generated Output](#generated-output)
 - [Building the Generated Operator](#building-the-generated-operator)
 - [Running the Operator](#running-the-operator)
@@ -840,6 +848,226 @@ type PetUploadImageResult struct {
 | `/pet/findByStatus` | GET | QueryEndpoint |
 | `/pet` | GET, POST | Resource |
 | `/pet/{petId}` | GET, PUT, DELETE | Resource |
+
+## Status Aggregator CRD
+
+The generator can create an optional Status Aggregator CRD that aggregates status information from multiple resources into a single view. This is useful for monitoring the health of multiple related resources, computing derived values across resources, and creating dashboards.
+
+### Enabling the Aggregator CRD
+
+Add the `--aggregate` flag when generating:
+
+```bash
+openapi-operator-gen generate \
+  --spec petstore.yaml \
+  --output ./generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator \
+  --aggregate
+```
+
+This creates a `<AppName>Aggregate` CRD (e.g., `PetstoreAggregate`) that can observe and aggregate status from other CRDs.
+
+### Aggregation Strategies
+
+The aggregator supports three strategies for determining overall health:
+
+| Strategy | Description |
+|----------|-------------|
+| `AllHealthy` | Healthy only if ALL selected resources are Synced (default) |
+| `AnyHealthy` | Healthy if ANY selected resource is Synced |
+| `Quorum` | Healthy if more than half of selected resources are Synced |
+
+Example:
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: all-resources
+spec:
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+    - kind: User
+  aggregationStrategy: AllHealthy
+```
+
+### Resource Selectors
+
+Select resources to aggregate by kind, labels, or name patterns:
+
+```yaml
+spec:
+  resourceSelectors:
+    # Select all resources of a kind
+    - kind: Order
+
+    # Filter by labels
+    - kind: Pet
+      matchLabels:
+        environment: production
+
+    # Filter by name pattern (regex)
+    - kind: User
+      namePattern: "^admin-.*"
+```
+
+### CEL Derived Values
+
+Compute custom values from aggregated resources using [CEL (Common Expression Language)](https://github.com/google/cel-spec) expressions. Results are stored in `.status.computedValues`.
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: with-metrics
+spec:
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+  aggregationStrategy: AllHealthy
+  derivedValues:
+    # Calculate percentage of synced resources
+    - name: syncPercentage
+      expression: "summary.total > 0 ? (summary.synced * 100) / summary.total : 0"
+
+    # Check if all resources are synced
+    - name: allSynced
+      expression: "summary.total > 0 && summary.synced == summary.total"
+
+    # Count resources in a specific state
+    - name: failedResources
+      expression: "resources.filter(r, r.status.state == 'Failed').size()"
+```
+
+### CEL Variables
+
+CEL expressions have access to the following variables:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `resources` | `list` | All aggregated resources across all kinds |
+| `summary` | `map` | Object with `total`, `synced`, `failed`, `pending` counts |
+| `<kind>s` | `list` | Kind-specific list (lowercase plural, e.g., `orders`, `pets`, `users`) |
+
+Each resource in the lists contains:
+
+| Field | Description |
+|-------|-------------|
+| `kind` | Resource kind (e.g., "Order", "Pet") |
+| `metadata` | Map with `name`, `namespace`, `labels`, `annotations` |
+| `spec` | Full spec fields from the CR |
+| `status` | Full status fields from the CR |
+
+Example expressions using different variables:
+
+```yaml
+derivedValues:
+  # Using resources variable (all kinds)
+  - name: totalResources
+    expression: "resources.size()"
+
+  # Using summary variable
+  - name: healthPercentage
+    expression: "summary.total > 0 ? (summary.synced * 100) / summary.total : 0"
+
+  # Using kind-specific variables
+  - name: orderCount
+    expression: "orders.size()"
+
+  - name: petCount
+    expression: "pets.size()"
+
+  # Accessing spec fields
+  - name: highValueOrders
+    expression: "orders.filter(r, has(r.spec.quantity) && r.spec.quantity > 10).size()"
+
+  # Accessing status fields
+  - name: syncedPets
+    expression: "pets.filter(r, r.status.state == 'Synced').size()"
+```
+
+### CEL Aggregate Functions
+
+Custom aggregate functions are available for computing values across lists:
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `sum(list)` | Sum of numeric values | `sum(orders.map(r, r.spec.quantity))` |
+| `max(list)` | Maximum value | `max(orders.map(r, r.spec.quantity))` |
+| `min(list)` | Minimum value | `min(orders.map(r, r.spec.quantity))` |
+| `avg(list)` | Average value | `avg(orders.map(r, r.spec.quantity))` |
+
+Example with aggregate functions:
+
+```yaml
+derivedValues:
+  # Sum of all order quantities
+  - name: totalOrderQuantity
+    expression: "sum(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+
+  # Maximum quantity across orders
+  - name: maxOrderQuantity
+    expression: "max(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+
+  # Average quantity
+  - name: avgOrderQuantity
+    expression: "avg(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+
+  # Sum of quantities for synced orders only
+  - name: syncedOrdersQuantity
+    expression: "sum(orders.filter(r, r.status.state == 'Synced').map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+```
+
+### Aggregator Status Fields
+
+The aggregator status contains:
+
+| Field | Description |
+|-------|-------------|
+| `state` | `Pending`, `Healthy`, `Degraded`, or `Unknown` |
+| `message` | Human-readable status message |
+| `summary.total` | Total number of matched resources |
+| `summary.synced` | Number of resources in Synced state |
+| `summary.failed` | Number of resources in Failed state |
+| `summary.pending` | Number of resources in Pending/other states |
+| `resources` | List of individual resource statuses |
+| `computedValues` | Results of CEL expression evaluations |
+| `lastAggregationTime` | Timestamp of last aggregation |
+
+Example status:
+
+```yaml
+status:
+  state: Degraded
+  message: "1 of 3 resources failed"
+  summary:
+    total: 3
+    synced: 2
+    failed: 1
+    pending: 0
+  resources:
+    - kind: Order
+      name: order-1
+      namespace: default
+      state: Synced
+    - kind: Pet
+      name: fluffy
+      namespace: default
+      state: Synced
+    - kind: User
+      name: admin
+      namespace: default
+      state: Failed
+      message: "API returned 500"
+  computedValues:
+    - name: syncPercentage
+      value: "66"
+    - name: totalOrderQuantity
+      value: "150"
+  lastAggregationTime: "2026-01-05T10:00:00Z"
+```
 
 ## Generated Output
 

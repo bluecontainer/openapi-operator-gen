@@ -705,7 +705,7 @@ func TestControllerGenerator_GenerateGoMod(t *testing.T) {
 	}
 	g := NewControllerGenerator(cfg)
 
-	err := g.generateGoMod()
+	err := g.generateGoMod(false)
 	if err != nil {
 		t.Fatalf("generateGoMod failed: %v", err)
 	}

@@ -24,13 +24,14 @@ func NewSamplesGenerator(cfg *config.Config) *SamplesGenerator {
 
 // ExampleCRData holds data for example CR template
 type ExampleCRData struct {
-	APIGroup   string
-	APIVersion string
-	Kind       string
-	KindLower  string
-	IsQuery    bool
-	IsAction   bool
-	SpecFields []ExampleFieldData
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	IsQuery          bool
+	IsAction         bool
+	SpecFields       []ExampleFieldData
 }
 
 // ExampleFieldData holds field data for example CR
@@ -42,11 +43,12 @@ type ExampleFieldData struct {
 
 // ExampleAggregateCRData holds data for example aggregate CR template
 type ExampleAggregateCRData struct {
-	APIGroup      string
-	APIVersion    string
-	Kind          string
-	KindLower     string
-	ResourceKinds []string
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	ResourceKinds    []string
 }
 
 // Generate generates example CR YAML files for all CRDs
@@ -94,13 +96,14 @@ func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *map
 
 func (g *SamplesGenerator) generateExampleCR(samplesDir string, crd *mapper.CRDDefinition) error {
 	data := ExampleCRData{
-		APIGroup:   crd.APIGroup,
-		APIVersion: crd.APIVersion,
-		Kind:       crd.Kind,
-		KindLower:  strings.ToLower(crd.Kind),
-		IsQuery:    crd.IsQuery,
-		IsAction:   crd.IsAction,
-		SpecFields: g.convertToExampleFields(crd.Spec),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         crd.APIGroup,
+		APIVersion:       crd.APIVersion,
+		Kind:             crd.Kind,
+		KindLower:        strings.ToLower(crd.Kind),
+		IsQuery:          crd.IsQuery,
+		IsAction:         crd.IsAction,
+		SpecFields:       g.convertToExampleFields(crd.Spec),
 	}
 
 	tmpl, err := template.New("example").Parse(templates.ExampleCRTemplate)
@@ -126,12 +129,13 @@ func (g *SamplesGenerator) generateExampleCR(samplesDir string, crd *mapper.CRDD
 
 func (g *SamplesGenerator) generateExampleCRRef(samplesDir string, crd *mapper.CRDDefinition) error {
 	data := ExampleCRData{
-		APIGroup:   crd.APIGroup,
-		APIVersion: crd.APIVersion,
-		Kind:       crd.Kind,
-		KindLower:  strings.ToLower(crd.Kind),
-		IsQuery:    crd.IsQuery,
-		IsAction:   crd.IsAction,
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         crd.APIGroup,
+		APIVersion:       crd.APIVersion,
+		Kind:             crd.Kind,
+		KindLower:        strings.ToLower(crd.Kind),
+		IsQuery:          crd.IsQuery,
+		IsAction:         crd.IsAction,
 	}
 
 	tmpl, err := template.New("example-ref").Parse(templates.ExampleCRRefTemplate)
@@ -157,9 +161,11 @@ func (g *SamplesGenerator) generateExampleCRRef(samplesDir string, crd *mapper.C
 
 func (g *SamplesGenerator) generateSamplesKustomization(samplesDir string, sampleFiles []string) error {
 	data := struct {
-		SampleFiles []string
+		GeneratorVersion string
+		SampleFiles      []string
 	}{
-		SampleFiles: sampleFiles,
+		GeneratorVersion: g.config.GeneratorVersion,
+		SampleFiles:      sampleFiles,
 	}
 
 	tmpl, err := template.New("samples-kustomization").Parse(templates.KustomizationSamplesTemplate)
@@ -247,11 +253,12 @@ func (g *SamplesGenerator) generateExampleValue(f *mapper.FieldDefinition) strin
 
 func (g *SamplesGenerator) generateExampleAggregateCR(samplesDir string, aggregate *mapper.AggregateDefinition) error {
 	data := ExampleAggregateCRData{
-		APIGroup:      aggregate.APIGroup,
-		APIVersion:    aggregate.APIVersion,
-		Kind:          aggregate.Kind,
-		KindLower:     strings.ToLower(aggregate.Kind),
-		ResourceKinds: aggregate.ResourceKinds,
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         aggregate.APIGroup,
+		APIVersion:       aggregate.APIVersion,
+		Kind:             aggregate.Kind,
+		KindLower:        strings.ToLower(aggregate.Kind),
+		ResourceKinds:    aggregate.ResourceKinds,
 	}
 
 	tmpl, err := template.New("example-aggregate").Parse(templates.ExampleAggregateCRTemplate)
