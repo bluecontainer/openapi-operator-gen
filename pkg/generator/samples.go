@@ -40,8 +40,18 @@ type ExampleFieldData struct {
 	IsTargeting  bool
 }
 
+// ExampleAggregateCRData holds data for example aggregate CR template
+type ExampleAggregateCRData struct {
+	APIGroup      string
+	APIVersion    string
+	Kind          string
+	KindLower     string
+	ResourceKinds []string
+}
+
 // Generate generates example CR YAML files for all CRDs
-func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition) error {
+// aggregate is optional - pass nil if not generating aggregate CRD
+func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition) error {
 	// Create samples directory
 	samplesDir := filepath.Join(g.config.OutputDir, "config", "samples")
 	if err := os.MkdirAll(samplesDir, 0755); err != nil {
@@ -64,6 +74,14 @@ func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			}
 			sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s_ref.yaml", g.config.APIVersion, strings.ToLower(crd.Kind)))
 		}
+	}
+
+	// Generate aggregate sample if aggregate CRD is enabled
+	if aggregate != nil {
+		if err := g.generateExampleAggregateCR(samplesDir, aggregate); err != nil {
+			return fmt.Errorf("failed to generate example aggregate CR: %w", err)
+		}
+		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(aggregate.Kind)))
 	}
 
 	// Generate kustomization.yaml for samples
@@ -225,4 +243,34 @@ func (g *SamplesGenerator) generateExampleValue(f *mapper.FieldDefinition) strin
 		// For complex types, return empty object
 		return "{}"
 	}
+}
+
+func (g *SamplesGenerator) generateExampleAggregateCR(samplesDir string, aggregate *mapper.AggregateDefinition) error {
+	data := ExampleAggregateCRData{
+		APIGroup:      aggregate.APIGroup,
+		APIVersion:    aggregate.APIVersion,
+		Kind:          aggregate.Kind,
+		KindLower:     strings.ToLower(aggregate.Kind),
+		ResourceKinds: aggregate.ResourceKinds,
+	}
+
+	tmpl, err := template.New("example-aggregate").Parse(templates.ExampleAggregateCRTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filename := fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(aggregate.Kind))
+	examplePath := filepath.Join(samplesDir, filename)
+
+	file, err := os.Create(examplePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
 }

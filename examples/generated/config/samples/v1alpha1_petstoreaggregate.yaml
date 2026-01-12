@@ -1,0 +1,53 @@
+# Example PetstoreAggregate CR - aggregates status from multiple resources
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: all-resources
+  namespace: default
+spec:
+  # Select which resources to aggregate
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+    - kind: User
+  # Strategy for determining overall health
+  # Options: AllHealthy (default), AnyHealthy, Quorum
+  aggregationStrategy: AllHealthy
+---
+# Example with label selector
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: production-resources
+  namespace: default
+spec:
+  resourceSelectors:
+    - kind: Order
+      matchLabels:
+        environment: production
+  aggregationStrategy: AllHealthy
+---
+# Example with name pattern (regex)
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: filtered-by-name
+  namespace: default
+spec:
+  resourceSelectors:
+    - kind: Order
+      namePattern: "^test-.*"
+  aggregationStrategy: AnyHealthy
+---
+# Example with Quorum strategy - healthy if majority are synced
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: quorum-check
+  namespace: default
+spec:
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+    - kind: User
+  aggregationStrategy: Quorum

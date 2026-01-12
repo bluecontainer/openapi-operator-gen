@@ -40,6 +40,9 @@ type Config struct {
 	// GeneratorVersion is the version of openapi-operator-gen used to generate the code.
 	// This is embedded in the generated go.mod to ensure correct dependency versions.
 	GeneratorVersion string
+	// GenerateAggregate controls whether to generate a Status Aggregator CRD.
+	// When true, generates an aggregate CRD that observes and aggregates status from other CRDs.
+	GenerateAggregate bool
 }
 
 // Validate checks if the configuration is valid

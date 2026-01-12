@@ -14,3 +14,4 @@ resources:
 - v1alpha1_userlogoutquery.yaml
 - v1alpha1_petuploadimageaction.yaml
 - v1alpha1_usercreatewithlistaction.yaml
+- v1alpha1_petstoreaggregate.yaml

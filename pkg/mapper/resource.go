@@ -1128,3 +1128,72 @@ func (m *Mapper) generateShortNames(kind string) []string {
 
 	return shortNames
 }
+
+// AggregateDefinition represents a Status Aggregator CRD definition (Option 4)
+// This is a read-only CRD that observes and aggregates status from existing resources
+type AggregateDefinition struct {
+	APIGroup   string
+	APIVersion string
+	Kind       string
+	Plural     string
+	// ResourceKinds are the CRD kinds this aggregate observes
+	ResourceKinds []string
+}
+
+// ResourceSelector defines how to select resources to aggregate
+type ResourceSelector struct {
+	Group       string            // API group (e.g., "petstore.example.com")
+	Kind        string            // Resource kind (e.g., "Pet")
+	NamePattern string            // Regex pattern for resource names
+	MatchLabels map[string]string // Label selector
+}
+
+// AggregationStrategy defines how to combine resource statuses
+type AggregationStrategy string
+
+const (
+	// AllHealthy requires all resources to be healthy
+	AllHealthy AggregationStrategy = "AllHealthy"
+	// AnyHealthy requires at least one resource to be healthy
+	AnyHealthy AggregationStrategy = "AnyHealthy"
+	// Quorum requires a majority of resources to be healthy
+	Quorum AggregationStrategy = "Quorum"
+)
+
+// MatchType defines how matchers are combined
+type MatchType string
+
+const (
+	// AnyResourceMatchesAnyCondition - any resource matches any condition
+	AnyResourceMatchesAnyCondition MatchType = "AnyResourceMatchesAnyCondition"
+	// AnyResourceMatchesAllConditions - any resource matches all conditions
+	AnyResourceMatchesAllConditions MatchType = "AnyResourceMatchesAllConditions"
+	// AllResourcesMatchAnyCondition - all resources match any condition
+	AllResourcesMatchAnyCondition MatchType = "AllResourcesMatchAnyCondition"
+	// AllResourcesMatchAllConditions - all resources match all conditions (default)
+	AllResourcesMatchAllConditions MatchType = "AllResourcesMatchAllConditions"
+)
+
+// CreateAggregateDefinition creates an aggregate CRD definition from existing CRDs
+func (m *Mapper) CreateAggregateDefinition(crds []*CRDDefinition) *AggregateDefinition {
+	// Collect resource kinds (excluding query and action CRDs)
+	resourceKinds := make([]string, 0)
+	for _, crd := range crds {
+		if !crd.IsQuery && !crd.IsAction {
+			resourceKinds = append(resourceKinds, crd.Kind)
+		}
+	}
+
+	// Derive aggregate kind name from API group
+	// e.g., "petstore.example.com" -> "PetstoreAggregate"
+	appName := strings.Split(m.config.APIGroup, ".")[0]
+	aggregateKind := strcase.ToCamel(appName) + "Aggregate"
+
+	return &AggregateDefinition{
+		APIGroup:      m.config.APIGroup,
+		APIVersion:    m.config.APIVersion,
+		Kind:          aggregateKind,
+		Plural:        strings.ToLower(aggregateKind) + "s",
+		ResourceKinds: resourceKinds,
+	}
+}

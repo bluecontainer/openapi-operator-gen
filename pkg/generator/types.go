@@ -269,3 +269,35 @@ func (g *TypesGenerator) generateFile(path, tmplContent string, data interface{}
 
 	return nil
 }
+
+// AggregateTypesTemplateData holds data for the aggregate types template
+type AggregateTypesTemplateData struct {
+	Year          int
+	APIVersion    string
+	Kind          string
+	Plural        string
+	ResourceKinds []string
+}
+
+// GenerateAggregateTypes generates the aggregate CRD types
+func (g *TypesGenerator) GenerateAggregateTypes(aggregate *mapper.AggregateDefinition) error {
+	outputDir := filepath.Join(g.config.OutputDir, "api", g.config.APIVersion)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	data := AggregateTypesTemplateData{
+		Year:          time.Now().Year(),
+		APIVersion:    g.config.APIVersion,
+		Kind:          aggregate.Kind,
+		Plural:        aggregate.Plural,
+		ResourceKinds: aggregate.ResourceKinds,
+	}
+
+	outputPath := filepath.Join(outputDir, "aggregate_types.go")
+	if err := g.generateFile(outputPath, templates.AggregateTypesTemplate, data); err != nil {
+		return fmt.Errorf("failed to generate aggregate_types.go: %w", err)
+	}
+
+	return nil
+}

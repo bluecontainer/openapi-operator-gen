@@ -1,0 +1,61 @@
+# Example {{ .Kind }} CR - aggregates status from multiple resources
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .Kind }}
+metadata:
+  name: all-resources
+  namespace: default
+spec:
+  # Select which resources to aggregate
+  resourceSelectors:
+{{- range .ResourceKinds }}
+    - kind: {{ . }}
+{{- end }}
+  # Strategy for determining overall health
+  # Options: AllHealthy (default), AnyHealthy, Quorum
+  aggregationStrategy: AllHealthy
+---
+# Example with label selector
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .Kind }}
+metadata:
+  name: production-resources
+  namespace: default
+spec:
+  resourceSelectors:
+{{- range $i, $kind := .ResourceKinds }}
+{{- if eq $i 0 }}
+    - kind: {{ $kind }}
+      matchLabels:
+        environment: production
+{{- end }}
+{{- end }}
+  aggregationStrategy: AllHealthy
+---
+# Example with name pattern (regex)
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .Kind }}
+metadata:
+  name: filtered-by-name
+  namespace: default
+spec:
+  resourceSelectors:
+{{- range $i, $kind := .ResourceKinds }}
+{{- if eq $i 0 }}
+    - kind: {{ $kind }}
+      namePattern: "^test-.*"
+{{- end }}
+{{- end }}
+  aggregationStrategy: AnyHealthy
+---
+# Example with Quorum strategy - healthy if majority are synced
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .Kind }}
+metadata:
+  name: quorum-check
+  namespace: default
+spec:
+  resourceSelectors:
+{{- range .ResourceKinds }}
+    - kind: {{ . }}
+{{- end }}
+  aggregationStrategy: Quorum

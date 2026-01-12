@@ -839,11 +839,13 @@ type CRDMainData struct {
 }
 
 type MainTemplateData struct {
-	Year       int
-	APIVersion string
-	ModuleName string
-	AppName    string
-	CRDs       []CRDMainData
+	Year          int
+	APIVersion    string
+	ModuleName    string
+	AppName       string
+	CRDs          []CRDMainData
+	HasAggregate  bool
+	AggregateKind string
 }
 
 func TestMainTemplateExecution(t *testing.T) {

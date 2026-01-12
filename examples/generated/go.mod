@@ -95,5 +95,4 @@ require (
 )
 
 // For local development, uncomment and adjust the path below:
-// replace github.com/bluecontainer/openapi-operator-gen => /path/to/openapi-operator-gen
-replace github.com/bluecontainer/openapi-operator-gen => ../..
+replace github.com/bluecontainer/openapi-operator-gen => ../../

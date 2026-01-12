@@ -84,6 +84,7 @@ func init() {
 	generateCmd.Flags().StringVar(&cfg.ModuleName, "module", "github.com/bluecontainer/generated-operator", "Go module name for generated code")
 	generateCmd.Flags().BoolVar(&cfg.GenerateCRDs, "generate-crds", false, "Generate CRD YAML manifests directly (default: use controller-gen)")
 	generateCmd.Flags().StringVar(&cfg.RootKind, "root-kind", "", "Kind name for root '/' endpoint (default: derived from spec filename)")
+	generateCmd.Flags().BoolVar(&cfg.GenerateAggregate, "aggregate", false, "Generate a Status Aggregator CRD for observing multiple resource types")
 
 	generateCmd.MarkFlagRequired("spec")
 	generateCmd.MarkFlagRequired("group")
@@ -155,19 +156,31 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Generate example CR samples (always generated)
+	// Generate Status Aggregator CRD (optional) - do this before samples so we can include aggregate sample
+	var aggregate *mapper.AggregateDefinition
+	if cfg.GenerateAggregate {
+		fmt.Println("Generating Status Aggregator CRD...")
+		aggregate = m.CreateAggregateDefinition(crds)
+		if err := typesGen.GenerateAggregateTypes(aggregate); err != nil {
+			return fmt.Errorf("failed to generate aggregate types: %w", err)
+		}
+		fmt.Println("  Generated api/<version>/aggregate_types.go")
+		fmt.Println()
+	}
+
+	// Generate example CR samples (always generated, includes aggregate sample if enabled)
 	fmt.Println("Generating example CR samples...")
 	samplesGen := generator.NewSamplesGenerator(cfg)
-	if err := samplesGen.Generate(crds); err != nil {
+	if err := samplesGen.Generate(crds, aggregate); err != nil {
 		return fmt.Errorf("failed to generate example CRs: %w", err)
 	}
 	fmt.Println("  Generated config/samples/*.yaml")
 	fmt.Println()
 
-	// Generate controllers
+	// Generate controllers (pass aggregate to include in main.go registration)
 	fmt.Println("Generating controller reconciliation logic...")
 	controllerGen := generator.NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, aggregate); err != nil {
 		return fmt.Errorf("failed to generate controllers: %w", err)
 	}
 	fmt.Println("  Generated internal/controller/*_controller.go")
@@ -177,6 +190,15 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Println("  Generated Makefile")
 	fmt.Println("  Copied OpenAPI spec file")
 	fmt.Println()
+
+	// Generate aggregate controller if enabled
+	if aggregate != nil {
+		if err := controllerGen.GenerateAggregateController(aggregate); err != nil {
+			return fmt.Errorf("failed to generate aggregate controller: %w", err)
+		}
+		fmt.Println("  Generated internal/controller/statusaggregate_controller.go")
+		fmt.Println()
+	}
 
 	fmt.Println("Code generation complete!")
 	fmt.Println()

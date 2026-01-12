@@ -103,11 +103,13 @@ type RequiredFieldInfo struct {
 
 // MainTemplateData holds data for main.go template
 type MainTemplateData struct {
-	Year       int
-	APIVersion string
-	ModuleName string
-	AppName    string
-	CRDs       []CRDMainData
+	Year          int
+	APIVersion    string
+	ModuleName    string
+	AppName       string
+	CRDs          []CRDMainData
+	HasAggregate  bool   // True if aggregate CRD is generated
+	AggregateKind string // Kind name of the aggregate CRD (e.g., "StatusAggregate")
 }
 
 // CRDMainData holds CRD data for main.go
@@ -118,7 +120,8 @@ type CRDMainData struct {
 }
 
 // Generate generates controller files
-func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
+// aggregate is optional - pass nil if not generating aggregate CRD
+func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition) error {
 	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
 	if err := os.MkdirAll(controllerDir, 0755); err != nil {
 		return fmt.Errorf("failed to create controller directory: %w", err)
@@ -144,8 +147,8 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		return fmt.Errorf("failed to generate suite_test.go: %w", err)
 	}
 
-	// Generate main.go
-	if err := g.generateMain(crds); err != nil {
+	// Generate main.go (with optional aggregate info)
+	if err := g.generateMain(crds, aggregate); err != nil {
 		return fmt.Errorf("failed to generate main.go: %w", err)
 	}
 
@@ -481,7 +484,7 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 	return nil
 }
 
-func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
+func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition) error {
 	cmdDir := filepath.Join(g.config.OutputDir, "cmd", "manager")
 	if err := os.MkdirAll(cmdDir, 0755); err != nil {
 		return fmt.Errorf("failed to create cmd directory: %w", err)
@@ -497,6 +500,12 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 
 	for _, crd := range crds {
 		data.CRDs = append(data.CRDs, CRDMainData{Kind: crd.Kind, IsQuery: crd.IsQuery, IsAction: crd.IsAction})
+	}
+
+	// Add aggregate info if provided
+	if aggregate != nil {
+		data.HasAggregate = true
+		data.AggregateKind = aggregate.Kind
 	}
 
 	filepath := filepath.Join(cmdDir, "main.go")
@@ -740,6 +749,59 @@ func (g *ControllerGenerator) executeTemplate(tmplContent string, data interface
 	}
 
 	return os.WriteFile(outputPath, buf.Bytes(), 0644)
+}
+
+// AggregateControllerTemplateData holds data for aggregate controller template
+type AggregateControllerTemplateData struct {
+	Year          int
+	APIGroup      string
+	APIVersion    string
+	ModuleName    string
+	Kind          string
+	KindLower     string
+	Plural        string
+	ResourceKinds []string
+}
+
+// GenerateAggregateController generates the aggregate controller
+func (g *ControllerGenerator) GenerateAggregateController(aggregate *mapper.AggregateDefinition) error {
+	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
+	if err := os.MkdirAll(controllerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create controller directory: %w", err)
+	}
+
+	data := AggregateControllerTemplateData{
+		Year:          time.Now().Year(),
+		APIGroup:      aggregate.APIGroup,
+		APIVersion:    aggregate.APIVersion,
+		ModuleName:    g.config.ModuleName,
+		Kind:          aggregate.Kind,
+		KindLower:     strings.ToLower(aggregate.Kind),
+		Plural:        aggregate.Plural,
+		ResourceKinds: aggregate.ResourceKinds,
+	}
+
+	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(aggregate.Kind))
+	fp := filepath.Join(controllerDir, filename)
+
+	tmpl, err := template.New("aggregate_controller").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.AggregateControllerTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
 }
 
 // copySpecFile copies the OpenAPI spec file to the output directory.

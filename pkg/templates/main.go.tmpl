@@ -219,6 +219,16 @@ func main() {
 		os.Exit(1)
 	}
 {{ end }}
+{{- if .HasAggregate }}
+	// Setup aggregate controller (read-only, no HTTP client needed)
+	if err = (&controller.{{ .AggregateKind }}Reconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "{{ .AggregateKind }}")
+		os.Exit(1)
+	}
+{{- end }}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

@@ -133,3 +133,18 @@ var SuiteTestTemplate string
 //
 //go:embed integration_test.go.tmpl
 var IntegrationTestTemplate string
+
+// AggregateControllerTemplate is the template for generating status aggregator controller
+//
+//go:embed aggregate_controller.go.tmpl
+var AggregateControllerTemplate string
+
+// AggregateTypesTemplate is the template for generating aggregate CRD types
+//
+//go:embed aggregate_types.go.tmpl
+var AggregateTypesTemplate string
+
+// ExampleAggregateCRTemplate is the template for generating example aggregate CR YAML files
+//
+//go:embed example_aggregate_cr.yaml.tmpl
+var ExampleAggregateCRTemplate string
