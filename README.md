@@ -52,6 +52,16 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [CEL Variables](#cel-variables)
   - [CEL Aggregate Functions](#cel-aggregate-functions)
   - [Aggregator Status Fields](#aggregator-status-fields)
+- [Bundle CRD](#bundle-crd)
+  - [Enabling the Bundle CRD](#enabling-the-bundle-crd)
+  - [Bundle Spec Structure](#bundle-spec-structure)
+  - [Automatic Dependency Derivation](#automatic-dependency-derivation)
+  - [Explicit Dependencies](#explicit-dependencies)
+  - [Conditional Resource Creation](#conditional-resource-creation)
+  - [Ready Conditions](#ready-conditions)
+  - [Sync Waves](#sync-waves)
+  - [Bundle Examples](#bundle-examples)
+  - [Bundle Status Fields](#bundle-status-fields)
 - [Generated Output](#generated-output)
 - [Building the Generated Operator](#building-the-generated-operator)
 - [Running the Operator](#running-the-operator)
@@ -1165,6 +1175,308 @@ status:
       value: "150"
   lastAggregationTime: "2026-01-05T10:00:00Z"
 ```
+
+## Bundle CRD
+
+The generator can create an optional Bundle CRD (Inline Composition) that allows you to define and manage multiple child resources as a single unit. This is useful for deploying related resources together with dependency ordering and lifecycle management.
+
+### Enabling the Bundle CRD
+
+Add the `--bundle` flag when generating:
+
+```bash
+openapi-operator-gen generate \
+  --spec petstore.yaml \
+  --output ./generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator \
+  --bundle
+```
+
+This creates a `<AppName>Bundle` CRD (e.g., `PetstoreBundle`) that can create and manage child resources.
+
+### Bundle Spec Structure
+
+A bundle defines embedded resource specs that are created as child CRs:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: my-bundle
+spec:
+  # Optional: Target settings inherited by child resources
+  targetHelmRelease: my-release
+  targetNamespace: backend
+
+  # Optional: Pause reconciliation
+  paused: false
+
+  # Optional: Sync wave for ordered deployment with other bundles
+  syncWave: 0
+
+  # Resource definitions
+  resources:
+    - id: my-pet           # Unique identifier within the bundle
+      kind: Pet            # CRD kind to create
+      spec:                # Spec for the child resource
+        name: "Fluffy"
+        status: available
+```
+
+Each resource in the `resources` array creates a child CR with owner references, ensuring automatic cleanup when the bundle is deleted.
+
+### Automatic Dependency Derivation
+
+Bundle CRD automatically derives dependencies from `${resources.<id>...}` variable references in your specs. You don't need to explicitly declare `dependsOn` when using variable references.
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: auto-deps-bundle
+spec:
+  resources:
+    # Parent resource
+    - id: parent
+      kind: Pet
+      spec:
+        name: "Parent Pet"
+
+    # Child resource - dependency on 'parent' is automatically derived
+    # from the ${resources.parent...} reference below
+    - id: child
+      kind: Pet
+      spec:
+        # This reference creates an implicit dependency on 'parent'
+        name: "Child of ${resources.parent.status.externalID}"
+```
+
+The controller parses all spec fields and CEL expressions to find `${resources.<id>...}` patterns and automatically adds them to the dependency graph. This means:
+
+- References like `${resources.parent.status.externalID}` create a dependency on `parent`
+- References in `readyWhen` and `skipWhen` conditions are also parsed
+- No explicit `dependsOn` declaration needed for referenced resources
+
+### Explicit Dependencies
+
+You can also explicitly declare dependencies when there's no variable reference but you still need ordering:
+
+```yaml
+spec:
+  resources:
+    - id: database
+      kind: Pet
+      spec:
+        name: "Database"
+
+    - id: app
+      kind: Pet
+      spec:
+        name: "Application"
+      dependsOn:
+        - database  # Explicit dependency
+```
+
+Explicit `dependsOn` and automatic derivation are combined - the final dependency set is the union of both.
+
+### Conditional Resource Creation
+
+Skip resource creation based on CEL conditions:
+
+```yaml
+spec:
+  resources:
+    - id: main
+      kind: Pet
+      spec:
+        name: "Main Resource"
+
+    - id: optional
+      kind: Pet
+      spec:
+        name: "Optional Resource"
+      skipWhen:
+        - "resources.main.status.state != 'Synced'"  # Skip until main is synced
+```
+
+Resources with `skipWhen` conditions that evaluate to `true` are not created.
+
+### Ready Conditions
+
+Define custom conditions for when a resource is considered ready:
+
+```yaml
+spec:
+  resources:
+    - id: backend
+      kind: Pet
+      spec:
+        name: "Backend Service"
+      readyWhen:
+        - "resources.backend.status.state == 'Synced'"
+        - "resources.backend.status.externalID != ''"
+
+    - id: frontend
+      kind: Pet
+      spec:
+        name: "Frontend Service"
+      dependsOn:
+        - backend  # Wait for backend to be ready
+      readyWhen:
+        - "resources.frontend.status.state == 'Synced'"
+```
+
+Resources are considered ready when all `readyWhen` conditions evaluate to `true`. Dependent resources wait for their dependencies to be ready before creation.
+
+### Sync Waves
+
+Sync waves allow ordering of bundle deployments:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: infrastructure
+spec:
+  syncWave: -1  # Deploy first (lower numbers first)
+  resources:
+    - id: database
+      kind: Pet
+      spec:
+        name: "Database"
+---
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: application
+spec:
+  syncWave: 0  # Deploy after infrastructure
+  resources:
+    - id: app
+      kind: Pet
+      spec:
+        name: "Application"
+```
+
+Bundles with lower `syncWave` values are processed first.
+
+### Bundle Examples
+
+#### Simple Bundle
+
+Create multiple resources without explicit dependencies:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: simple-bundle
+spec:
+  resources:
+    - id: pet-1
+      kind: Pet
+      spec:
+        name: "Pet One"
+    - id: pet-2
+      kind: Pet
+      spec:
+        name: "Pet Two"
+```
+
+#### Bundle with Variable References
+
+Use variable references for automatic dependency ordering:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: reference-bundle
+spec:
+  resources:
+    - id: parent
+      kind: Pet
+      spec:
+        name: "Parent"
+
+    - id: child
+      kind: Pet
+      spec:
+        # Automatic dependency on 'parent' from this reference
+        name: "Child of ${resources.parent.status.externalID}"
+```
+
+#### Paused Bundle
+
+Suspend reconciliation temporarily:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: paused-bundle
+spec:
+  paused: true  # No reconciliation until set to false
+  resources:
+    - id: example
+      kind: Pet
+      spec:
+        name: "Paused Resource"
+```
+
+### Bundle Status Fields
+
+The bundle status provides detailed information about child resources:
+
+| Field | Description |
+|-------|-------------|
+| `state` | Overall state: `Pending`, `Progressing`, `Ready`, `Degraded`, or `Paused` |
+| `message` | Human-readable status message |
+| `observedGeneration` | Last observed spec generation |
+| `summary.total` | Total number of resources in the bundle |
+| `summary.ready` | Number of resources in ready state |
+| `summary.pending` | Number of pending resources |
+| `summary.failed` | Number of failed resources |
+| `resources` | Per-resource status details |
+| `lastReconcileTime` | Timestamp of last reconciliation |
+
+Example status:
+
+```yaml
+status:
+  state: Progressing
+  message: "2 of 3 resources ready"
+  observedGeneration: 1
+  summary:
+    total: 3
+    ready: 2
+    pending: 1
+    failed: 0
+  resources:
+    - id: parent
+      kind: Pet
+      name: my-bundle-parent
+      namespace: default
+      state: Ready
+      message: "Resource synced successfully"
+    - id: child
+      kind: Pet
+      name: my-bundle-child
+      namespace: default
+      state: Ready
+      message: "Resource synced successfully"
+    - id: grandchild
+      kind: Pet
+      name: my-bundle-grandchild
+      namespace: default
+      state: Pending
+      message: "Waiting for dependencies"
+  lastReconcileTime: "2026-01-05T10:00:00Z"
+```
+
+The bundle controller uses a DAG (Directed Acyclic Graph) to determine the correct creation order based on both explicit `dependsOn` declarations and automatically derived dependencies from variable references.
 
 ## Generated Output
 

@@ -307,3 +307,43 @@ func (g *TypesGenerator) GenerateAggregateTypes(aggregate *mapper.AggregateDefin
 
 	return nil
 }
+
+// BundleTypesTemplateData holds data for the bundle types template
+type BundleTypesTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	Kind             string
+	Plural           string
+	ResourceKinds    []string
+	QueryKinds       []string
+	ActionKinds      []string
+	AllKinds         []string
+}
+
+// GenerateBundleTypes generates the bundle CRD types
+func (g *TypesGenerator) GenerateBundleTypes(bundle *mapper.BundleDefinition) error {
+	outputDir := filepath.Join(g.config.OutputDir, "api", g.config.APIVersion)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	data := BundleTypesTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		Kind:             bundle.Kind,
+		Plural:           bundle.Plural,
+		ResourceKinds:    bundle.ResourceKinds,
+		QueryKinds:       bundle.QueryKinds,
+		ActionKinds:      bundle.ActionKinds,
+		AllKinds:         bundle.AllKinds,
+	}
+
+	outputPath := filepath.Join(outputDir, "bundle_types.go")
+	if err := g.generateFile(outputPath, templates.BundleTypesTemplate, data); err != nil {
+		return fmt.Errorf("failed to generate bundle_types.go: %w", err)
+	}
+
+	return nil
+}

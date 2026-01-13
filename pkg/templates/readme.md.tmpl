@@ -121,6 +121,9 @@ This operator manages the following CRDs:
 {{- if .HasAggregate }}
 | `{{ .TitleAppName }}Aggregate` | Aggregate | Aggregates status from multiple resources with CEL expressions |
 {{- end }}
+{{- if .HasBundle }}
+| `{{ .TitleAppName }}Bundle` | Bundle | Inline composition - creates and manages multiple child resources |
+{{- end }}
 
 ### Resource CRDs
 
@@ -364,6 +367,167 @@ The aggregate status includes:
 | `resources` | List of individual resource statuses |
 | `computedValues` | Results of CEL expression evaluations |
 | `lastAggregationTime` | Timestamp of last aggregation |
+
+{{- end }}
+{{- if .HasBundle }}
+
+### Bundle CRD
+
+The `{{ .TitleAppName }}Bundle` CRD allows you to define and manage multiple child resources as a single unit. This is useful for deploying related resources together with dependency ordering and lifecycle management.
+
+#### Bundle Spec Structure
+
+```yaml
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .TitleAppName }}Bundle
+metadata:
+  name: my-bundle
+spec:
+  # Optional: Target settings inherited by child resources
+  targetHelmRelease: my-release
+  targetNamespace: backend
+
+  # Optional: Pause reconciliation
+  paused: false
+
+  # Optional: Sync wave for ordered deployment
+  syncWave: 0
+
+  # Resource definitions
+  resources:
+    - id: my-resource        # Unique identifier within the bundle
+      kind: Pet              # CRD kind to create
+      spec:                  # Spec for the child resource
+        name: "Fluffy"
+```
+
+Child resources are created with owner references and automatically cleaned up when the bundle is deleted.
+
+#### Automatic Dependency Derivation
+
+Dependencies are automatically derived from `${resources.<id>...}` variable references in your specs. No explicit `dependsOn` needed when using variable references:
+
+```yaml
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .TitleAppName }}Bundle
+metadata:
+  name: auto-deps-bundle
+spec:
+  resources:
+    # Parent resource
+    - id: parent
+      kind: Pet
+      spec:
+        name: "Parent Pet"
+
+    # Child - dependency on 'parent' is automatically derived
+    - id: child
+      kind: Pet
+      spec:
+        # This reference creates an implicit dependency on 'parent'
+        name: "Child of ${resources.parent.status.externalID}"
+```
+
+The controller parses all spec fields and CEL expressions to find `${resources.<id>...}` patterns and automatically adds them to the dependency graph.
+
+#### Explicit Dependencies
+
+You can also explicitly declare dependencies when needed:
+
+```yaml
+spec:
+  resources:
+    - id: database
+      kind: Pet
+      spec:
+        name: "Database"
+
+    - id: app
+      kind: Pet
+      spec:
+        name: "Application"
+      dependsOn:
+        - database  # Explicit dependency
+```
+
+Explicit and automatic dependencies are combined.
+
+#### Conditional Resource Creation
+
+Skip resource creation based on CEL conditions:
+
+```yaml
+spec:
+  resources:
+    - id: main
+      kind: Pet
+      spec:
+        name: "Main Resource"
+
+    - id: optional
+      kind: Pet
+      spec:
+        name: "Optional Resource"
+      skipWhen:
+        - "resources.main.status.state != 'Synced'"
+```
+
+#### Ready Conditions
+
+Define custom conditions for when a resource is considered ready:
+
+```yaml
+spec:
+  resources:
+    - id: backend
+      kind: Pet
+      spec:
+        name: "Backend Service"
+      readyWhen:
+        - "resources.backend.status.state == 'Synced'"
+
+    - id: frontend
+      kind: Pet
+      spec:
+        name: "Frontend Service"
+      dependsOn:
+        - backend
+      readyWhen:
+        - "resources.frontend.status.state == 'Synced'"
+```
+
+#### Bundle Status
+
+| Field | Description |
+|-------|-------------|
+| `state` | `Pending`, `Progressing`, `Ready`, `Degraded`, or `Paused` |
+| `summary` | Counts: `total`, `ready`, `pending`, `failed` |
+| `resources` | Per-resource status details |
+| `lastReconcileTime` | Timestamp of last reconciliation |
+
+Example status:
+
+```yaml
+status:
+  state: Progressing
+  message: "2 of 3 resources ready"
+  summary:
+    total: 3
+    ready: 2
+    pending: 1
+    failed: 0
+  resources:
+    - id: parent
+      kind: Pet
+      name: my-bundle-parent
+      state: Ready
+    - id: child
+      kind: Pet
+      name: my-bundle-child
+      state: Pending
+      message: "Waiting for dependencies"
+  lastReconcileTime: "2026-01-05T10:00:00Z"
+```
 
 {{- end }}
 
@@ -658,6 +822,20 @@ Spans are created for:
 | `executionCount` | Number of executions |
 | `httpStatusCode` | HTTP response status code |
 | `result` | Action result data |
+{{- if .HasBundle }}
+
+### Bundle CRs
+
+| Field | Description |
+|-------|-------------|
+| `state` | `Pending`, `Progressing`, `Ready`, `Degraded`, `Paused` |
+| `summary.total` | Total number of resources |
+| `summary.ready` | Resources in ready state |
+| `summary.pending` | Resources pending creation |
+| `summary.failed` | Resources in failed state |
+| `resources` | Per-resource status list |
+| `lastReconcileTime` | Last reconciliation timestamp |
+{{- end }}
 
 ## License
 

@@ -23,6 +23,9 @@ type CRDDefinition struct {
 	Operations  []OperationMapping
 	BasePath    string
 
+	// HTTP method availability (for conditional controller logic)
+	HasDelete bool // True if DELETE method is available for this resource
+
 	// Query endpoint fields
 	IsQuery         bool               // True if this is a query/action CRD
 	QueryPath       string             // Full query path (e.g., /pet/findByTags)
@@ -706,6 +709,14 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 			Operations:  m.mapOperations(resource.Operations),
 		}
 
+		// Check if DELETE method is available for this resource
+		for _, op := range resource.Operations {
+			if op.Method == "DELETE" {
+				crd.HasDelete = true
+				break
+			}
+		}
+
 		// Generate spec fields from resource schema
 		if resource.Schema != nil {
 			crd.Spec = m.schemaToFieldDefinition("Spec", resource.Schema, true)
@@ -824,6 +835,13 @@ func (m *Mapper) mapSingleCRD(spec *parser.ParsedSpec) ([]*CRDDefinition, error)
 	for _, resource := range spec.Resources {
 		ops := m.mapOperations(resource.Operations)
 		crd.Operations = append(crd.Operations, ops...)
+		// Check if DELETE method is available
+		for _, op := range resource.Operations {
+			if op.Method == "DELETE" {
+				crd.HasDelete = true
+				break
+			}
+		}
 	}
 
 	// Create spec with resourceType field
@@ -1209,6 +1227,59 @@ func (m *Mapper) CreateAggregateDefinition(crds []*CRDDefinition) *AggregateDefi
 		APIVersion:    m.config.APIVersion,
 		Kind:          aggregateKind,
 		Plural:        strings.ToLower(aggregateKind) + "s",
+		ResourceKinds: resourceKinds,
+		QueryKinds:    queryKinds,
+		ActionKinds:   actionKinds,
+		AllKinds:      allKinds,
+	}
+}
+
+// BundleDefinition represents an Inline Composition CRD definition (Option 2)
+// This CRD creates and manages multiple child resources with dependency ordering
+type BundleDefinition struct {
+	APIGroup   string
+	APIVersion string
+	Kind       string
+	Plural     string
+	// ResourceKinds are the CRUD CRD kinds this bundle can create
+	ResourceKinds []string
+	// QueryKinds are the Query CRD kinds this bundle can create
+	QueryKinds []string
+	// ActionKinds are the Action CRD kinds this bundle can create
+	ActionKinds []string
+	// AllKinds is the combined list of all kinds (for iteration convenience)
+	AllKinds []string
+}
+
+// CreateBundleDefinition creates a bundle CRD definition from existing CRDs
+func (m *Mapper) CreateBundleDefinition(crds []*CRDDefinition) *BundleDefinition {
+	// Collect resource kinds by type
+	resourceKinds := make([]string, 0)
+	queryKinds := make([]string, 0)
+	actionKinds := make([]string, 0)
+	allKinds := make([]string, 0)
+
+	for _, crd := range crds {
+		allKinds = append(allKinds, crd.Kind)
+		if crd.IsQuery {
+			queryKinds = append(queryKinds, crd.Kind)
+		} else if crd.IsAction {
+			actionKinds = append(actionKinds, crd.Kind)
+		} else {
+			resourceKinds = append(resourceKinds, crd.Kind)
+		}
+	}
+
+	// Derive bundle kind name from API group
+	// e.g., "petstore.example.com" -> "PetstoreBundle"
+	appName := strings.Split(m.config.APIGroup, ".")[0]
+	bundleKind := strcase.ToCamel(appName) + "Bundle"
+
+	return &BundleDefinition{
+		APIGroup:      m.config.APIGroup,
+		APIVersion:    m.config.APIVersion,
+		Kind:          bundleKind,
+		Plural:        strings.ToLower(bundleKind) + "s",
 		ResourceKinds: resourceKinds,
 		QueryKinds:    queryKinds,
 		ActionKinds:   actionKinds,

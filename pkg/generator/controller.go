@@ -67,6 +67,9 @@ type ControllerTemplateData struct {
 	ResourceQueryParams []ResourceQueryParam // Query parameters for resource endpoints
 	HasResourceParams   bool                 // True if there are path or query params to handle
 
+	// HTTP method availability
+	HasDelete bool // True if DELETE method is available for this resource
+
 	// Integration test fields
 	RequiredFields    []RequiredFieldInfo // Required fields that need sample values in tests
 	HasRequiredFields bool                // True if there are required fields
@@ -112,6 +115,8 @@ type MainTemplateData struct {
 	CRDs             []CRDMainData
 	HasAggregate     bool   // True if aggregate CRD is generated
 	AggregateKind    string // Kind name of the aggregate CRD (e.g., "StatusAggregate")
+	HasBundle        bool   // True if bundle CRD is generated
+	BundleKind       string // Kind name of the bundle CRD (e.g., "PetstoreBundle")
 }
 
 // CRDMainData holds CRD data for main.go
@@ -122,8 +127,8 @@ type CRDMainData struct {
 }
 
 // Generate generates controller files
-// aggregate is optional - pass nil if not generating aggregate CRD
-func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition) error {
+// aggregate and bundle are optional - pass nil if not generating those CRDs
+func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition, bundle *mapper.BundleDefinition) error {
 	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
 	if err := os.MkdirAll(controllerDir, 0755); err != nil {
 		return fmt.Errorf("failed to create controller directory: %w", err)
@@ -149,13 +154,13 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 		return fmt.Errorf("failed to generate suite_test.go: %w", err)
 	}
 
-	// Generate main.go (with optional aggregate info)
-	if err := g.generateMain(crds, aggregate); err != nil {
+	// Generate main.go (with optional aggregate and bundle info)
+	if err := g.generateMain(crds, aggregate, bundle); err != nil {
 		return fmt.Errorf("failed to generate main.go: %w", err)
 	}
 
 	// Generate go.mod for the generated operator
-	if err := g.generateGoMod(aggregate != nil); err != nil {
+	if err := g.generateGoMod(aggregate != nil, bundle != nil); err != nil {
 		return fmt.Errorf("failed to generate go.mod: %w", err)
 	}
 
@@ -170,7 +175,7 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 	}
 
 	// Generate README.md
-	if err := g.generateReadme(crds, aggregate != nil); err != nil {
+	if err := g.generateReadme(crds, aggregate != nil, bundle != nil); err != nil {
 		return fmt.Errorf("failed to generate README: %w", err)
 	}
 
@@ -220,6 +225,8 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
+		// HTTP method availability
+		HasDelete: crd.HasDelete,
 	}
 
 	// Populate path params (excluding parent ID)
@@ -362,6 +369,7 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
+		HasDelete:      crd.HasDelete,
 	}
 
 	filename := fmt.Sprintf("%s_controller_test.go", strings.ToLower(crd.Kind))
@@ -463,6 +471,7 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
+		HasDelete:      crd.HasDelete,
 
 		RequiredFields:    requiredFields,
 		HasRequiredFields: len(requiredFields) > 0,
@@ -489,7 +498,7 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 	return nil
 }
 
-func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition) error {
+func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition, bundle *mapper.BundleDefinition) error {
 	cmdDir := filepath.Join(g.config.OutputDir, "cmd", "manager")
 	if err := os.MkdirAll(cmdDir, 0755); err != nil {
 		return fmt.Errorf("failed to create cmd directory: %w", err)
@@ -514,6 +523,12 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggrega
 		data.AggregateKind = aggregate.Kind
 	}
 
+	// Add bundle info if provided
+	if bundle != nil {
+		data.HasBundle = true
+		data.BundleKind = bundle.Kind
+	}
+
 	filepath := filepath.Join(cmdDir, "main.go")
 
 	tmpl, err := template.New("main").Parse(templates.MainTemplate)
@@ -534,7 +549,7 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggrega
 	return nil
 }
 
-func (g *ControllerGenerator) generateGoMod(hasAggregate bool) error {
+func (g *ControllerGenerator) generateGoMod(hasAggregate bool, hasBundle bool) error {
 	// Use the generator version for the dependency
 	// Only use clean semver versions (vX.Y.Z), otherwise fall back to v0.0.0
 	// which will be resolved to latest by go mod tidy
@@ -547,10 +562,12 @@ func (g *ControllerGenerator) generateGoMod(hasAggregate bool) error {
 		ModuleName       string
 		GeneratorVersion string
 		HasAggregate     bool
+		HasBundle        bool
 	}{
 		ModuleName:       g.config.ModuleName,
 		GeneratorVersion: version,
 		HasAggregate:     hasAggregate,
+		HasBundle:        hasBundle,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
 	return g.executeTemplate(templates.GoModTemplate, data, outputPath)
@@ -611,7 +628,7 @@ func (g *ControllerGenerator) generateMakefile() error {
 	return g.executeTemplate(templates.MakefileTemplate, data, outputPath)
 }
 
-func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAggregate bool) error {
+func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAggregate bool, hasBundle bool) error {
 	// Build CRD info for template
 	type CRDInfo struct {
 		Kind     string
@@ -645,6 +662,9 @@ func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAg
 	if hasAggregate {
 		generatorCmd += " \\\n  --aggregate"
 	}
+	if hasBundle {
+		generatorCmd += " \\\n  --bundle"
+	}
 
 	data := struct {
 		AppName          string
@@ -654,6 +674,7 @@ func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAg
 		CRDs             []CRDInfo
 		GeneratorCmd     string
 		HasAggregate     bool
+		HasBundle        bool
 		GeneratorVersion string
 	}{
 		AppName:          appName,
@@ -663,6 +684,7 @@ func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAg
 		CRDs:             crdInfos,
 		GeneratorCmd:     generatorCmd,
 		HasAggregate:     hasAggregate,
+		HasBundle:        hasBundle,
 		GeneratorVersion: g.config.GeneratorVersion,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "README.md")
@@ -821,6 +843,67 @@ func (g *ControllerGenerator) GenerateAggregateController(aggregate *mapper.Aggr
 	tmpl, err := template.New("aggregate_controller").Funcs(template.FuncMap{
 		"lower": strings.ToLower,
 	}).Parse(templates.AggregateControllerTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// BundleControllerTemplateData holds data for bundle controller template
+type BundleControllerTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	ModuleName       string
+	Kind             string
+	KindLower        string
+	Plural           string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
+}
+
+// GenerateBundleController generates the bundle controller
+func (g *ControllerGenerator) GenerateBundleController(bundle *mapper.BundleDefinition) error {
+	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
+	if err := os.MkdirAll(controllerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create controller directory: %w", err)
+	}
+
+	data := BundleControllerTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         bundle.APIGroup,
+		APIVersion:       bundle.APIVersion,
+		ModuleName:       g.config.ModuleName,
+		Kind:             bundle.Kind,
+		KindLower:        strings.ToLower(bundle.Kind),
+		Plural:           bundle.Plural,
+		ResourceKinds:    bundle.ResourceKinds,
+		QueryKinds:       bundle.QueryKinds,
+		ActionKinds:      bundle.ActionKinds,
+		AllKinds:         bundle.AllKinds,
+	}
+
+	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(bundle.Kind))
+	fp := filepath.Join(controllerDir, filename)
+
+	tmpl, err := template.New("bundle_controller").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.BundleControllerTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}

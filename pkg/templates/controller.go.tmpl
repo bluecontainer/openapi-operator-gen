@@ -29,7 +29,9 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+{{- if .HasDelete }}
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+{{- end }}
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
@@ -99,7 +101,9 @@ func init() {
 }
 
 const (
+{{- if .HasDelete }}
 	{{ .KindLower }}Finalizer    = "{{ .APIGroup }}/finalizer"
+{{- end }}
 	{{ .KindLower }}RequeueAfter = time.Second * 30
 )
 
@@ -180,6 +184,7 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 	// Check if this is a read-only resource
 	isReadOnly := instance.Spec.ReadOnly
 
+{{- if .HasDelete }}
 	// Check if the resource is being deleted
 	if instance.GetDeletionTimestamp() != nil {
 		if controllerutil.ContainsFinalizer(instance, {{ .KindLower }}Finalizer) {
@@ -206,6 +211,7 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 			return ctrl.Result{}, err
 		}
 	}
+{{- end }}
 
 	// Handle read-only mode: only GET and update status
 	if isReadOnly {
@@ -964,6 +970,7 @@ func (r *{{ .Kind }}Reconciler) syncResource(ctx context.Context, instance *{{ .
 	return nil
 }
 
+{{- if .HasDelete }}
 // deleteFromEndpoint deletes from a single endpoint URL
 func (r *{{ .Kind }}Reconciler) deleteFromEndpoint(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string) error {
 	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "DELETE",
@@ -1066,6 +1073,7 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 
 	return r.deleteFromEndpoint(ctx, instance, baseURL)
 }
+{{- end }}
 
 func (r *{{ .Kind }}Reconciler) updateStatus(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, state, message string) {
 	logger := log.FromContext(ctx)

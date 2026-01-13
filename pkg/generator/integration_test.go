@@ -136,7 +136,7 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds, nil); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestGeneratedCodeWithE2ETests(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds, nil); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestGeneratedCodeFromPetstoreSpec(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds, nil); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -394,7 +394,7 @@ func TestGeneratedCodeIncludesTestHelpers(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds, nil); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -450,7 +450,7 @@ func TestGenerateControllerTestFile(t *testing.T) {
 
 	// Generate the controller
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds, nil); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 

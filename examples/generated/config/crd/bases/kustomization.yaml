@@ -6,6 +6,7 @@ resources:
   - petstore.example.com_petfindbytagsqueries.yaml
   - petstore.example.com_pets.yaml
   - petstore.example.com_petstoreaggregates.yaml
+  - petstore.example.com_petstorebundles.yaml
   - petstore.example.com_petuploadimageactions.yaml
   - petstore.example.com_storeinventoryqueries.yaml
   - petstore.example.com_usercreatewithlistactions.yaml

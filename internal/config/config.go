@@ -43,6 +43,9 @@ type Config struct {
 	// GenerateAggregate controls whether to generate a Status Aggregator CRD.
 	// When true, generates an aggregate CRD that observes and aggregates status from other CRDs.
 	GenerateAggregate bool
+	// GenerateBundle controls whether to generate an Inline Composition Bundle CRD (Option 2).
+	// When true, generates a bundle CRD that creates and manages multiple child resources.
+	GenerateBundle bool
 }
 
 // Validate checks if the configuration is valid

@@ -595,7 +595,7 @@ func TestControllerGenerator_Generate(t *testing.T) {
 		},
 	}
 
-	err := g.Generate(crds, nil)
+	err := g.Generate(crds, nil, nil)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -671,7 +671,7 @@ func TestControllerGenerator_Generate_MultipleCRDs(t *testing.T) {
 		},
 	}
 
-	err := g.Generate(crds, nil)
+	err := g.Generate(crds, nil, nil)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -705,7 +705,7 @@ func TestControllerGenerator_GenerateGoMod(t *testing.T) {
 	}
 	g := NewControllerGenerator(cfg)
 
-	err := g.generateGoMod(false)
+	err := g.generateGoMod(false, false)
 	if err != nil {
 		t.Fatalf("generateGoMod failed: %v", err)
 	}
@@ -846,7 +846,7 @@ func TestControllerGenerator_ControllerContent(t *testing.T) {
 		},
 	}
 
-	err := g.Generate(crds, nil)
+	err := g.Generate(crds, nil, nil)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -965,7 +965,7 @@ func TestControllerGenerator_Generate_EmptyCRDs(t *testing.T) {
 	}
 	g := NewControllerGenerator(cfg)
 
-	err := g.Generate([]*mapper.CRDDefinition{}, nil)
+	err := g.Generate([]*mapper.CRDDefinition{}, nil, nil)
 	if err != nil {
 		t.Fatalf("Generate should handle empty CRDs: %v", err)
 	}
@@ -1061,7 +1061,7 @@ func TestFullGeneration(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds, nil); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 

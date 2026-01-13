@@ -419,6 +419,9 @@ type ControllerTemplateData struct {
 	ResourcePathParams  []ActionPathParam
 	ResourceQueryParams []ResourceQueryParam
 	HasResourceParams   bool
+
+	// HTTP method availability
+	HasDelete bool
 }
 
 func TestControllerTemplateExecution(t *testing.T) {
@@ -439,6 +442,7 @@ func TestControllerTemplateExecution(t *testing.T) {
 		BasePath:          "/pet",
 		IsQuery:           false,
 		HasResourceParams: false,
+		HasDelete:         true,
 	}
 
 	var buf bytes.Buffer
@@ -862,6 +866,8 @@ type MainTemplateData struct {
 	CRDs             []CRDMainData
 	HasAggregate     bool
 	AggregateKind    string
+	HasBundle        bool
+	BundleKind       string
 }
 
 func TestMainTemplateExecution(t *testing.T) {

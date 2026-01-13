@@ -229,6 +229,16 @@ func main() {
 		os.Exit(1)
 	}
 {{- end }}
+{{- if .HasBundle }}
+	// Setup bundle controller (creates child CRs, no HTTP client needed directly)
+	if err = (&controller.{{ .BundleKind }}Reconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "{{ .BundleKind }}")
+		os.Exit(1)
+	}
+{{- end }}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
