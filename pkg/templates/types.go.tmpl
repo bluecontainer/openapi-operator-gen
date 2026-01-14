@@ -505,16 +505,25 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 
+{{- if .NeedsExternalIDRef }}
 	// ExternalIDRef references an existing resource in the external REST API by its ID.
 	// When set, the controller will GET this resource instead of creating a new one.
 	// This is useful for importing existing resources or for read-only observation.
+{{- if .HasPost }}
 	// +optional
 	ExternalIDRef string `json:"externalIDRef,omitempty"`
+{{- else }}
+	// +kubebuilder:validation:Required
+	ExternalIDRef string `json:"externalIDRef"`
+{{- end }}
+{{- end }}
 
 	// ReadOnly indicates that this CR is for observation only.
 	// When true, the controller will only GET the resource and update status,
 	// without performing any create, update, or delete operations.
+{{- if .NeedsExternalIDRef }}
 	// Requires ExternalIDRef to be set.
+{{- end }}
 	// +optional
 	ReadOnly bool `json:"readOnly,omitempty"`
 }
@@ -533,9 +542,11 @@ type {{ .Kind }}Status struct {
 	// +optional
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
-	// ExternalID is the ID of the resource in the external REST API
+{{- if .HasPost }}
+	// ExternalID is the ID of the resource in the external REST API (set from POST response)
 	// +optional
 	ExternalID string `json:"externalID,omitempty"`
+{{- end }}
 
 	// Message is a human-readable message about the current state
 	// +optional

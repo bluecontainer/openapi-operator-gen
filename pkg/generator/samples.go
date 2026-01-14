@@ -72,8 +72,9 @@ func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *map
 		}
 		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(crd.Kind)))
 
-		// Generate example CR with externalIDRef (only for resource CRDs, not queries/actions)
-		if !crd.IsQuery && !crd.IsAction {
+		// Generate example CR with externalIDRef (only for resource CRDs that need it)
+		// ExternalIDRef is only needed when there are no path parameters to identify the resource
+		if !crd.IsQuery && !crd.IsAction && crd.NeedsExternalIDRef {
 			if err := g.generateExampleCRRef(samplesDir, crd); err != nil {
 				return fmt.Errorf("failed to generate example CR ref for %s: %w", crd.Kind, err)
 			}

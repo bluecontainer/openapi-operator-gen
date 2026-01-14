@@ -57,6 +57,13 @@ type CRDTypeData struct {
 	ParentResource string // Parent resource kind (e.g., "Pet")
 	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
 	ActionName     string // Action name (e.g., "uploadImage")
+
+	// HTTP method availability (for Resource CRDs)
+	HasDelete bool // True if DELETE method is available
+	HasPost   bool // True if POST method is available
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 }
 
 // SpecData holds spec field data
@@ -122,6 +129,11 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			ParentResource: crd.ParentResource,
 			ParentIDParam:  crd.ParentIDParam,
 			ActionName:     crd.ActionName,
+			// HTTP method availability
+			HasDelete: crd.HasDelete,
+			HasPost:   crd.HasPost,
+			// ExternalIDRef handling
+			NeedsExternalIDRef: crd.NeedsExternalIDRef,
 		}
 
 		if crd.Spec != nil {

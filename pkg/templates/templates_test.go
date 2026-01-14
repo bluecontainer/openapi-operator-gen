@@ -189,6 +189,13 @@ type CRDTypeData struct {
 	ParentResource string
 	ParentIDParam  string
 	ActionName     string
+
+	// HTTP method availability
+	HasDelete bool
+	HasPost   bool
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool
 }
 
 // NestedTypeData mimics nested type data
@@ -243,7 +250,9 @@ func TestTypesTemplateExecution(t *testing.T) {
 						},
 					},
 				},
-				IsQuery: false,
+				IsQuery:   false,
+				HasDelete: true,
+				HasPost:   true,
 			},
 		},
 		NestedTypes: []NestedTypeData{},
@@ -396,6 +405,7 @@ type ControllerTemplateData struct {
 	KindLower        string
 	Plural           string
 	BasePath         string
+	ResourcePath     string
 	IsQuery          bool
 	QueryPath        string
 	ResponseType     string
@@ -422,6 +432,10 @@ type ControllerTemplateData struct {
 
 	// HTTP method availability
 	HasDelete bool
+	HasPost   bool
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool
 }
 
 func TestControllerTemplateExecution(t *testing.T) {
@@ -443,6 +457,7 @@ func TestControllerTemplateExecution(t *testing.T) {
 		IsQuery:           false,
 		HasResourceParams: false,
 		HasDelete:         true,
+		HasPost:           true,
 	}
 
 	var buf bytes.Buffer

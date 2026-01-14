@@ -648,6 +648,13 @@ spec:
   # targetDeployment: {{ .AppName }}-api
 ```
 
+{{- $hasExternalIDRef := false }}
+{{- range .CRDs }}
+{{- if .NeedsExternalIDRef }}
+{{- $hasExternalIDRef = true }}
+{{- end }}
+{{- end }}
+{{- if $hasExternalIDRef }}
 ### Importing Existing Resources
 
 Reference an existing resource in the REST API:
@@ -675,6 +682,7 @@ spec:
   externalIDRef: "existing-id-123"
   readOnly: true
 ```
+{{- end }}
 {{- end }}
 
 ## Deploying to Kubernetes

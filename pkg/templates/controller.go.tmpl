@@ -177,7 +177,9 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 	// Add resource attributes to current span
 	span := trace.SpanFromContext(ctx)
 	span.SetAttributes(
+{{- if or .NeedsExternalIDRef .HasPost }}
 		attribute.String("resource.externalID", r.getExternalID(instance)),
+{{- end }}
 		attribute.Bool("resource.readOnly", instance.Spec.ReadOnly),
 	)
 
@@ -215,10 +217,12 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 
 	// Handle read-only mode: only GET and update status
 	if isReadOnly {
+{{- if .NeedsExternalIDRef }}
 		if instance.Spec.ExternalIDRef == "" {
 			r.updateStatus(ctx, instance, "Failed", "ReadOnly mode requires ExternalIDRef to be set")
 			return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, fmt.Errorf("readOnly mode requires externalIDRef")
 		}
+{{- end }}
 		if err := r.observeResource(ctx, instance); err != nil {
 			r.updateStatus(ctx, instance, "Failed", err.Error())
 			return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, err
@@ -263,13 +267,23 @@ func (r *{{ .Kind }}Reconciler) getBaseURLByOrdinal(ctx context.Context, ordinal
 }
 
 // buildResourceURL builds the URL for resource operations with path and query parameters
-// BasePath is the base path without path parameter placeholders (e.g., /pet, not /pet/{petId})
-// The resourceID is appended to the path for GET/PUT/DELETE operations
-func (r *{{ .Kind }}Reconciler) buildResourceURL(baseURL string, instance *{{ .APIVersion }}.{{ .Kind }}, resourceID string) string {
-	builder := runtime.NewURLBuilder("{{ .BasePath }}")
+// ResourcePath is the full path template with placeholders (e.g., /pet/{petId}, /classes/{className}/variables/{variableName})
+// Path parameters are substituted from the spec fields
+func (r *{{ .Kind }}Reconciler) buildResourceURL(baseURL string, instance *{{ .APIVersion }}.{{ .Kind }}) string {
+	builder := runtime.NewURLBuilder("{{ .ResourcePath }}")
 
-	// Add resource ID for operations that need it (appended to path)
-	builder.WithResourceID(resourceID)
+	{{- if .ResourcePathParams }}
+	// Add path parameters from spec
+	{{- range .ResourcePathParams }}
+	{{- if eq .GoType "string" }}
+	builder.WithPathParam("{{ .Name }}", instance.Spec.{{ .GoName }})
+	{{- else if eq .GoType "int64" }}
+	builder.WithPathParamInt("{{ .Name }}", instance.Spec.{{ .GoName }})
+	{{- else }}
+	builder.WithPathParam("{{ .Name }}", fmt.Sprintf("%v", instance.Spec.{{ .GoName }}))
+	{{- end }}
+	{{- end }}
+	{{- end }}
 
 	{{- if .ResourceQueryParams }}
 	// Add query parameters from spec
@@ -292,6 +306,8 @@ func (r *{{ .Kind }}Reconciler) buildResourceURL(baseURL string, instance *{{ .A
 
 	return builder.Build(baseURL)
 }
+
+{{- if .HasPost }}
 
 // buildResourceURLForCreate builds the URL for resource creation (POST) with query parameters only
 func (r *{{ .Kind }}Reconciler) buildResourceURLForCreate(baseURL string, instance *{{ .APIVersion }}.{{ .Kind }}) string {
@@ -318,16 +334,31 @@ func (r *{{ .Kind }}Reconciler) buildResourceURLForCreate(baseURL string, instan
 
 	return builder.BuildForCreate(baseURL)
 }
+{{- end }}
 
+{{- if or .NeedsExternalIDRef .HasPost }}
 // getExternalID returns the external ID to use for GET/PUT/DELETE operations.
+{{- if and .NeedsExternalIDRef .HasPost }}
 // It prefers ExternalIDRef from spec (for importing existing resources),
 // then falls back to ExternalID from status (for resources created by the controller).
+{{- else if .NeedsExternalIDRef }}
+// It returns ExternalIDRef from spec (for referencing existing resources).
+{{- else if .HasPost }}
+// It returns ExternalID from status (for resources created by the controller).
+{{- end }}
 func (r *{{ .Kind }}Reconciler) getExternalID(instance *{{ .APIVersion }}.{{ .Kind }}) string {
+{{- if .NeedsExternalIDRef }}
 	if instance.Spec.ExternalIDRef != "" {
 		return instance.Spec.ExternalIDRef
 	}
+{{- end }}
+{{- if .HasPost }}
 	return instance.Status.ExternalID
+{{- else }}
+	return ""
+{{- end }}
 }
+{{- end }}
 
 // getResource performs a GET request to fetch the current state of the resource from the REST API.
 // Returns the response body as a map, or nil if the resource doesn't exist (404).
@@ -343,7 +374,7 @@ func (r *{{ .Kind }}Reconciler) getResource(ctx context.Context, baseURL string,
 	logger := log.FromContext(ctx)
 	start := time.Now()
 
-	url := r.buildResourceURL(baseURL, instance, externalID)
+	url := r.buildResourceURL(baseURL, instance)
 	span.SetAttributes(attribute.String("http.url", url))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -436,7 +467,9 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 	delete(specMap, "targetStatefulSet")
 	delete(specMap, "targetDeployment")
 	delete(specMap, "targetNamespace")
+{{- if .NeedsExternalIDRef }}
 	delete(specMap, "externalIDRef")
+{{- end }}
 	delete(specMap, "readOnly")
 
 	// Compare each field in spec with API response
@@ -458,10 +491,17 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) error {
 	logger := log.FromContext(ctx)
 
+{{- if or .NeedsExternalIDRef .HasPost }}
 	externalID := r.getExternalID(instance)
+{{- if .NeedsExternalIDRef }}
 	if externalID == "" {
 		return fmt.Errorf("no external ID available for observation")
 	}
+{{- end }}
+{{- else }}
+	// Resource identified by path parameters - no external ID needed
+	externalID := ""
+{{- end }}
 
 	now := metav1.Now()
 
@@ -508,7 +548,9 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 			}
 
 			// Update status with all responses
+{{- if .HasPost }}
 			instance.Status.ExternalID = externalID
+{{- end }}
 			instance.Status.Responses = responses
 			instance.Status.LastGetTime = &now
 			instance.Status.DriftDetected = false
@@ -552,7 +594,9 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 	}
 
 	// Update status with fetched data
+{{- if .HasPost }}
 	instance.Status.ExternalID = externalID
+{{- end }}
 	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 		Success:     true,
 		StatusCode:  200,
@@ -637,7 +681,11 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 }
 
 // syncToEndpoint syncs to a single endpoint URL with GET-first drift detection.
+{{- if .HasPost }}
 // On success, it updates instance.Status.ExternalID, instance.Status.Response, and instance.Status.DriftDetected.
+{{- else }}
+// On success, it updates instance.Status.Response and instance.Status.DriftDetected.
+{{- end }}
 // The caller is responsible for calling updateStatus after this returns.
 func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string) error {
 	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "SyncToEndpoint",
@@ -649,11 +697,31 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 	logger := log.FromContext(ctx)
 
 	now := metav1.Now()
+{{- if or .NeedsExternalIDRef .HasPost }}
 	externalID := r.getExternalID(instance)
 	span.SetAttributes(attribute.String("resource.externalID", externalID))
+{{- else }}
+	// Resource identified by path parameters - no external ID needed
+	externalID := ""
+{{- end }}
 
-	// If we have an external ID (from spec.externalIDRef or status.externalID), try GET first
-	if externalID != "" {
+{{- if and (not .HasPost) .NeedsExternalIDRef }}
+	// POST not available - ExternalIDRef is required
+	if instance.Spec.ExternalIDRef == "" {
+		return fmt.Errorf("externalIDRef is required: this resource does not support creation (no POST method available)")
+	}
+{{- end }}
+
+	// Determine if we should try GET first to check if resource exists
+{{- if .NeedsExternalIDRef }}
+	// ExternalIDRef mode - only GET if we have an ID reference
+	shouldTryGet := externalID != ""
+{{- else }}
+	// Path params mode - always try GET since path params identify the resource
+	shouldTryGet := true
+{{- end }}
+
+	if shouldTryGet {
 		respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get resource: %w", err)
@@ -679,7 +747,9 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 			if !hasDrift {
 				// No drift - skip update
 				logger.Info("No drift detected, skipping update", "externalID", externalID)
+{{- if .HasPost }}
 				instance.Status.ExternalID = externalID
+{{- end }}
 				instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					Success:     true,
 					StatusCode:  200,
@@ -694,19 +764,33 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 			return r.updateResource(ctx, instance, baseURL, externalID)
 		}
 
+{{- if .NeedsExternalIDRef }}
 		// Resource doesn't exist (404) - if we're using externalIDRef, this is an error
 		if instance.Spec.ExternalIDRef != "" {
 			return fmt.Errorf("resource with externalIDRef %s not found", instance.Spec.ExternalIDRef)
 		}
+{{- end }}
 
+		{{- if .HasPost }}
 		// Resource was created by us but no longer exists - recreate it
 		logger.Info("Resource no longer exists, recreating", "externalID", externalID)
 		instance.Status.ExternalID = "" // Clear so we do a POST
+		{{- else }}
+		// Cannot recreate - POST not available
+		return fmt.Errorf("resource no longer exists and cannot be recreated (no POST method available)")
+		{{- end }}
 	}
 
+	{{- if .HasPost }}
 	// No external ID or resource doesn't exist - create new resource
 	return r.createResource(ctx, instance, baseURL)
+	{{- else }}
+	// This should not be reached since ExternalIDRef is required when POST is not available
+	return fmt.Errorf("unexpected state: no external ID and POST not available")
+	{{- end }}
 }
+
+{{- if .HasPost }}
 
 // createResource performs a POST to create a new resource.
 func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string) error {
@@ -799,6 +883,7 @@ func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{
 	logger.Info("Successfully created resource", "externalID", instance.Status.ExternalID)
 	return nil
 }
+{{- end }}
 
 // updateResource performs a PUT to update an existing resource.
 func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
@@ -813,7 +898,7 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 	logger := log.FromContext(ctx)
 	start := time.Now()
 
-	url := r.buildResourceURL(baseURL, instance, externalID)
+	url := r.buildResourceURL(baseURL, instance)
 	span.SetAttributes(attribute.String("http.url", url))
 
 	// Marshal spec, excluding controller-specific fields
@@ -865,7 +950,9 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 	r.recordAPICallMetrics(ctx, "PUT", "success", resp.StatusCode, duration)
 
 	now := metav1.Now()
+{{- if .HasPost }}
 	instance.Status.ExternalID = externalID
+{{- end }}
 	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 		Success:     true,
 		StatusCode:  resp.StatusCode,
@@ -897,7 +984,9 @@ func (r *{{ .Kind }}Reconciler) marshalSpecForAPI(instance *{{ .APIVersion }}.{{
 	delete(specMap, "targetStatefulSet")
 	delete(specMap, "targetDeployment")
 	delete(specMap, "targetNamespace")
+{{- if .NeedsExternalIDRef }}
 	delete(specMap, "externalIDRef")
+{{- end }}
 	delete(specMap, "readOnly")
 
 	{{- if .ResourcePathParams }}
@@ -977,14 +1066,16 @@ func (r *{{ .Kind }}Reconciler) deleteFromEndpoint(ctx context.Context, instance
 		trace.WithAttributes(
 			attribute.String("http.method", "DELETE"),
 			attribute.String("http.url", baseURL),
+{{- if .HasPost }}
 			attribute.String("resource.externalID", instance.Status.ExternalID),
+{{- end }}
 		))
 	defer span.End()
 
 	logger := log.FromContext(ctx)
 	start := time.Now()
 
-	url := r.buildResourceURL(baseURL, instance, instance.Status.ExternalID)
+	url := r.buildResourceURL(baseURL, instance)
 	span.SetAttributes(attribute.String("http.url", url))
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
@@ -1026,10 +1117,12 @@ func (r *{{ .Kind }}Reconciler) deleteFromEndpoint(ctx context.Context, instance
 func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) error {
 	logger := log.FromContext(ctx)
 
+{{- if .HasPost }}
 	if instance.Status.ExternalID == "" {
 		logger.Info("No external ID, skipping delete")
 		return nil
 	}
+{{- end }}
 
 	// Check if using all-healthy strategy (fan out to multiple endpoints)
 	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {

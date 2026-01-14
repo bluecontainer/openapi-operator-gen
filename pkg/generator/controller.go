@@ -40,6 +40,7 @@ type ControllerTemplateData struct {
 	KindLower        string
 	Plural           string
 	BasePath         string
+	ResourcePath     string                   // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
 	IsQuery          bool                     // True if this is a query CRD
 	QueryPath        string                   // Full query path for query CRDs
 	QueryParams      []mapper.QueryParamField // Query parameters for building URL
@@ -69,6 +70,10 @@ type ControllerTemplateData struct {
 
 	// HTTP method availability
 	HasDelete bool // True if DELETE method is available for this resource
+	HasPost   bool // True if POST method is available for this resource
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 
 	// Integration test fields
 	RequiredFields    []RequiredFieldInfo // Required fields that need sample values in tests
@@ -208,6 +213,7 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		KindLower:        strings.ToLower(crd.Kind),
 		Plural:           crd.Plural,
 		BasePath:         crd.BasePath,
+		ResourcePath:     crd.ResourcePath,
 		IsQuery:          crd.IsQuery,
 		QueryPath:        crd.QueryPath,
 		QueryParams:      crd.QueryParams,
@@ -227,6 +233,7 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		ActionName:     crd.ActionName,
 		// HTTP method availability
 		HasDelete: crd.HasDelete,
+		HasPost:   crd.HasPost,
 	}
 
 	// Populate path params (excluding parent ID)
@@ -314,6 +321,10 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 			}
 		}
 		data.HasResourceParams = len(data.ResourcePathParams) > 0 || len(data.ResourceQueryParams) > 0
+
+		// Use the NeedsExternalIDRef value from the CRD (set by mapper based on ResourcePath)
+		// This is true when there are no path parameters to identify the resource
+		data.NeedsExternalIDRef = crd.NeedsExternalIDRef
 	}
 
 	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(crd.Kind))
@@ -357,6 +368,7 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 		KindLower:       strings.ToLower(crd.Kind),
 		Plural:          crd.Plural,
 		BasePath:        crd.BasePath,
+		ResourcePath:    crd.ResourcePath,
 		IsQuery:         crd.IsQuery,
 		QueryPath:       crd.QueryPath,
 		IsAction:        crd.IsAction,
@@ -370,6 +382,7 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
 		HasDelete:      crd.HasDelete,
+		HasPost:        crd.HasPost,
 	}
 
 	filename := fmt.Sprintf("%s_controller_test.go", strings.ToLower(crd.Kind))
@@ -459,6 +472,7 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 		KindLower:       strings.ToLower(crd.Kind),
 		Plural:          crd.Plural,
 		BasePath:        crd.BasePath,
+		ResourcePath:    crd.ResourcePath,
 		IsQuery:         crd.IsQuery,
 		QueryPath:       crd.QueryPath,
 		IsAction:        crd.IsAction,
@@ -472,6 +486,7 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
 		HasDelete:      crd.HasDelete,
+		HasPost:        crd.HasPost,
 
 		RequiredFields:    requiredFields,
 		HasRequiredFields: len(requiredFields) > 0,
@@ -631,16 +646,18 @@ func (g *ControllerGenerator) generateMakefile() error {
 func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAggregate bool, hasBundle bool) error {
 	// Build CRD info for template
 	type CRDInfo struct {
-		Kind     string
-		IsQuery  bool
-		IsAction bool
+		Kind               string
+		IsQuery            bool
+		IsAction           bool
+		NeedsExternalIDRef bool
 	}
 	crdInfos := make([]CRDInfo, 0, len(crds))
 	for _, crd := range crds {
 		crdInfos = append(crdInfos, CRDInfo{
-			Kind:     crd.Kind,
-			IsQuery:  crd.IsQuery,
-			IsAction: crd.IsAction,
+			Kind:               crd.Kind,
+			IsQuery:            crd.IsQuery,
+			IsAction:           crd.IsAction,
+			NeedsExternalIDRef: crd.NeedsExternalIDRef,
 		})
 	}
 

@@ -217,12 +217,6 @@ spec:
                                   name:
                                     type: string
                                 type: object
-                              externalIDRef:
-                                description: |-
-                                  ExternalIDRef references an existing resource in the external REST API by its ID.
-                                  When set, the controller will GET this resource instead of creating a new one.
-                                  This is useful for importing existing resources or for read-only observation.
-                                type: string
                               id:
                                 format: int64
                                 type: integer
@@ -241,7 +235,6 @@ spec:
                                   ReadOnly indicates that this CR is for observation only.
                                   When true, the controller will only GET the resource and update status,
                                   without performing any create, update, or delete operations.
-                                  Requires ExternalIDRef to be set.
                                 type: boolean
                               status:
                                 description: pet status in the store
@@ -367,7 +360,7 @@ spec:
                                 type: boolean
                               externalID:
                                 description: ExternalID is the ID of the resource
-                                  in the external REST API
+                                  in the external REST API (set from POST response)
                                 type: string
                               lastGetTime:
                                 description: LastGetTime is the last time the resource
@@ -530,12 +523,6 @@ spec:
                                 name:
                                   type: string
                               type: object
-                            externalIDRef:
-                              description: |-
-                                ExternalIDRef references an existing resource in the external REST API by its ID.
-                                When set, the controller will GET this resource instead of creating a new one.
-                                This is useful for importing existing resources or for read-only observation.
-                              type: string
                             id:
                               format: int64
                               type: integer
@@ -554,7 +541,6 @@ spec:
                                 ReadOnly indicates that this CR is for observation only.
                                 When true, the controller will only GET the resource and update status,
                                 without performing any create, update, or delete operations.
-                                Requires ExternalIDRef to be set.
                               type: boolean
                             status:
                               description: pet status in the store
@@ -680,7 +666,7 @@ spec:
                               type: boolean
                             externalID:
                               description: ExternalID is the ID of the resource in
-                                the external REST API
+                                the external REST API (set from POST response)
                               type: string
                             lastGetTime:
                               description: LastGetTime is the last time the resource

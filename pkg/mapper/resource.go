@@ -11,20 +11,25 @@ import (
 
 // CRDDefinition represents a Kubernetes CRD to be generated
 type CRDDefinition struct {
-	APIGroup    string
-	APIVersion  string
-	Kind        string
-	Plural      string
-	ShortNames  []string
-	Scope       string // Namespaced or Cluster
-	Description string
-	Spec        *FieldDefinition
-	Status      *FieldDefinition
-	Operations  []OperationMapping
-	BasePath    string
+	APIGroup     string
+	APIVersion   string
+	Kind         string
+	Plural       string
+	ShortNames   []string
+	Scope        string // Namespaced or Cluster
+	Description  string
+	Spec         *FieldDefinition
+	Status       *FieldDefinition
+	Operations   []OperationMapping
+	BasePath     string
+	ResourcePath string // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
 
 	// HTTP method availability (for conditional controller logic)
 	HasDelete bool // True if DELETE method is available for this resource
+	HasPost   bool // True if POST method is available for this resource
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 
 	// Query endpoint fields
 	IsQuery         bool               // True if this is a query/action CRD
@@ -131,8 +136,15 @@ func (m *Mapper) MapResources(spec *parser.ParsedSpec) ([]*CRDDefinition, error)
 // mapQueryEndpoints converts query endpoints to CRD definitions
 func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, knownKinds map[string]bool) []*CRDDefinition {
 	crds := make([]*CRDDefinition, 0, len(queryEndpoints))
+	seenKinds := make(map[string]bool)
 
 	for _, qe := range queryEndpoints {
+		// Skip duplicate Kind names to avoid redeclaration errors
+		if seenKinds[qe.Name] {
+			continue
+		}
+		seenKinds[qe.Name] = true
+
 		crd := &CRDDefinition{
 			APIGroup:    m.config.APIGroup,
 			APIVersion:  m.config.APIVersion,
@@ -174,8 +186,15 @@ func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, known
 // mapActionEndpoints converts action endpoints to CRD definitions
 func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, knownKinds map[string]bool) []*CRDDefinition {
 	crds := make([]*CRDDefinition, 0, len(actionEndpoints))
+	seenKinds := make(map[string]bool)
 
 	for _, ae := range actionEndpoints {
+		// Skip duplicate Kind names to avoid redeclaration errors
+		if seenKinds[ae.Name] {
+			continue
+		}
+		seenKinds[ae.Name] = true
+
 		crd := &CRDDefinition{
 			APIGroup:       m.config.APIGroup,
 			APIVersion:     m.config.APIVersion,
@@ -717,6 +736,39 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 			}
 		}
 
+		// Check if POST method is available for this resource
+		for _, op := range resource.Operations {
+			if op.Method == "POST" {
+				crd.HasPost = true
+				break
+			}
+		}
+
+		// Find the full resource path with parameters (prefer GET path, fallback to PUT)
+		// This is the path template used for GET/PUT/DELETE operations
+		for _, op := range resource.Operations {
+			if op.Method == "GET" && strings.Contains(op.Path, "{") {
+				crd.ResourcePath = op.Path
+				break
+			}
+		}
+		if crd.ResourcePath == "" {
+			for _, op := range resource.Operations {
+				if op.Method == "PUT" && strings.Contains(op.Path, "{") {
+					crd.ResourcePath = op.Path
+					break
+				}
+			}
+		}
+		// Fallback to BasePath if no parameterized path found
+		if crd.ResourcePath == "" {
+			crd.ResourcePath = resource.Path
+		}
+
+		// ExternalIDRef is only needed when there are no path parameters to identify the resource
+		// If path params exist (e.g., /pet/{petId}), those fields serve as the identifier
+		crd.NeedsExternalIDRef = !strings.Contains(crd.ResourcePath, "{")
+
 		// Generate spec fields from resource schema
 		if resource.Schema != nil {
 			crd.Spec = m.schemaToFieldDefinition("Spec", resource.Schema, true)
@@ -839,6 +891,13 @@ func (m *Mapper) mapSingleCRD(spec *parser.ParsedSpec) ([]*CRDDefinition, error)
 		for _, op := range resource.Operations {
 			if op.Method == "DELETE" {
 				crd.HasDelete = true
+				break
+			}
+		}
+		// Check if POST method is available
+		for _, op := range resource.Operations {
+			if op.Method == "POST" {
+				crd.HasPost = true
 				break
 			}
 		}
@@ -1051,14 +1110,18 @@ func (m *Mapper) mapType(schema *parser.Schema) string {
 			itemType := m.mapType(schema.Items)
 			return "[]" + itemType
 		}
-		return "[]interface{}"
+		// Arrays without item type use RawExtension for arbitrary JSON
+		return "[]runtime.RawExtension"
 	case "object":
 		if len(schema.Properties) == 0 {
-			return "map[string]interface{}"
+			// Objects without properties use RawExtension for arbitrary JSON
+			// This is compatible with controller-gen (interface{} is not)
+			return "*runtime.RawExtension"
 		}
 		return "struct"
 	default:
-		return "interface{}"
+		// Unknown types use RawExtension for arbitrary JSON
+		return "*runtime.RawExtension"
 	}
 }
 

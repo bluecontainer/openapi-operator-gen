@@ -394,21 +394,21 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 				if parentIDDisplay == "" {
 					parentIDDisplay = "-"
 				}
-				fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), actionEndpoint.HTTPMethod, "ActionEndpoint", truncateString(actionEndpoint.Name, 19), truncateString(parentIDDisplay, 19))
+				printWrappedTableRow(path, actionEndpoint.HTTPMethod, "ActionEndpoint", actionEndpoint.Name, parentIDDisplay)
 				continue
 			}
 
 			// Check if this is a query endpoint
 			if queryEndpoint := p.extractQueryEndpoint(path, pathItem, doc); queryEndpoint != nil {
 				queryEndpoints = append(queryEndpoints, queryEndpoint)
-				fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), "GET", "QueryEndpoint", truncateString(queryEndpoint.Name, 19), "-")
+				printWrappedTableRow(path, "GET", "QueryEndpoint", queryEndpoint.Name, "-")
 				continue
 			}
 		}
 
 		resourceName := p.extractResourceName(path)
 		if resourceName == "" {
-			fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), methods, "Skipped", "-", "-")
+			printWrappedTableRow(path, methods, "Skipped", "-", "-")
 			continue
 		}
 
@@ -435,7 +435,7 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 			}
 		}
 
-		fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", truncateString(path, 34), methods, classification, truncateString(resourceName, 19), "-")
+		printWrappedTableRow(path, methods, classification, resourceName, "-")
 
 		// Extract operations
 		ops := p.extractOperations(path, pathItem)
@@ -883,15 +883,17 @@ func (p *Parser) extractResourceName(path string) string {
 		}
 
 		// Check if this segment is followed by a matching ID parameter
-		// e.g., "order" followed by "{orderId}"
+		// e.g., "order" followed by "{orderId}" or "variables" followed by "{variableName}"
 		if i < len(parts)-1 {
 			nextPart := parts[i+1]
 			if strings.HasPrefix(nextPart, "{") && strings.HasSuffix(nextPart, "}") {
 				paramName := strings.ToLower(nextPart[1 : len(nextPart)-1])
 				segmentName := strings.ToLower(part)
-				// Check if param name contains the segment name (e.g., "orderid" contains "order")
+				singularSegment := strings.ToLower(p.singularize(part))
+				// Check if param name contains the segment name or its singular form
+				// (e.g., "orderid" contains "order", "variablename" contains "variable")
 				// or is a generic "id" parameter
-				if strings.Contains(paramName, segmentName) || paramName == "id" {
+				if strings.Contains(paramName, segmentName) || strings.Contains(paramName, singularSegment) || paramName == "id" {
 					return p.singularize(p.toPascalCase(part))
 				}
 			}
@@ -1204,9 +1206,16 @@ func (p *Parser) singularize(s string) string {
 	if strings.HasSuffix(s, "ies") {
 		return s[:len(s)-3] + "y"
 	}
-	if strings.HasSuffix(s, "es") {
+	// Remove "es" for words ending in sibilants (s, x, z, ch, sh) + es
+	// e.g., "classes" -> "class", "buses" -> "bus", "boxes" -> "box"
+	// Note: "ses" is included for words like "buses" but may incorrectly
+	// singularize rare words like "cases" -> "cas" (should be "case")
+	if strings.HasSuffix(s, "sses") || strings.HasSuffix(s, "ses") ||
+		strings.HasSuffix(s, "xes") || strings.HasSuffix(s, "zes") ||
+		strings.HasSuffix(s, "ches") || strings.HasSuffix(s, "shes") {
 		return s[:len(s)-2]
 	}
+	// For other words ending in "s" (like "profiles", "variables"), just remove "s"
 	if strings.HasSuffix(s, "s") && !strings.HasSuffix(s, "ss") {
 		return s[:len(s)-1]
 	}
@@ -1245,15 +1254,89 @@ func (p *Parser) getMethodsForPath(pathItem *openapi3.PathItem) string {
 	return strings.Join(methods, ",")
 }
 
-// truncateString truncates a string to maxLen characters, adding "..." if truncated
-func truncateString(s string, maxLen int) string {
+// wrapText wraps text into lines of at most maxLen characters
+// It tries to break at natural break points (/, -, _, ,) when possible
+func wrapText(s string, maxLen int) []string {
 	if len(s) <= maxLen {
-		return s
+		return []string{s}
 	}
-	if maxLen <= 3 {
-		return s[:maxLen]
+
+	var lines []string
+	remaining := s
+
+	for len(remaining) > maxLen {
+		// Find a good break point within the maxLen limit
+		breakPoint := maxLen
+
+		// Look for natural break characters (/, -, _, ,) working backwards from maxLen
+		for i := maxLen - 1; i > maxLen/2; i-- {
+			if remaining[i] == '/' || remaining[i] == '-' || remaining[i] == '_' || remaining[i] == ',' {
+				breakPoint = i + 1 // Include the break character in the first part
+				break
+			}
+		}
+
+		lines = append(lines, remaining[:breakPoint])
+		remaining = remaining[breakPoint:]
 	}
-	return s[:maxLen-3] + "..."
+
+	if len(remaining) > 0 {
+		lines = append(lines, remaining)
+	}
+
+	return lines
+}
+
+// printWrappedTableRow prints a table row with text wrapping for cells that exceed column width
+// Column widths: Endpoint=34, Method=12, Classification=18, Kind=19, ParentID=19
+func printWrappedTableRow(endpoint, method, classification, kind, parentID string) {
+	// Wrap each cell
+	endpointLines := wrapText(endpoint, 34)
+	methodLines := wrapText(method, 12)
+	classificationLines := wrapText(classification, 18)
+	kindLines := wrapText(kind, 19)
+	parentIDLines := wrapText(parentID, 19)
+
+	// Find the maximum number of lines needed
+	maxLines := len(endpointLines)
+	if len(methodLines) > maxLines {
+		maxLines = len(methodLines)
+	}
+	if len(classificationLines) > maxLines {
+		maxLines = len(classificationLines)
+	}
+	if len(kindLines) > maxLines {
+		maxLines = len(kindLines)
+	}
+	if len(parentIDLines) > maxLines {
+		maxLines = len(parentIDLines)
+	}
+
+	// Print each line
+	for i := 0; i < maxLines; i++ {
+		e := ""
+		if i < len(endpointLines) {
+			e = endpointLines[i]
+		}
+		m := ""
+		if i < len(methodLines) {
+			m = methodLines[i]
+		}
+		c := ""
+		if i < len(classificationLines) {
+			c = classificationLines[i]
+		}
+		k := ""
+		if i < len(kindLines) {
+			k = kindLines[i]
+		}
+		p := ""
+		if i < len(parentIDLines) {
+			p = parentIDLines[i]
+		}
+
+		fmt.Printf("│ %-34s │ %-12s │ %-18s │ %-19s │ %-19s │\n", e, m, c, k, p)
+	}
 }
 
 // isResourceIDPath checks if a path is a resource with an ID parameter

@@ -116,7 +116,8 @@ func TestPetReconciler_E2E(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	// Create fake client with the object
@@ -202,7 +203,8 @@ func TestPetReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -285,7 +287,8 @@ func TestPetReconciler_CreateResource(t *testing.T) {
 			Name:      "new-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -348,7 +351,8 @@ func TestPetReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -411,7 +415,8 @@ func TestPetReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -474,7 +479,8 @@ func TestPetReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -543,7 +549,8 @@ func TestPetReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -598,7 +605,8 @@ func TestPetReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -654,7 +662,8 @@ func TestPetReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{},
+		Spec: v1alpha1.PetSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -772,7 +781,6 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: v1alpha1.PetSpec{
-			// Resource endpoint - set external ID ref for read operations
 		},
 	}
 
@@ -865,125 +873,3 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
 
-// TestPetReconciler_PathParamInURL verifies that path parameters from spec
-// are correctly substituted in the HTTP request URL
-func TestPetReconciler_PathParamInURL(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = v1alpha1.AddToScheme(scheme)
-
-	// The external ID we expect to see in the URL
-	const expectedExternalID = "path-param-test-789"
-
-	var receivedRequests []httpRequestPet
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fullURL := r.URL.Path
-		if r.URL.RawQuery != "" {
-			fullURL += "?" + r.URL.RawQuery
-		}
-		receivedRequests = append(receivedRequests, httpRequestPet{
-			Method: r.Method,
-			URL:    fullURL,
-		})
-
-		w.Header().Set("Content-Type", "application/json")
-
-		// Return resource with matching ID
-		responseResource := map[string]interface{}{
-			"id":   expectedExternalID,
-			"name": "TestPet",
-		}
-
-		switch r.Method {
-		case http.MethodGet:
-			json.NewEncoder(w).Encode(responseResource)
-		default:
-			json.NewEncoder(w).Encode(responseResource)
-		}
-	}))
-	defer server.Close()
-
-	// Create CR with ExternalIDRef - this should be used in the URL path
-	obj := &v1alpha1.Pet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pet",
-			Namespace: "default",
-		},
-		Spec: v1alpha1.PetSpec{
-			ExternalIDRef: expectedExternalID,
-			ReadOnly:      true, // ReadOnly mode uses GET with the external ID
-		},
-	}
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(obj).
-		WithStatusSubresource(obj).
-		Build()
-
-	reconciler := &PetReconciler{
-		Client:     fakeClient,
-		Scheme:     scheme,
-		HTTPClient: server.Client(),
-		BaseURL:    server.URL,
-	}
-
-	ctx := context.Background()
-	req := ctrl.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-pet",
-			Namespace: "default",
-		},
-	}
-
-	_, err, iterations := reconcilePetUntilComplete(t, ctx, reconciler, req, 10)
-
-	if err != nil {
-		t.Fatalf("Reconcile returned error after %d iterations: %v", iterations, err)
-	}
-
-	// Log requests
-	t.Logf("Received %d HTTP requests:", len(receivedRequests))
-	for i, req := range receivedRequests {
-		t.Logf("  [%d] %s %s", i+1, req.Method, req.URL)
-	}
-
-	// Verify the external ID appears in at least one URL
-	foundExternalID := false
-	for _, req := range receivedRequests {
-		if strings.Contains(req.URL, expectedExternalID) {
-			foundExternalID = true
-			t.Logf("Found external ID %q in URL: %s %s", expectedExternalID, req.Method, req.URL)
-			break
-		}
-	}
-
-	if !foundExternalID {
-		t.Errorf("expected external ID %q to appear in URL path, got requests: %v", expectedExternalID, receivedRequests)
-	}
-
-	// Verify GET method was used (since ReadOnly mode)
-	foundGet := false
-	for _, req := range receivedRequests {
-		if req.Method == http.MethodGet {
-			foundGet = true
-			break
-		}
-	}
-
-	if !foundGet {
-		t.Error("expected GET request for ReadOnly resource")
-	}
-
-	// Verify status reflects the external ID
-	var updated v1alpha1.Pet
-	if err := fakeClient.Get(ctx, types.NamespacedName{Name: "test-pet", Namespace: "default"}, &updated); err != nil {
-		t.Fatalf("failed to get updated object: %v", err)
-	}
-
-	// The external ID should be stored in status after successful GET
-	if updated.Status.ExternalID != expectedExternalID {
-		t.Errorf("expected status.ExternalID to be %q, got %q", expectedExternalID, updated.Status.ExternalID)
-	}
-}

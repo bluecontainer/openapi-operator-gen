@@ -124,7 +124,11 @@ func Test{{.Kind}}Reconciler_E2E(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	// Create fake client with the object
@@ -214,7 +218,11 @@ func Test{{.Kind}}Reconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -301,7 +309,11 @@ func Test{{.Kind}}Reconciler_CreateResource(t *testing.T) {
 			Name:      "new-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -364,7 +376,11 @@ func Test{{.Kind}}Reconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -427,7 +443,11 @@ func Test{{.Kind}}Reconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -490,7 +510,11 @@ func Test{{.Kind}}Reconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -565,7 +589,11 @@ func Test{{.Kind}}Reconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -620,7 +648,11 @@ func Test{{.Kind}}Reconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -682,7 +714,11 @@ func Test{{.Kind}}Reconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -812,7 +848,10 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 {{- else if .IsQuery }}
 			// Query endpoints use query parameters
 {{- else }}
-			// Resource endpoint - set external ID ref for read operations
+{{- if and (not .HasPost) .NeedsExternalIDRef }}
+			// ExternalIDRef is required when POST is not available
+			ExternalIDRef: testResourceID,
+{{- end }}
 {{- end }}
 		},
 	}
@@ -879,10 +918,17 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 		t.Errorf("expected at least one %s request for action endpoint, got methods: %v", expectedMethod, methodCounts)
 	}
 {{- else }}
+{{- if .HasPost }}
 	// Resource endpoints should use POST to create
 	if methodCounts[http.MethodPost] == 0 {
 		t.Errorf("expected at least one POST request for resource creation, got methods: %v", methodCounts)
 	}
+{{- else }}
+	// Resource without POST should use GET with ExternalIDRef
+	if methodCounts[http.MethodGet] == 0 {
+		t.Errorf("expected at least one GET request for resource (no POST available), got methods: %v", methodCounts)
+	}
+{{- end }}
 {{- end }}
 
 	// === Validation 3: Correct path was used ===
@@ -939,16 +985,16 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
 
-{{- if and (not .IsQuery) (not .IsAction) }}
-// Test{{.Kind}}Reconciler_PathParamInURL verifies that path parameters from spec
-// are correctly substituted in the HTTP request URL
-func Test{{.Kind}}Reconciler_PathParamInURL(t *testing.T) {
+{{- if and (not .IsQuery) (not .IsAction) .NeedsExternalIDRef }}
+// Test{{.Kind}}Reconciler_ExternalIDRefInURL verifies that ExternalIDRef from spec
+// is correctly used in the HTTP request URL
+func Test{{.Kind}}Reconciler_ExternalIDRefInURL(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = {{.APIVersion}}.AddToScheme(scheme)
 
 	// The external ID we expect to see in the URL
-	const expectedExternalID = "path-param-test-789"
+	const expectedExternalID = "external-id-test-789"
 
 	var receivedRequests []httpRequest{{.Kind}}
 
@@ -1061,10 +1107,12 @@ func Test{{.Kind}}Reconciler_PathParamInURL(t *testing.T) {
 		t.Fatalf("failed to get updated object: %v", err)
 	}
 
+{{- if .HasPost }}
 	// The external ID should be stored in status after successful GET
 	if updated.Status.ExternalID != expectedExternalID {
 		t.Errorf("expected status.ExternalID to be %q, got %q", expectedExternalID, updated.Status.ExternalID)
 	}
+{{- end }}
 }
 {{- end }}
 
@@ -1272,7 +1320,11 @@ func Test{{.Kind}}Reconciler_QueryParams(t *testing.T) {
 			Name:      "test-{{.KindLower}}",
 			Namespace: "default",
 		},
-		Spec: {{.APIVersion}}.{{.Kind}}Spec{},
+		Spec: {{.APIVersion}}.{{.Kind}}Spec{
+{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+			ExternalIDRef: "123",
+{{- end }}
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
