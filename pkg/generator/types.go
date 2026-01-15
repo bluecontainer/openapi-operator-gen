@@ -37,18 +37,20 @@ type TypesTemplateData struct {
 
 // CRDTypeData holds CRD-specific data for template
 type CRDTypeData struct {
-	Kind            string
-	Plural          string
-	ShortNames      []string
-	Spec            *SpecData
-	IsQuery         bool                     // True if this is a query CRD
-	QueryPath       string                   // Full query path for query CRDs
-	QueryParams     []mapper.QueryParamField // Query parameters for query CRDs
-	ResponseType    string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
-	ResponseIsArray bool                     // True if response is an array
-	ResultItemType  string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
-	ResultFields    []FieldData              // Fields for the result type (empty if UsesSharedType)
-	UsesSharedType  bool                     // True if ResultItemType is a shared type from another CRD
+	Kind               string
+	Plural             string
+	ShortNames         []string
+	Spec               *SpecData
+	IsQuery            bool                     // True if this is a query CRD
+	QueryPath          string                   // Full query path for query CRDs
+	QueryParams        []mapper.QueryParamField // Query parameters for query CRDs
+	ResponseType       string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
+	ResponseIsArray    bool                     // True if response is an array
+	ResultItemType     string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
+	ResultFields       []FieldData              // Fields for the result type (empty if UsesSharedType)
+	UsesSharedType     bool                     // True if ResultItemType is a shared type from another CRD
+	IsPrimitiveArray   bool                     // True if response is a primitive array ([]string, []int, etc.)
+	PrimitiveArrayType string                   // Base type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
 	IsAction       bool   // True if this is an action CRD
@@ -112,16 +114,18 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 	for _, crd := range crds {
 		crdData := CRDTypeData{
-			Kind:            crd.Kind,
-			Plural:          crd.Plural,
-			ShortNames:      crd.ShortNames,
-			IsQuery:         crd.IsQuery,
-			QueryPath:       crd.QueryPath,
-			QueryParams:     crd.QueryParams,
-			ResponseType:    crd.ResponseType,
-			ResponseIsArray: crd.ResponseIsArray,
-			ResultItemType:  crd.ResultItemType,
-			UsesSharedType:  crd.UsesSharedType,
+			Kind:               crd.Kind,
+			Plural:             crd.Plural,
+			ShortNames:         crd.ShortNames,
+			IsQuery:            crd.IsQuery,
+			QueryPath:          crd.QueryPath,
+			QueryParams:        crd.QueryParams,
+			ResponseType:       crd.ResponseType,
+			ResponseIsArray:    crd.ResponseIsArray,
+			ResultItemType:     crd.ResultItemType,
+			UsesSharedType:     crd.UsesSharedType,
+			IsPrimitiveArray:   crd.IsPrimitiveArray,
+			PrimitiveArrayType: crd.PrimitiveArrayType,
 			// Action fields
 			IsAction:       crd.IsAction,
 			ActionPath:     crd.ActionPath,

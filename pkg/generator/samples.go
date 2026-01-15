@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/bluecontainer/openapi-operator-gen/internal/config"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
@@ -243,6 +244,9 @@ func (g *SamplesGenerator) generateExampleValue(f *mapper.FieldDefinition) strin
 		return fmt.Sprintf("[%q]", "item1")
 	case "[]int", "[]int32", "[]int64":
 		return "[1, 2, 3]"
+	case "metav1.Time":
+		// Generate a valid RFC 3339 timestamp for date-time fields
+		return fmt.Sprintf("%q", time.Now().UTC().Format(time.RFC3339))
 	default:
 		if strings.HasPrefix(goType, "[]") {
 			return "[]"

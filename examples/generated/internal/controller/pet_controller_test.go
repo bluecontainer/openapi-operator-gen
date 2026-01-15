@@ -116,8 +116,7 @@ func TestPetReconciler_E2E(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	// Create fake client with the object
@@ -203,8 +202,7 @@ func TestPetReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -287,8 +285,7 @@ func TestPetReconciler_CreateResource(t *testing.T) {
 			Name:      "new-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -351,8 +348,7 @@ func TestPetReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -415,8 +411,7 @@ func TestPetReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -479,8 +474,7 @@ func TestPetReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -549,8 +543,7 @@ func TestPetReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -605,8 +598,7 @@ func TestPetReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -662,8 +654,7 @@ func TestPetReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -780,8 +771,7 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -831,9 +821,13 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 		methodCounts[req.Method]++
 	}
 	t.Logf("HTTP method counts: %v", methodCounts)
-	// Resource endpoints should use POST to create
-	if methodCounts[http.MethodPost] == 0 {
-		t.Errorf("expected at least one POST request for resource creation, got methods: %v", methodCounts)
+	// Resource endpoints use GET-first reconciliation:
+	// - If GET returns 404: POST to create
+	// - If GET returns data with drift: PUT to update
+	// - If GET returns data without drift: no POST/PUT needed (skipped)
+	// Since our mock always returns data, we may see only GETs (no drift) or GETs+PUTs (with drift)
+	if methodCounts[http.MethodGet] == 0 {
+		t.Errorf("expected at least one GET request for drift detection, got methods: %v", methodCounts)
 	}
 
 	// === Validation 3: Correct path was used ===
@@ -872,4 +866,3 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-

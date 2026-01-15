@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -34,6 +33,7 @@ import (
 {{- end }}
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	controllerutil2 "github.com/bluecontainer/openapi-operator-gen/pkg/controller"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/runtime"
 	{{ .APIVersion }} "{{ .ModuleName }}/api/{{ .APIVersion }}"
@@ -275,7 +275,21 @@ func (r *{{ .Kind }}Reconciler) buildResourceURL(baseURL string, instance *{{ .A
 	{{- if .ResourcePathParams }}
 	// Add path parameters from spec
 	{{- range .ResourcePathParams }}
-	{{- if eq .GoType "string" }}
+	{{- if .IsPointer }}
+	{{- if eq .BaseType "string" }}
+	if instance.Spec.{{ .GoName }} != nil {
+		builder.WithPathParam("{{ .Name }}", *instance.Spec.{{ .GoName }})
+	}
+	{{- else if eq .BaseType "int64" }}
+	if instance.Spec.{{ .GoName }} != nil {
+		builder.WithPathParamInt("{{ .Name }}", *instance.Spec.{{ .GoName }})
+	}
+	{{- else }}
+	if instance.Spec.{{ .GoName }} != nil {
+		builder.WithPathParam("{{ .Name }}", fmt.Sprintf("%v", *instance.Spec.{{ .GoName }}))
+	}
+	{{- end }}
+	{{- else if eq .GoType "string" }}
 	builder.WithPathParam("{{ .Name }}", instance.Spec.{{ .GoName }})
 	{{- else if eq .GoType "int64" }}
 	builder.WithPathParamInt("{{ .Name }}", instance.Spec.{{ .GoName }})
@@ -334,6 +348,48 @@ func (r *{{ .Kind }}Reconciler) buildResourceURLForCreate(baseURL string, instan
 
 	return builder.BuildForCreate(baseURL)
 }
+
+{{- if len .ResourcePathParams }}
+// hasValidPathParams checks if all path parameters have valid (non-zero/non-empty) values.
+// This is used to determine if we can perform GET operations on a resource.
+func (r *{{ .Kind }}Reconciler) hasValidPathParams(instance *{{ .APIVersion }}.{{ .Kind }}) bool {
+	{{- range .ResourcePathParams }}
+	{{- if .IsPointer }}
+	if instance.Spec.{{ .GoName }} == nil {
+		return false
+	}
+	{{- if eq .BaseType "string" }}
+	if *instance.Spec.{{ .GoName }} == "" {
+		return false
+	}
+	{{- else if or (eq .BaseType "int64") (eq .BaseType "int32") (eq .BaseType "int") }}
+	if *instance.Spec.{{ .GoName }} == 0 {
+		return false
+	}
+	{{- end }}
+	{{- else if eq .GoType "string" }}
+	if instance.Spec.{{ .GoName }} == "" {
+		return false
+	}
+	{{- else if or (eq .GoType "int64") (eq .GoType "int32") (eq .GoType "int") }}
+	if instance.Spec.{{ .GoName }} == 0 {
+		return false
+	}
+	{{- end }}
+	{{- end }}
+	return true
+}
+{{- end }}
+{{- end }}
+
+{{- if .PutPathDiffers }}
+
+// buildResourceURLForPut builds the URL for PUT operations when PUT uses a different path than GET.
+// This is common when PUT /resource updates by ID in the request body, not in the URL.
+func (r *{{ .Kind }}Reconciler) buildResourceURLForPut(baseURL string, instance *{{ .APIVersion }}.{{ .Kind }}) string {
+	builder := runtime.NewURLBuilder("{{ .PutPath }}")
+	return builder.Build(baseURL)
+}
 {{- end }}
 
 {{- if or .NeedsExternalIDRef .HasPost }}
@@ -359,6 +415,28 @@ func (r *{{ .Kind }}Reconciler) getExternalID(instance *{{ .APIVersion }}.{{ .Ki
 {{- end }}
 }
 {{- end }}
+
+// extractExternalIDFromResponse extracts the external ID from an API response.
+// It looks for common ID field names (id, ID) and returns the value as a string.
+// If no ID is found in the response, it falls back to the provided fallback value.
+func (r *{{ .Kind }}Reconciler) extractExternalIDFromResponse(respData map[string]interface{}, fallback string) string {
+	// Try common ID field names
+	for _, idField := range []string{"id", "ID", "Id"} {
+		if id, ok := respData[idField]; ok {
+			switch v := id.(type) {
+			case string:
+				return v
+			case float64:
+				return fmt.Sprintf("%.0f", v)
+			case int:
+				return fmt.Sprintf("%d", v)
+			case int64:
+				return fmt.Sprintf("%d", v)
+			}
+		}
+	}
+	return fallback
+}
 
 // getResource performs a GET request to fetch the current state of the resource from the REST API.
 // Returns the response body as a map, or nil if the resource doesn't exist (404).
@@ -479,7 +557,7 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 			// Field exists in spec but not in API response - could be drift or API doesn't return this field
 			continue
 		}
-		if !reflect.DeepEqual(specValue, apiValue) {
+		if !controllerutil2.ValuesEqual(specValue, apiValue) {
 			return true // Drift detected
 		}
 	}
@@ -716,6 +794,10 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 {{- if .NeedsExternalIDRef }}
 	// ExternalIDRef mode - only GET if we have an ID reference
 	shouldTryGet := externalID != ""
+{{- else if and .HasPost (len .ResourcePathParams) }}
+	// Path params mode with POST available - only try GET if path params are set
+	// or if we already have an ExternalID from a previous creation
+	shouldTryGet := r.hasValidPathParams(instance) || instance.Status.ExternalID != ""
 {{- else }}
 	// Path params mode - always try GET since path params identify the resource
 	shouldTryGet := true
@@ -735,7 +817,12 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 			instance.Status.DriftDetected = hasDrift
 			span.SetAttributes(attribute.Bool("drift.detected", hasDrift))
 
+			// Extract external ID from response if available (for resources identified by path params)
+			responseExternalID := r.extractExternalIDFromResponse(respData, externalID)
+
 			if hasDrift {
+				// Increment drift detected count
+				instance.Status.DriftDetectedCount++
 				// Record drift detection metric
 				{{ .KindLower }}DriftDetected.Add(ctx, 1,
 					metric.WithAttributes(
@@ -744,11 +831,12 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 					))
 			}
 
+{{- if .HasPut }}
 			if !hasDrift {
 				// No drift - skip update
-				logger.Info("No drift detected, skipping update", "externalID", externalID)
+				logger.Info("No drift detected, skipping update", "externalID", responseExternalID)
 {{- if .HasPost }}
-				instance.Status.ExternalID = externalID
+				instance.Status.ExternalID = responseExternalID
 {{- end }}
 				instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					Success:     true,
@@ -760,8 +848,45 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 			}
 
 			// Drift detected - proceed with PUT
-			logger.Info("Drift detected, updating resource", "externalID", externalID)
-			return r.updateResource(ctx, instance, baseURL, externalID)
+			logger.Info("Drift detected, updating resource", "externalID", responseExternalID)
+			return r.updateResource(ctx, instance, baseURL, responseExternalID)
+{{- else }}
+{{- if .UpdateWithPost }}
+			if !hasDrift {
+				// No drift - skip update
+				logger.Info("No drift detected, skipping update", "externalID", responseExternalID)
+				instance.Status.ExternalID = responseExternalID
+				instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
+					Success:     true,
+					StatusCode:  200,
+					Data:        &k8sruntime.RawExtension{Raw: body},
+					LastUpdated: &now,
+				}
+				return nil
+			}
+
+			// Drift detected - proceed with POST (UpdateWithPost mode)
+			logger.Info("Drift detected, updating resource with POST", "externalID", responseExternalID)
+			return r.updateResourceWithPost(ctx, instance, baseURL, responseExternalID)
+{{- else }}
+			// No PUT method available - just record the current state (read-only sync)
+			logger.Info("Resource exists, recording current state (no PUT available)", "externalID", responseExternalID)
+{{- if .HasPost }}
+			instance.Status.ExternalID = responseExternalID
+{{- end }}
+			instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
+				Success:     true,
+				StatusCode:  200,
+				Data:        &k8sruntime.RawExtension{Raw: body},
+				LastUpdated: &now,
+			}
+			if hasDrift {
+				// Record drift but can't update (no PUT)
+				logger.Info("Drift detected but cannot update (no PUT method available)", "externalID", responseExternalID)
+			}
+			return nil
+{{- end }}
+{{- end }}
 		}
 
 {{- if .NeedsExternalIDRef }}
@@ -885,6 +1010,8 @@ func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{
 }
 {{- end }}
 
+{{- if .HasPut }}
+
 // updateResource performs a PUT to update an existing resource.
 func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
 	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "PUT",
@@ -898,7 +1025,11 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 	logger := log.FromContext(ctx)
 	start := time.Now()
 
+{{- if .PutPathDiffers }}
+	url := r.buildResourceURLForPut(baseURL, instance)
+{{- else }}
 	url := r.buildResourceURL(baseURL, instance)
+{{- end }}
 	span.SetAttributes(attribute.String("http.url", url))
 
 	// Marshal spec, excluding controller-specific fields
@@ -965,6 +1096,92 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 	logger.Info("Successfully updated resource", "externalID", externalID)
 	return nil
 }
+{{- end }}
+
+{{- if .UpdateWithPost }}
+
+// updateResourceWithPost performs a POST to update an existing resource (when PUT is not available).
+// This is used when the API uses POST for both creation and updates.
+func (r *{{ .Kind }}Reconciler) updateResourceWithPost(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
+	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "POST_UPDATE",
+		trace.WithAttributes(
+			attribute.String("http.method", "POST"),
+			attribute.String("http.url", baseURL),
+			attribute.String("resource.externalID", externalID),
+			attribute.Bool("update_with_post", true),
+		))
+	defer span.End()
+
+	logger := log.FromContext(ctx)
+	start := time.Now()
+
+	// Use the same URL as create (base path without ID) since this API uses POST for both create and update
+	url := r.buildResourceURLForCreate(baseURL, instance)
+	span.SetAttributes(attribute.String("http.url", url))
+
+	// Marshal spec, excluding controller-specific fields
+	specData, err := r.marshalSpecForAPI(instance)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(specData))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to create POST request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	logger.Info("Updating resource with POST", "url", url)
+	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
+	if err != nil {
+		r.recordAPICallMetrics(ctx, "POST", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to execute POST request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		r.recordAPICallMetrics(ctx, "POST", "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to read POST response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		r.recordAPICallMetrics(ctx, "POST", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("POST update failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	r.recordAPICallMetrics(ctx, "POST", "success", resp.StatusCode, duration)
+
+	now := metav1.Now()
+	instance.Status.ExternalID = externalID
+	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
+		Success:     true,
+		StatusCode:  resp.StatusCode,
+		Data:        &k8sruntime.RawExtension{Raw: body},
+		LastUpdated: &now,
+	}
+	instance.Status.DriftDetected = false
+	instance.Status.LastGetTime = &now
+
+	logger.Info("Successfully updated resource with POST", "externalID", externalID)
+	return nil
+}
+{{- end }}
 
 // marshalSpecForAPI marshals the spec for sending to the API, excluding controller-specific fields.
 func (r *{{ .Kind }}Reconciler) marshalSpecForAPI(instance *{{ .APIVersion }}.{{ .Kind }}) ([]byte, error) {

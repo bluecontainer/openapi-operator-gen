@@ -116,8 +116,7 @@ func TestUserLoginQueryReconciler_E2E(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	// Create fake client with the object
@@ -203,8 +202,7 @@ func TestUserLoginQueryReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -287,8 +285,7 @@ func TestUserLoginQueryReconciler_CreateResource(t *testing.T) {
 			Name:      "new-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -351,8 +348,7 @@ func TestUserLoginQueryReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -415,8 +411,7 @@ func TestUserLoginQueryReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -479,8 +474,7 @@ func TestUserLoginQueryReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -549,8 +543,7 @@ func TestUserLoginQueryReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -605,8 +598,7 @@ func TestUserLoginQueryReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -662,8 +654,7 @@ func TestUserLoginQueryReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -873,6 +864,7 @@ func TestUserLoginQueryReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
 // TestUserLoginQueryReconciler_QueryParams verifies that query parameters from spec
 // are correctly appended to the HTTP request URL
 func TestUserLoginQueryReconciler_QueryParams(t *testing.T) {
@@ -905,8 +897,7 @@ func TestUserLoginQueryReconciler_QueryParams(t *testing.T) {
 			Name:      "test-userloginquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserLoginQuerySpec{
-		},
+		Spec: v1alpha1.UserLoginQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -983,4 +974,3 @@ func TestUserLoginQueryReconciler_QueryParams(t *testing.T) {
 		t.Errorf("expected query path pattern %q in URL (prefix=%q, suffix=%q)", expectedQueryPath, staticPrefix, staticSuffix)
 	}
 }
-

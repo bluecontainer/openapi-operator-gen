@@ -394,25 +394,40 @@ type ResourceQueryParam struct {
 	IsArray  bool   // True if this is an array parameter
 }
 
+// QueryParamField represents a query/path parameter for query controllers
+type QueryParamField struct {
+	Name        string // Go field name (e.g., "ServiceName")
+	JSONName    string // JSON field name (e.g., "serviceName")
+	GoType      string // Go type (e.g., "string", "int64")
+	Description string
+	Required    bool
+	IsArray     bool   // True if this is an array parameter
+	ItemType    string // Type of array items if IsArray is true
+}
+
 // ControllerTemplateData mimics the data structure for controller template
 type ControllerTemplateData struct {
-	Year             int
-	GeneratorVersion string
-	APIGroup         string
-	APIVersion       string
-	ModuleName       string
-	Kind             string
-	KindLower        string
-	Plural           string
-	BasePath         string
-	ResourcePath     string
-	IsQuery          bool
-	QueryPath        string
-	ResponseType     string
-	ResponseIsArray  bool
-	ResultItemType   string
-	HasTypedResults  bool
-	UsesSharedType   bool
+	Year               int
+	GeneratorVersion   string
+	APIGroup           string
+	APIVersion         string
+	ModuleName         string
+	Kind               string
+	KindLower          string
+	Plural             string
+	BasePath           string
+	ResourcePath       string
+	IsQuery            bool
+	QueryPath          string
+	QueryPathParams    []QueryParamField // Path parameters for query endpoints
+	QueryParams        []QueryParamField // Query parameters for query endpoints
+	ResponseType       string
+	ResponseIsArray    bool
+	ResultItemType     string
+	HasTypedResults    bool
+	UsesSharedType     bool
+	IsPrimitiveArray   bool
+	PrimitiveArrayType string
 
 	// Action endpoint fields
 	IsAction            bool
@@ -433,6 +448,16 @@ type ControllerTemplateData struct {
 	// HTTP method availability
 	HasDelete bool
 	HasPost   bool
+	HasPut    bool
+
+	// UpdateWithPost enables using POST for updates when PUT is not available
+	UpdateWithPost bool
+
+	// Per-method paths (when different methods use different paths)
+	GetPath        string
+	PutPath        string
+	DeletePath     string
+	PutPathDiffers bool
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool

@@ -57,10 +57,6 @@ spec:
               id:
                 format: int64
                 type: integer
-              orderId:
-                description: ID of order that needs to be fetched
-                format: int64
-                type: integer
               petId:
                 format: int64
                 type: integer
@@ -111,8 +107,6 @@ spec:
                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                   When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
-            required:
-            - orderId
             type: object
           status:
             description: OrderStatus defines the observed state of Order
@@ -182,6 +176,11 @@ spec:
                 description: DriftDetected indicates whether drift was detected between
                   the spec and external resource
                 type: boolean
+              driftDetectedCount:
+                description: DriftDetectedCount is the number of times drift has been
+                  detected (cumulative)
+                format: int64
+                type: integer
               externalID:
                 description: ExternalID is the ID of the resource in the external
                   REST API (set from POST response)

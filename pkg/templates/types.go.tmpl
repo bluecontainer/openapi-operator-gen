@@ -186,6 +186,8 @@ type {{ .Kind }}EndpointResponse struct {
 	// +optional
 {{- if or .ResultFields .UsesSharedType }}
 	Data {{ .ResponseType }} `json:"data,omitempty"`
+{{- else if .IsPrimitiveArray }}
+	Data []{{ .PrimitiveArrayType }} `json:"data,omitempty"`
 {{- else }}
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Data *runtime.RawExtension `json:"data,omitempty"`
@@ -576,6 +578,10 @@ type {{ .Kind }}Status struct {
 	// DriftDetected indicates whether drift was detected between the spec and external resource
 	// +optional
 	DriftDetected bool `json:"driftDetected,omitempty"`
+
+	// DriftDetectedCount is the number of times drift has been detected (cumulative)
+	// +optional
+	DriftDetectedCount int64 `json:"driftDetectedCount,omitempty"`
 
 	// LastGetTime is the last time the resource was fetched from the REST API via GET
 	// +optional

@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	controllerutil2 "github.com/bluecontainer/openapi-operator-gen/pkg/controller"
 	{{ .APIVersion }} "{{ .ModuleName }}/api/{{ .APIVersion }}"
 )
 
@@ -336,7 +337,7 @@ func (r *{{ .Kind }}Reconciler) listResourcesBySelector(ctx context.Context, nam
 				Name:         item.Name,
 				Namespace:    item.Namespace,
 				State:        item.Status.State,
-				ExternalID:   item.Status.ExternalID,
+				ExternalID:   controllerutil2.GetExternalIDIfPresent(&item),
 				Message:      item.Status.Message,
 				LastSyncTime: item.Status.LastSyncTime,
 			})
@@ -415,7 +416,7 @@ func (r *{{ .Kind }}Reconciler) getResourceByReference(ctx context.Context, name
 			Name:         item.Name,
 			Namespace:    item.Namespace,
 			State:        item.Status.State,
-			ExternalID:   item.Status.ExternalID,
+			ExternalID:   controllerutil2.GetExternalIDIfPresent(item),
 			Message:      item.Status.Message,
 			LastSyncTime: item.Status.LastSyncTime,
 		}

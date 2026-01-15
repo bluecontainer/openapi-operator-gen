@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	controllerutil2 "github.com/bluecontainer/openapi-operator-gen/pkg/controller"
 	{{ .APIVersion }} "{{ .ModuleName }}/api/{{ .APIVersion }}"
 )
 
@@ -519,7 +520,7 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		Kind:         "{{ . }}",
 		Name:         name,
 		State:        existing.Status.State,
-		ExternalID:   existing.Status.ExternalID,
+		ExternalID:   controllerutil2.GetExternalIDIfPresent(existing),
 		Message:      existing.Status.Message,
 		Ready:        existing.Status.State == "Synced",
 		LastSyncTime: existing.Status.LastSyncTime,

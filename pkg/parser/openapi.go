@@ -170,6 +170,9 @@ type Parameter struct {
 	Required    bool
 	Type        string
 	Description string
+	// IDFieldRef is the value of x-k8s-id-field extension, indicating which body field
+	// this path parameter should be merged with (e.g., "id" for orderId -> id mapping)
+	IDFieldRef string
 }
 
 // Schema represents a data schema
@@ -239,10 +242,30 @@ type ParsedSpec struct {
 	Schemas         map[string]*Schema
 }
 
+// PathFilter interface for filtering paths, tags, and operationIds
+type PathFilter interface {
+	// ShouldIncludePath returns true if the path should be included based on path patterns
+	ShouldIncludePath(path string) bool
+	// ShouldIncludeTags returns true if the tags pass the tag filter
+	ShouldIncludeTags(tags []string) bool
+	// ShouldIncludeOperation returns true if the operationId passes the operation filter
+	ShouldIncludeOperation(operationID string) bool
+	// ShouldInclude returns true if both path and tags pass all filters (no operationId check)
+	ShouldInclude(path string, tags []string) bool
+	// ShouldIncludeWithOperations returns true if path, tags, and operationIds pass all filters
+	ShouldIncludeWithOperations(path string, tags []string, operationIDs []string) bool
+	// HasFilters returns true if any filters are configured
+	HasFilters() bool
+	// HasOperationFilters returns true if operationId filters are configured
+	HasOperationFilters() bool
+}
+
 // Parser parses OpenAPI specifications
 type Parser struct {
 	// RootKind is the Kind name to use for the root "/" endpoint
 	RootKind string
+	// Filter is an optional filter for paths and tags
+	Filter PathFilter
 }
 
 // NewParser creates a new OpenAPI parser
@@ -253,6 +276,11 @@ func NewParser() *Parser {
 // NewParserWithRootKind creates a new OpenAPI parser with a specified root kind
 func NewParserWithRootKind(rootKind string) *Parser {
 	return &Parser{RootKind: rootKind}
+}
+
+// NewParserWithFilter creates a new OpenAPI parser with a filter
+func NewParserWithFilter(rootKind string, filter PathFilter) *Parser {
+	return &Parser{RootKind: rootKind, Filter: filter}
 }
 
 // Parse parses an OpenAPI specification file or URL
@@ -348,6 +376,154 @@ func (p *Parser) Parse(specPath string) (*ParsedSpec, error) {
 	return spec, nil
 }
 
+// getPathTagsAndOperationIDs extracts all unique tags and operationIds from operations on a path
+func (p *Parser) getPathTagsAndOperationIDs(pathItem *openapi3.PathItem) ([]string, []string) {
+	tagSet := make(map[string]bool)
+	operationIDs := make([]string, 0)
+
+	ops := []*openapi3.Operation{
+		pathItem.Get,
+		pathItem.Post,
+		pathItem.Put,
+		pathItem.Delete,
+		pathItem.Patch,
+		pathItem.Head,
+		pathItem.Options,
+	}
+
+	for _, op := range ops {
+		if op != nil {
+			for _, tag := range op.Tags {
+				tagSet[tag] = true
+			}
+			if op.OperationID != "" {
+				operationIDs = append(operationIDs, op.OperationID)
+			}
+		}
+	}
+
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags, operationIDs
+}
+
+// getPathTags extracts all unique tags from operations on a path (for backwards compatibility)
+func (p *Parser) getPathTags(pathItem *openapi3.PathItem) []string {
+	tags, _ := p.getPathTagsAndOperationIDs(pathItem)
+	return tags
+}
+
+// MethodFilterResult represents the filtering status of methods on a path
+type MethodFilterResult struct {
+	PassedMethods   []string // Methods that passed all filters
+	FilteredMethods []string // Methods that were filtered out (with operationId)
+	AllFiltered     bool     // True if the entire path is filtered (path/tag filter)
+	PathFiltered    bool     // True if filtered by path pattern
+	TagFiltered     bool     // True if filtered by tag
+}
+
+// getMethodFilterResults returns detailed filtering info for each method on a path
+func (p *Parser) getMethodFilterResults(path string, pathItem *openapi3.PathItem) MethodFilterResult {
+	result := MethodFilterResult{
+		PassedMethods:   make([]string, 0),
+		FilteredMethods: make([]string, 0),
+	}
+
+	if p.Filter == nil {
+		// No filter, all methods pass
+		result.PassedMethods = append(result.PassedMethods, p.getMethodsForPathAsList(pathItem)...)
+		return result
+	}
+
+	// First check path filter
+	if !p.Filter.ShouldIncludePath(path) {
+		result.AllFiltered = true
+		result.PathFiltered = true
+		return result
+	}
+
+	// Then check tag filter
+	tags := p.getPathTags(pathItem)
+	if !p.Filter.ShouldIncludeTags(tags) {
+		result.AllFiltered = true
+		result.TagFiltered = true
+		return result
+	}
+
+	// If no operation filters, all methods pass
+	if !p.Filter.HasOperationFilters() {
+		result.PassedMethods = append(result.PassedMethods, p.getMethodsForPathAsList(pathItem)...)
+		return result
+	}
+
+	// Check each method individually
+	methodOps := []struct {
+		method string
+		op     *openapi3.Operation
+	}{
+		{"GET", pathItem.Get},
+		{"POST", pathItem.Post},
+		{"PUT", pathItem.Put},
+		{"DELETE", pathItem.Delete},
+		{"PATCH", pathItem.Patch},
+	}
+
+	for _, mo := range methodOps {
+		if mo.op == nil {
+			continue
+		}
+		opID := mo.op.OperationID
+		if p.Filter.ShouldIncludeOperation(opID) {
+			result.PassedMethods = append(result.PassedMethods, mo.method)
+		} else {
+			// Include operationId in the filtered method display
+			if opID != "" {
+				result.FilteredMethods = append(result.FilteredMethods, fmt.Sprintf("%s(%s)", mo.method, opID))
+			} else {
+				result.FilteredMethods = append(result.FilteredMethods, mo.method)
+			}
+		}
+	}
+
+	// If all methods were filtered by operation filter, mark as all filtered
+	result.AllFiltered = len(result.PassedMethods) == 0
+
+	return result
+}
+
+// getMethodsForPathAsList returns methods as a string slice
+func (p *Parser) getMethodsForPathAsList(pathItem *openapi3.PathItem) []string {
+	methods := make([]string, 0)
+	if pathItem.Get != nil {
+		methods = append(methods, "GET")
+	}
+	if pathItem.Post != nil {
+		methods = append(methods, "POST")
+	}
+	if pathItem.Put != nil {
+		methods = append(methods, "PUT")
+	}
+	if pathItem.Delete != nil {
+		methods = append(methods, "DELETE")
+	}
+	if pathItem.Patch != nil {
+		methods = append(methods, "PATCH")
+	}
+	return methods
+}
+
+// shouldIncludePath checks if a path should be included based on the parser's filter
+func (p *Parser) shouldIncludePath(path string, pathItem *openapi3.PathItem) bool {
+	if p.Filter == nil {
+		return true
+	}
+	tags, operationIDs := p.getPathTagsAndOperationIDs(pathItem)
+	return p.Filter.ShouldIncludeWithOperations(path, tags, operationIDs)
+}
+
 func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource, []*QueryEndpoint, []*ActionEndpoint) {
 	resourceMap := make(map[string]*Resource)
 	queryEndpoints := make([]*QueryEndpoint, 0)
@@ -367,6 +543,20 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 	}
 	sort.Strings(paths)
 
+	// Count filtered paths if filter is active
+	filteredCount := 0
+	if p.Filter != nil && p.Filter.HasFilters() {
+		for _, path := range paths {
+			pathItem := doc.Paths.Map()[path]
+			if !p.shouldIncludePath(path, pathItem) {
+				filteredCount++
+			}
+		}
+		if filteredCount > 0 {
+			fmt.Printf("Filtering: %d of %d paths excluded by filter\n", filteredCount, len(paths))
+		}
+	}
+
 	// Log endpoint classification header
 	fmt.Println("\n┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐")
 	fmt.Println("│                                        Endpoint Classification                                                    │")
@@ -377,6 +567,37 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 	for _, path := range paths {
 		pathItem := doc.Paths.Map()[path]
 		methods := p.getMethodsForPath(pathItem)
+
+		// Get detailed filter results for this path
+		filterResult := p.getMethodFilterResults(path, pathItem)
+
+		// Apply path/tag filter
+		if !p.shouldIncludePath(path, pathItem) {
+			// Show detailed filtering info
+			classification := "Filtered"
+			if filterResult.PathFiltered {
+				classification = "Filtered (path)"
+			} else if filterResult.TagFiltered {
+				classification = "Filtered (tag)"
+			}
+
+			// If some methods were filtered by operationId, show which ones
+			methodDisplay := methods
+			if len(filterResult.FilteredMethods) > 0 && !filterResult.PathFiltered && !filterResult.TagFiltered {
+				// Show passed methods normally, filtered methods with strikethrough indication
+				passed := strings.Join(filterResult.PassedMethods, ",")
+				filtered := strings.Join(filterResult.FilteredMethods, ",")
+				if passed != "" && filtered != "" {
+					methodDisplay = fmt.Sprintf("%s ~%s~", passed, filtered)
+				} else if filtered != "" {
+					methodDisplay = fmt.Sprintf("~%s~", filtered)
+				}
+				classification = "Filtered (op)"
+			}
+
+			printWrappedTableRow(path, methodDisplay, classification, "-", "-")
+			continue
+		}
 
 		// Check if this path is a base path with POST that has a corresponding resource ID path
 		// e.g., /pet with POST + /pet/{petId} with GET/PUT/DELETE = combined resource
@@ -435,7 +656,16 @@ func (p *Parser) extractResourcesQueriesAndActions(doc *openapi3.T) ([]*Resource
 			}
 		}
 
-		printWrappedTableRow(path, methods, classification, resourceName, "-")
+		// Show method display with filtered methods indicated
+		methodDisplay := methods
+		if len(filterResult.FilteredMethods) > 0 {
+			// Some methods were filtered by operationId - show which
+			passed := strings.Join(filterResult.PassedMethods, ",")
+			filtered := strings.Join(filterResult.FilteredMethods, ",")
+			methodDisplay = fmt.Sprintf("%s ~%s~", passed, filtered)
+		}
+
+		printWrappedTableRow(path, methodDisplay, classification, resourceName, "-")
 
 		// Extract operations
 		ops := p.extractOperations(path, pathItem)
@@ -652,6 +882,15 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 			}
 		}
 
+		// Extract x-k8s-id-field extension if present
+		if paramRef.Value.Extensions != nil {
+			if idFieldRef, ok := paramRef.Value.Extensions["x-k8s-id-field"]; ok {
+				if strVal, ok := idFieldRef.(string); ok {
+					param.IDFieldRef = strVal
+				}
+			}
+		}
+
 		// Skip the parent ID param as it's handled separately
 		if param.Name == parentIDParam {
 			continue
@@ -772,6 +1011,14 @@ func (p *Parser) extractQueryEndpoint(path string, pathItem *openapi3.PathItem, 
 			if paramRef.Value.Schema != nil && paramRef.Value.Schema.Value != nil {
 				if len(paramRef.Value.Schema.Value.Type.Slice()) > 0 {
 					param.Type = paramRef.Value.Schema.Value.Type.Slice()[0]
+				}
+			}
+			// Extract x-k8s-id-field extension if present
+			if paramRef.Value.Extensions != nil {
+				if idFieldRef, ok := paramRef.Value.Extensions["x-k8s-id-field"]; ok {
+					if strVal, ok := idFieldRef.(string); ok {
+						param.IDFieldRef = strVal
+					}
 				}
 			}
 			queryEndpoint.PathParams = append(queryEndpoint.PathParams, param)
@@ -1029,6 +1276,15 @@ func (p *Parser) extractOperations(path string, pathItem *openapi3.PathItem) []O
 			}
 			if paramRef.Value.Schema != nil && paramRef.Value.Schema.Value != nil {
 				param.Type = paramRef.Value.Schema.Value.Type.Slice()[0]
+			}
+
+			// Extract x-k8s-id-field extension if present
+			if paramRef.Value.Extensions != nil {
+				if idFieldRef, ok := paramRef.Value.Extensions["x-k8s-id-field"]; ok {
+					if strVal, ok := idFieldRef.(string); ok {
+						param.IDFieldRef = strVal
+					}
+				}
 			}
 
 			switch param.In {

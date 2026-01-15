@@ -48,7 +48,10 @@ example: build
 		--group petstore.example.com \
 		--version v1alpha1 \
 		--module github.com/bluecontainer/petstore-operator \
-		--aggregate
+		--aggregate \
+		--bundle \
+		--exclude-operations="updatePetWithForm" \
+		--update-with-post="/store/order"
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
 

@@ -919,9 +919,13 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 {{- else }}
 {{- if .HasPost }}
-	// Resource endpoints should use POST to create
-	if methodCounts[http.MethodPost] == 0 {
-		t.Errorf("expected at least one POST request for resource creation, got methods: %v", methodCounts)
+	// Resource endpoints use GET-first reconciliation:
+	// - If GET returns 404: POST to create
+	// - If GET returns data with drift: PUT to update
+	// - If GET returns data without drift: no POST/PUT needed (skipped)
+	// Since our mock always returns data, we may see only GETs (no drift) or GETs+PUTs (with drift)
+	if methodCounts[http.MethodGet] == 0 {
+		t.Errorf("expected at least one GET request for drift detection, got methods: %v", methodCounts)
 	}
 {{- else }}
 	// Resource without POST should use GET with ExternalIDRef

@@ -31,24 +31,27 @@ func NewControllerGenerator(cfg *config.Config) *ControllerGenerator {
 
 // ControllerTemplateData holds data for controller template
 type ControllerTemplateData struct {
-	Year             int
-	GeneratorVersion string
-	APIGroup         string
-	APIVersion       string
-	ModuleName       string
-	Kind             string
-	KindLower        string
-	Plural           string
-	BasePath         string
-	ResourcePath     string                   // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
-	IsQuery          bool                     // True if this is a query CRD
-	QueryPath        string                   // Full query path for query CRDs
-	QueryParams      []mapper.QueryParamField // Query parameters for building URL
-	ResponseType     string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
-	ResponseIsArray  bool                     // True if response is an array
-	ResultItemType   string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
-	HasTypedResults  bool                     // True if we have typed results (not raw extension)
-	UsesSharedType   bool                     // True if ResultItemType is a shared type from another CRD
+	Year               int
+	GeneratorVersion   string
+	APIGroup           string
+	APIVersion         string
+	ModuleName         string
+	Kind               string
+	KindLower          string
+	Plural             string
+	BasePath           string
+	ResourcePath       string                   // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
+	IsQuery            bool                     // True if this is a query CRD
+	QueryPath          string                   // Full query path for query CRDs
+	QueryPathParams    []mapper.QueryParamField // Path parameters for query endpoints
+	QueryParams        []mapper.QueryParamField // Query parameters for building URL
+	ResponseType       string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
+	ResponseIsArray    bool                     // True if response is an array
+	ResultItemType     string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
+	HasTypedResults    bool                     // True if we have typed results (not raw extension)
+	UsesSharedType     bool                     // True if ResultItemType is a shared type from another CRD
+	IsPrimitiveArray   bool                     // True if response is a primitive array ([]string, []int, etc.)
+	PrimitiveArrayType string                   // Base type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
 	IsAction          bool                     // True if this is an action CRD
@@ -71,6 +74,19 @@ type ControllerTemplateData struct {
 	// HTTP method availability
 	HasDelete bool // True if DELETE method is available for this resource
 	HasPost   bool // True if POST method is available for this resource
+	HasPut    bool // True if PUT method is available for this resource
+
+	// UpdateWithPost enables using POST for updates when PUT is not available.
+	// This is set when --update-with-post flag is used AND HasPut is false AND HasPost is true.
+	UpdateWithPost bool
+
+	// Per-method paths (when different methods use different paths)
+	GetPath    string // Path for GET operations (e.g., /pet/{petId})
+	PutPath    string // Path for PUT operations (e.g., /pet - when ID is in body)
+	DeletePath string // Path for DELETE operations (e.g., /pet/{petId})
+
+	// PutPathDiffers is true when PUT uses a different path than GET (e.g., PUT /pet vs GET /pet/{petId})
+	PutPathDiffers bool
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
@@ -82,9 +98,11 @@ type ControllerTemplateData struct {
 
 // ActionPathParam represents a path parameter in action templates
 type ActionPathParam struct {
-	Name   string // Parameter name (e.g., "userId")
-	GoName string // Go field name (e.g., "UserId")
-	GoType string // Go type (e.g., "string", "int64")
+	Name      string // Parameter name (e.g., "userId")
+	GoName    string // Go field name (e.g., "UserId")
+	GoType    string // Go type (e.g., "string", "int64")
+	IsPointer bool   // True if this is a pointer type (e.g., *int64)
+	BaseType  string // Base type without pointer (e.g., "int64" for "*int64")
 }
 
 // ActionRequestBodyField represents a request body field in action templates
@@ -159,6 +177,9 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 		return fmt.Errorf("failed to generate suite_test.go: %w", err)
 	}
 
+	// Note: controller utility functions (ValuesEqual, GetExternalIDIfPresent, etc.)
+	// are now in the shared library github.com/bluecontainer/openapi-operator-gen/pkg/controller
+
 	// Generate main.go (with optional aggregate and bundle info)
 	if err := g.generateMain(crds, aggregate, bundle); err != nil {
 		return fmt.Errorf("failed to generate main.go: %w", err)
@@ -204,24 +225,27 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 
 func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.CRDDefinition) error {
 	data := ControllerTemplateData{
-		Year:             time.Now().Year(),
-		GeneratorVersion: g.config.GeneratorVersion,
-		APIGroup:         crd.APIGroup,
-		APIVersion:       crd.APIVersion,
-		ModuleName:       g.config.ModuleName,
-		Kind:             crd.Kind,
-		KindLower:        strings.ToLower(crd.Kind),
-		Plural:           crd.Plural,
-		BasePath:         crd.BasePath,
-		ResourcePath:     crd.ResourcePath,
-		IsQuery:          crd.IsQuery,
-		QueryPath:        crd.QueryPath,
-		QueryParams:      crd.QueryParams,
-		ResponseType:     crd.ResponseType,
-		ResponseIsArray:  crd.ResponseIsArray,
-		ResultItemType:   crd.ResultItemType,
-		HasTypedResults:  len(crd.ResultFields) > 0 || crd.UsesSharedType,
-		UsesSharedType:   crd.UsesSharedType,
+		Year:               time.Now().Year(),
+		GeneratorVersion:   g.config.GeneratorVersion,
+		APIGroup:           crd.APIGroup,
+		APIVersion:         crd.APIVersion,
+		ModuleName:         g.config.ModuleName,
+		Kind:               crd.Kind,
+		KindLower:          strings.ToLower(crd.Kind),
+		Plural:             crd.Plural,
+		BasePath:           crd.BasePath,
+		ResourcePath:       crd.ResourcePath,
+		IsQuery:            crd.IsQuery,
+		QueryPath:          crd.QueryPath,
+		QueryPathParams:    crd.QueryPathParams,
+		QueryParams:        crd.QueryParams,
+		ResponseType:       crd.ResponseType,
+		ResponseIsArray:    crd.ResponseIsArray,
+		ResultItemType:     crd.ResultItemType,
+		HasTypedResults:    len(crd.ResultFields) > 0 || crd.UsesSharedType || crd.IsPrimitiveArray,
+		UsesSharedType:     crd.UsesSharedType,
+		IsPrimitiveArray:   crd.IsPrimitiveArray,
+		PrimitiveArrayType: crd.PrimitiveArrayType,
 		// Action fields
 		IsAction:       crd.IsAction,
 		ActionPath:     crd.ActionPath,
@@ -232,8 +256,15 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
 		// HTTP method availability
-		HasDelete: crd.HasDelete,
-		HasPost:   crd.HasPost,
+		HasDelete:      crd.HasDelete,
+		HasPost:        crd.HasPost,
+		HasPut:         crd.HasPut,
+		UpdateWithPost: crd.UpdateWithPost,
+		// Per-method paths
+		GetPath:        crd.GetPath,
+		PutPath:        crd.PutPath,
+		DeletePath:     crd.DeletePath,
+		PutPathDiffers: crd.PutPath != "" && crd.GetPath != "" && crd.PutPath != crd.GetPath,
 	}
 
 	// Populate path params (excluding parent ID)
@@ -272,27 +303,71 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		pathParamsSeen := make(map[string]bool)
 		queryParamsSeen := make(map[string]bool)
 
+		// Build a map of path param -> merged field name from IDFieldMappings
+		pathParamToFieldName := make(map[string]string)
+		for _, mapping := range crd.IDFieldMappings {
+			pathParamToFieldName[mapping.PathParam] = mapping.BodyField
+		}
+
 		for _, op := range crd.Operations {
 			for _, paramName := range op.PathParams {
 				if pathParamsSeen[paramName] {
 					continue
 				}
 				pathParamsSeen[paramName] = true
-				// Find the field in spec to get type info
+
+				// Check if this path param is merged with a body field
+				mergedFieldName := pathParamToFieldName[paramName]
+
+				// Find the field in spec to get type info and the correct GoName
 				goType := "string" // default
+				goName := strcase.ToCamel(paramName)
+				isPointer := false
+				baseType := goType
 				if crd.Spec != nil {
 					for _, field := range crd.Spec.Fields {
-						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(paramName)) {
+						// If merged, look for the body field; otherwise look for the path param field
+						targetField := paramName
+						if mergedFieldName != "" {
+							targetField = mergedFieldName
+						}
+						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(targetField)) {
 							goType = field.GoType
+							goName = field.Name // Use the actual field name (e.g., "Id" not "OrderId")
+
+							// Apply the same pointer logic as resolveGoType in types.go:
+							// Non-required primitive numeric types become pointers in the generated code
+							if !field.Required {
+								switch goType {
+								case "int", "int32", "int64", "float32", "float64":
+									goType = "*" + goType
+								}
+							}
+
+							// Check if this is a pointer type
+							if strings.HasPrefix(goType, "*") {
+								isPointer = true
+								baseType = strings.TrimPrefix(goType, "*")
+							} else {
+								baseType = goType
+							}
 							break
 						}
 					}
 				}
 				data.ResourcePathParams = append(data.ResourcePathParams, ActionPathParam{
-					Name:   paramName,
-					GoName: strcase.ToCamel(paramName),
-					GoType: goType,
+					Name:      paramName,
+					GoName:    goName,
+					GoType:    goType,
+					IsPointer: isPointer,
+					BaseType:  baseType,
 				})
+			}
+			// Only collect query params from the Create operation (POST to base path)
+			// Query params from other operations (like updatePetWithForm on /pet/{petId})
+			// should not be included in buildResourceURLForCreate
+			if op.CRDAction != "Create" {
+				continue
 			}
 			for _, paramName := range op.QueryParams {
 				if queryParamsSeen[paramName] {

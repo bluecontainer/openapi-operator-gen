@@ -24,22 +24,35 @@ type CRDDefinition struct {
 	BasePath     string
 	ResourcePath string // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
 
+	// Per-method paths (when different methods use different paths)
+	GetPath    string // Path for GET operations (e.g., /pet/{petId})
+	PutPath    string // Path for PUT operations (e.g., /pet - when ID is in body)
+	DeletePath string // Path for DELETE operations (e.g., /pet/{petId})
+
 	// HTTP method availability (for conditional controller logic)
 	HasDelete bool // True if DELETE method is available for this resource
 	HasPost   bool // True if POST method is available for this resource
+	HasPut    bool // True if PUT method is available for this resource
+
+	// UpdateWithPost enables using POST for updates when PUT is not available.
+	// This is set when --update-with-post flag is used AND HasPut is false AND HasPost is true.
+	UpdateWithPost bool
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 
 	// Query endpoint fields
-	IsQuery         bool               // True if this is a query/action CRD
-	QueryPath       string             // Full query path (e.g., /pet/findByTags)
-	QueryParams     []QueryParamField  // Query parameters for building URL
-	ResponseType    string             // Go type for response (e.g., "[]Pet", "Pet")
-	ResponseIsArray bool               // True if response is an array
-	ResultItemType  string             // Item type if ResponseIsArray (e.g., "Pet")
-	ResultFields    []*FieldDefinition // Fields for the result type (used to generate result struct)
-	UsesSharedType  bool               // True if ResultItemType is a shared type from another CRD
+	IsQuery            bool               // True if this is a query/action CRD
+	QueryPath          string             // Full query path (e.g., /pet/findByTags)
+	QueryPathParams    []QueryParamField  // Path parameters for query endpoints (e.g., serviceName, parameterName)
+	QueryParams        []QueryParamField  // Query parameters for building URL
+	ResponseType       string             // Go type for response (e.g., "[]Pet", "Pet")
+	ResponseIsArray    bool               // True if response is an array
+	ResultItemType     string             // Item type if ResponseIsArray (e.g., "Pet")
+	ResultFields       []*FieldDefinition // Fields for the result type (used to generate result struct)
+	UsesSharedType     bool               // True if ResultItemType is a shared type from another CRD
+	IsPrimitiveArray   bool               // True if response is a simple array of primitives ([]string, []int, etc.)
+	PrimitiveArrayType string             // The Go type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
 	IsAction       bool   // True if this is an action CRD (one-shot operation)
@@ -48,6 +61,13 @@ type CRDDefinition struct {
 	ParentResource string // Parent resource kind (e.g., "Pet")
 	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
 	ActionName     string // Action name (e.g., "uploadImage")
+
+	// IDFieldMappings stores mappings from path parameters to body fields.
+	// This is used when a path param like {orderId} maps to the body's "id" field.
+	// The controller uses this to:
+	// 1. Build URLs using the merged field's value
+	// 2. Optionally rename the field in the JSON body when sending to the API
+	IDFieldMappings []IDFieldMapping
 }
 
 // QueryParamField represents a query parameter as a spec field
@@ -59,6 +79,8 @@ type QueryParamField struct {
 	Required    bool
 	IsArray     bool   // True if this is an array parameter (e.g., tags[])
 	ItemType    string // Type of array items if IsArray is true
+	IsPointer   bool   // True if this is a pointer type (for optional numeric types)
+	BaseType    string // Base type without pointer (e.g., "int64" for "*int64")
 }
 
 // OperationMapping maps a CRD operation to a REST API call
@@ -81,6 +103,17 @@ type FieldDefinition struct {
 	Fields      []*FieldDefinition // nested fields for structs
 	ItemType    *FieldDefinition   // for arrays/slices
 	Enum        []string
+	// PathParamName is set when this field is merged with a path parameter.
+	// The controller uses this to substitute the field value into the URL path.
+	// e.g., for orderId -> id merge, the "id" field will have PathParamName = "orderId"
+	PathParamName string
+}
+
+// IDFieldMapping represents a mapping from a path parameter to a body field.
+// This is used to handle cases where {orderId} in the URL maps to "id" in the request body.
+type IDFieldMapping struct {
+	PathParam string // The path parameter name (e.g., "orderId")
+	BodyField string // The body field name (e.g., "id")
 }
 
 // ValidationRules contains kubebuilder validation markers
@@ -146,17 +179,18 @@ func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, known
 		seenKinds[qe.Name] = true
 
 		crd := &CRDDefinition{
-			APIGroup:    m.config.APIGroup,
-			APIVersion:  m.config.APIVersion,
-			Kind:        qe.Name,
-			Plural:      strings.ToLower(qe.Name) + "s",
-			ShortNames:  []string{}, // Query CRDs don't get short names to avoid conflicts
-			Scope:       "Namespaced",
-			Description: qe.Summary,
-			BasePath:    qe.BasePath,
-			IsQuery:     true,
-			QueryPath:   qe.Path,
-			QueryParams: m.mapQueryParams(qe.QueryParams),
+			APIGroup:        m.config.APIGroup,
+			APIVersion:      m.config.APIVersion,
+			Kind:            qe.Name,
+			Plural:          strings.ToLower(qe.Name) + "s",
+			ShortNames:      []string{}, // Query CRDs don't get short names to avoid conflicts
+			Scope:           "Namespaced",
+			Description:     qe.Summary,
+			BasePath:        qe.BasePath,
+			IsQuery:         true,
+			QueryPath:       qe.Path,
+			QueryPathParams: m.mapQueryPathParams(qe.PathParams),
+			QueryParams:     m.mapQueryParams(qe.QueryParams),
 		}
 
 		// Generate spec fields from query parameters
@@ -487,9 +521,15 @@ func (m *Mapper) mapResponseSchema(crd *CRDDefinition, qe *parser.QueryEndpoint,
 			crd.ResultFields = m.schemaToResultFields(itemSchema)
 			crd.ResponseType = "[]" + crd.ResultItemType
 		} else {
-			// Simple array type (e.g., []string)
-			crd.ResponseType = "[]" + m.mapType(itemSchema)
+			// Simple array type (e.g., []string, []int64)
+			itemType := m.mapType(itemSchema)
+			crd.ResponseType = "[]" + itemType
 			crd.ResultFields = nil
+			// Mark as primitive array so the template can generate proper typed field
+			if m.isPrimitiveType(itemType) {
+				crd.IsPrimitiveArray = true
+				crd.PrimitiveArrayType = itemType
+			}
 		}
 	} else if schema.Type == "object" && len(schema.Properties) > 0 {
 		// Single object response
@@ -579,10 +619,45 @@ func (m *Mapper) mapQueryParams(params []parser.Parameter) []QueryParamField {
 			field.IsArray = true
 			field.ItemType = strings.TrimPrefix(p.Type, "array:")
 			field.GoType = "[]" + m.mapParamType(field.ItemType)
+			field.BaseType = field.GoType
 		} else {
-			field.GoType = m.mapParamType(p.Type)
+			baseType := m.mapParamType(p.Type)
+			field.BaseType = baseType
+			// Add pointer for optional numeric types (matches resolveGoType in types.go)
+			if !p.Required && m.isNumericType(baseType) {
+				field.GoType = "*" + baseType
+				field.IsPointer = true
+			} else {
+				field.GoType = baseType
+			}
 		}
 
+		fields = append(fields, field)
+	}
+
+	return fields
+}
+
+// mapQueryPathParams converts parser path params to QueryParamField for query endpoints
+func (m *Mapper) mapQueryPathParams(params []parser.Parameter) []QueryParamField {
+	fields := make([]QueryParamField, 0, len(params))
+
+	for _, p := range params {
+		baseType := m.mapParamType(p.Type)
+		field := QueryParamField{
+			Name:        strcase.ToCamel(p.Name),
+			JSONName:    strcase.ToLowerCamel(p.Name),
+			Description: p.Description,
+			Required:    p.Required,
+			BaseType:    baseType,
+		}
+		// Add pointer for optional numeric types (matches resolveGoType in types.go)
+		if !p.Required && m.isNumericType(baseType) {
+			field.GoType = "*" + baseType
+			field.IsPointer = true
+		} else {
+			field.GoType = baseType
+		}
 		fields = append(fields, field)
 	}
 
@@ -602,6 +677,26 @@ func (m *Mapper) mapParamType(t string) string {
 		return "bool"
 	default:
 		return "string"
+	}
+}
+
+// isNumericType returns true if the Go type is a numeric type that should be a pointer when optional
+func (m *Mapper) isNumericType(goType string) bool {
+	switch goType {
+	case "int", "int32", "int64", "float32", "float64":
+		return true
+	default:
+		return false
+	}
+}
+
+// isPrimitiveType returns true if the Go type is a primitive type (not struct/object)
+func (m *Mapper) isPrimitiveType(goType string) bool {
+	switch goType {
+	case "string", "bool", "int", "int32", "int64", "float32", "float64":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -728,24 +823,35 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 			Operations:  m.mapOperations(resource.Operations),
 		}
 
-		// Check if DELETE method is available for this resource
+		// Check method availability and collect per-method paths
 		for _, op := range resource.Operations {
-			if op.Method == "DELETE" {
+			switch op.Method {
+			case "DELETE":
 				crd.HasDelete = true
-				break
-			}
-		}
-
-		// Check if POST method is available for this resource
-		for _, op := range resource.Operations {
-			if op.Method == "POST" {
+				if crd.DeletePath == "" {
+					crd.DeletePath = op.Path
+				}
+			case "POST":
 				crd.HasPost = true
-				break
+			case "PUT":
+				crd.HasPut = true
+				if crd.PutPath == "" {
+					crd.PutPath = op.Path
+				}
+			case "GET":
+				if crd.GetPath == "" {
+					crd.GetPath = op.Path
+				}
 			}
 		}
 
-		// Find the full resource path with parameters (prefer GET path, fallback to PUT)
-		// This is the path template used for GET/PUT/DELETE operations
+		// Set UpdateWithPost if configured for this path and PUT is not available but POST is
+		if m.config.ShouldUpdateWithPost(resource.Path) && !crd.HasPut && crd.HasPost {
+			crd.UpdateWithPost = true
+		}
+
+		// Find the full resource path with parameters (prefer GET path with params)
+		// This is kept for backward compatibility with ResourcePath
 		for _, op := range resource.Operations {
 			if op.Method == "GET" && strings.Contains(op.Path, "{") {
 				crd.ResourcePath = op.Path
@@ -778,7 +884,8 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 		}
 
 		// Add path and query parameters from operations to spec fields
-		m.addOperationParamsToSpec(crd.Spec, resource.Operations)
+		// Use the merge-enabled version to handle ID field merging
+		m.addOperationParamsToSpecWithMerge(crd.Spec, resource.Operations, crd, crd.Kind)
 
 		// Generate status fields
 		crd.Status = m.createStatusDefinition()
@@ -789,16 +896,28 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 	return crds, nil
 }
 
-// addOperationParamsToSpec adds path and query parameters from operations to the spec
+// addOperationParamsToSpec adds path and query parameters from operations to the spec.
+// It also handles ID field merging: when a path parameter like {orderId} maps to a body field "id",
+// the path param is not added as a separate field; instead, the body field is annotated with PathParamName.
 func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []parser.Operation) {
+	m.addOperationParamsToSpecWithMerge(spec, operations, nil, "")
+}
+
+// addOperationParamsToSpecWithMerge adds path and query parameters with ID field merging support.
+// crd is used to store ID field mappings, and kindName is used for auto-detection heuristics.
+func (m *Mapper) addOperationParamsToSpecWithMerge(spec *FieldDefinition, operations []parser.Operation, crd *CRDDefinition, kindName string) {
 	if spec == nil {
 		return
 	}
 
 	// Track existing field names to avoid duplicates
+	// Also build a map for quick lookup of field definitions by JSON name
 	existingFields := make(map[string]bool)
+	fieldByJSONName := make(map[string]*FieldDefinition)
 	for _, field := range spec.Fields {
-		existingFields[strings.ToLower(field.JSONName)] = true
+		key := strings.ToLower(field.JSONName)
+		existingFields[key] = true
+		fieldByJSONName[key] = field
 	}
 
 	// Collect unique path params from all operations
@@ -814,11 +933,39 @@ func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []pa
 	for _, op := range sortedOps {
 		for _, param := range op.PathParams {
 			paramKey := strings.ToLower(param.Name)
-			if pathParamsSeen[paramKey] || existingFields[paramKey] {
+			if pathParamsSeen[paramKey] {
 				continue
 			}
 			pathParamsSeen[paramKey] = true
 
+			// Check if this path param should be merged with an existing body field
+			// Priority: 1) x-k8s-id-field extension, 2) --id-field-map flag, 3) auto-detection
+			bodyFieldName := m.config.GetIDFieldMapping(param.Name, kindName, param.IDFieldRef)
+
+			if bodyFieldName != "" {
+				// Check if the body field exists in the spec
+				bodyFieldKey := strings.ToLower(bodyFieldName)
+				if bodyField, ok := fieldByJSONName[bodyFieldKey]; ok {
+					// Merge: annotate the body field with the path param name
+					bodyField.PathParamName = param.Name
+					// Store the mapping in the CRD for controller use
+					if crd != nil {
+						crd.IDFieldMappings = append(crd.IDFieldMappings, IDFieldMapping{
+							PathParam: param.Name,
+							BodyField: bodyFieldName,
+						})
+					}
+					// Don't add the path param as a separate field
+					continue
+				}
+			}
+
+			// No merge - check if field already exists
+			if existingFields[paramKey] {
+				continue
+			}
+
+			// Add the path param as a new field
 			field := &FieldDefinition{
 				Name:        strcase.ToCamel(param.Name),
 				JSONName:    strcase.ToLowerCamel(param.Name),
@@ -964,23 +1111,30 @@ func (m *Mapper) mapOperations(ops []parser.Operation) []OperationMapping {
 			QueryParams: make([]string, 0),
 		}
 
+		// Collect path params first so we can use them for action classification
+		for _, p := range op.PathParams {
+			mapping.PathParams = append(mapping.PathParams, p.Name)
+		}
+		for _, p := range op.QueryParams {
+			mapping.QueryParams = append(mapping.QueryParams, p.Name)
+		}
+
 		// Map HTTP method to CRD action
+		// POST is only "Create" if it has no path params (e.g., POST /pet)
+		// POST with path params (e.g., POST /pet/{petId}) is typically an Update or Action
 		switch op.Method {
 		case "POST":
-			mapping.CRDAction = "Create"
+			if len(mapping.PathParams) == 0 {
+				mapping.CRDAction = "Create"
+			} else {
+				mapping.CRDAction = "Update" // POST with path params is an update/action
+			}
 		case "PUT", "PATCH":
 			mapping.CRDAction = "Update"
 		case "DELETE":
 			mapping.CRDAction = "Delete"
 		case "GET":
 			mapping.CRDAction = "Get"
-		}
-
-		for _, p := range op.PathParams {
-			mapping.PathParams = append(mapping.PathParams, p.Name)
-		}
-		for _, p := range op.QueryParams {
-			mapping.QueryParams = append(mapping.QueryParams, p.Name)
 		}
 
 		mappings = append(mappings, mapping)

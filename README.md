@@ -17,6 +17,11 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Options](#options)
   - [Example](#example)
   - [Swagger 2.0 Support](#swagger-20-support)
+- [Update With POST](#update-with-post)
+  - [When to Use](#when-to-use)
+  - [Usage](#usage-1)
+  - [How It Works](#how-it-works)
+  - [Behavior by HTTP Method Availability](#behavior-by-http-method-availability)
 - [OpenAPI Schema Support](#openapi-schema-support)
   - [Nested Objects](#nested-objects)
   - [Supported Types](#supported-types)
@@ -380,6 +385,17 @@ openapi-operator-gen generate \
 | `--module`, `-m` | Go module name for generated code | Required |
 | `--mapping` | Resource mapping mode: `per-resource` or `single-crd` | `per-resource` |
 | `--root-kind` | Kind name for root `/` endpoint | Derived from spec filename |
+| `--include-paths` | Only include paths matching these patterns (comma-separated, glob supported) | All paths |
+| `--exclude-paths` | Exclude paths matching these patterns (comma-separated, glob supported) | None |
+| `--include-tags` | Only include endpoints with these OpenAPI tags (comma-separated) | All tags |
+| `--exclude-tags` | Exclude endpoints with these OpenAPI tags (comma-separated) | None |
+| `--include-operations` | Only include operations with these operationIds (comma-separated, glob supported) | All operations |
+| `--exclude-operations` | Exclude operations with these operationIds (comma-separated, glob supported) | None |
+| `--update-with-post` | Use POST for updates when PUT is not available (see [Update With POST](#update-with-post)) | Disabled |
+| `--id-field-map` | Explicit mapping of path params to body fields (e.g., `orderId=id,petId=id`) | Auto-detect |
+| `--no-id-merge` | Disable automatic merging of path ID parameters with body 'id' fields | `false` |
+| `--aggregate` | Generate a Status Aggregator CRD (see [Status Aggregator CRD](#status-aggregator-crd)) | `false` |
+| `--bundle` | Generate an Inline Composition Bundle CRD (see [Bundle CRD](#bundle-crd)) | `false` |
 
 ### Example: Local File
 
@@ -438,6 +454,62 @@ openapi-operator-gen generate \
 - Swagger 2.0 specs are converted to OpenAPI 3.0 using the [kin-openapi](https://github.com/getkin/kin-openapi) library
 - The conversion handles path parameters, query parameters, request bodies, and response schemas
 - Most Swagger 2.0 features map cleanly to OpenAPI 3.0 equivalents
+
+## Update With POST
+
+Some REST APIs use POST for both creating and updating resources, rather than using PUT for updates. The `--update-with-post` flag enables the generated operator to use POST for updates when the API doesn't support PUT.
+
+### When to Use
+
+Use this flag when your API:
+- Uses POST for both create and update operations
+- Doesn't provide a PUT endpoint for resource updates
+- Implements "upsert" semantics with POST (create or update based on existence)
+
+### Usage
+
+The flag accepts:
+- `*` - Enable POST-for-updates on all resources that lack PUT
+- Comma-separated paths - Enable only for specific endpoints (glob patterns supported)
+
+```bash
+# Enable for all resources without PUT
+openapi-operator-gen generate \
+  --spec api.yaml \
+  --output ./generated \
+  --group myapp.example.com \
+  --version v1alpha1 \
+  --update-with-post "*"
+
+# Enable only for specific paths
+openapi-operator-gen generate \
+  --spec api.yaml \
+  --output ./generated \
+  --group myapp.example.com \
+  --version v1alpha1 \
+  --update-with-post "/store/order,/users/*"
+```
+
+### How It Works
+
+When `--update-with-post` is enabled for a resource:
+
+1. **GET-first reconciliation**: The controller still fetches the current state from the API
+2. **Drift detection**: Compares the CR spec with the fetched resource
+3. **POST for updates**: If drift is detected, uses POST (instead of PUT) to update the resource
+4. **ID preservation**: The external ID from the initial creation is preserved in subsequent updates
+
+This is particularly useful for APIs like the Petstore `/store/order` endpoint, which only supports POST and GET (no PUT).
+
+### Behavior by HTTP Method Availability
+
+| Has GET | Has POST | Has PUT | `--update-with-post` | Behavior |
+|---------|----------|---------|---------------------|----------|
+| ✓ | ✓ | ✓ | Any | Uses PUT for updates (standard) |
+| ✓ | ✓ | ✗ | Enabled | Uses POST for updates |
+| ✓ | ✓ | ✗ | Disabled | Read-only sync (no updates) |
+| ✓ | ✗ | ✗ | Any | Read-only sync |
+| ✗ | ✓ | ✗ | Any | POST-only (no GET for drift detection) |
 
 ## OpenAPI Schema Support
 
