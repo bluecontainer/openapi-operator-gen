@@ -1622,9 +1622,16 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 {{- if .NeedsExternalIDRef }}
 // restoreOriginalState restores the external resource to its original state captured during adoption.
 func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) error {
+{{- if .UpdateWithPost }}
+	httpMethod := "POST"
+{{- else }}
+	httpMethod := "PUT"
+{{- end }}
+
 	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "RestoreOriginalState",
 		trace.WithAttributes(
 			attribute.String("resource.externalID", r.getExternalID(instance)),
+			attribute.String("http.method", httpMethod),
 		))
 	defer span.End()
 
@@ -1638,10 +1645,15 @@ func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instan
 		return fmt.Errorf("failed to resolve base URL: %w", err)
 	}
 
+{{- if .UpdateWithPost }}
+	// Use create URL for POST-based updates
+	url := r.buildResourceURLForCreate(baseURL, instance)
+{{- else }}
 	url := r.buildResourceURL(baseURL, instance)
+{{- end }}
 	span.SetAttributes(attribute.String("http.url", url))
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(instance.Status.OriginalState.Raw))
+	req, err := http.NewRequestWithContext(ctx, httpMethod, url, bytes.NewReader(instance.Status.OriginalState.Raw))
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -1649,12 +1661,12 @@ func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instan
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Info("Restoring original state", "url", url)
+	logger.Info("Restoring original state", "url", url, "method", httpMethod)
 	resp, err := r.HTTPClient.Do(req)
 	duration := time.Since(start).Seconds()
 
 	if err != nil {
-		r.recordAPICallMetrics(ctx, "PUT", "error", 0, duration)
+		r.recordAPICallMetrics(ctx, httpMethod, "error", 0, duration)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to restore original state: %w", err)
@@ -1665,21 +1677,21 @@ func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instan
 
 	// 404 is acceptable - resource may have been deleted externally
 	if resp.StatusCode == http.StatusNotFound {
-		r.recordAPICallMetrics(ctx, "PUT", "not_found", resp.StatusCode, duration)
+		r.recordAPICallMetrics(ctx, httpMethod, "not_found", resp.StatusCode, duration)
 		logger.Info("Resource not found during restore (may have been deleted externally)")
 		return nil
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		r.recordAPICallMetrics(ctx, "PUT", "error", resp.StatusCode, duration)
+		r.recordAPICallMetrics(ctx, httpMethod, "error", resp.StatusCode, duration)
 		err := fmt.Errorf("restore failed: %s - %s", resp.Status, string(body))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
-	r.recordAPICallMetrics(ctx, "PUT", "success", resp.StatusCode, duration)
+	r.recordAPICallMetrics(ctx, httpMethod, "success", resp.StatusCode, duration)
 	logger.Info("Successfully restored original state", "externalID", r.getExternalID(instance))
 	return nil
 }
