@@ -548,6 +548,7 @@ func (r *{{ .Kind }}Reconciler) executeQuery(ctx context.Context, instance *{{ .
 	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
 		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
+			r.updateStatus(ctx, instance, "Failed", fmt.Sprintf("failed to get all healthy endpoints: %v", err), 0)
 			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
 
@@ -629,6 +630,7 @@ func (r *{{ .Kind }}Reconciler) executeQuery(ctx context.Context, instance *{{ .
 	// Single endpoint case
 	baseURL, err := r.resolveBaseURL(ctx, instance)
 	if err != nil {
+		r.updateStatus(ctx, instance, "Failed", fmt.Sprintf("failed to resolve base URL: %v", err), 0)
 		return fmt.Errorf("failed to resolve base URL: %w", err)
 	}
 

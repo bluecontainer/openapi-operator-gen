@@ -131,6 +131,12 @@ spec:
                   SyncWaves enables wave-based ordering for resources.
                   When enabled, resources are grouped by dependency depth and processed in waves.
                 type: boolean
+              targetBaseURL:
+                description: |-
+                  TargetBaseURL specifies a static base URL for the REST API.
+                  This is applied to all child resources created by the bundle.
+                  Example: "http://api.example.com:8080"
+                type: string
               targetHelmRelease:
                 description: |-
                   TargetHelmRelease specifies the Helm release for endpoint discovery.
@@ -139,6 +145,11 @@ spec:
               targetNamespace:
                 description: |-
                   TargetNamespace specifies the namespace for the target workload.
+                  This is applied to all child resources created by the bundle.
+                type: string
+              targetPod:
+                description: |-
+                  TargetPod specifies a pod name to route requests to directly.
                   This is applied to all child resources created by the bundle.
                 type: string
             required:

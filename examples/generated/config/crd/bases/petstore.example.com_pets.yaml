@@ -74,6 +74,17 @@ spec:
                 type: boolean
               name:
                 type: string
+              onDelete:
+                description: |-
+                  OnDelete specifies what to do with the external resource when the CR is deleted.
+                  - Delete: Delete the external resource (default for resources created by the controller)
+                  - Orphan: Leave the external resource as-is (default for resources adopted via ExternalIDRef)
+                  - Restore: Restore the original state captured when the resource was first adopted
+                enum:
+                - Delete
+                - Orphan
+                - Restore
+                type: string
               photoUrls:
                 items:
                   type: string
@@ -102,6 +113,12 @@ spec:
                       type: string
                   type: object
                 type: array
+              targetBaseURL:
+                description: |-
+                  TargetBaseURL specifies a static base URL for the REST API.
+                  When set, overrides all other endpoint configuration for this CR.
+                  Example: "http://api.example.com:8080"
+                type: string
               targetDeployment:
                 description: |-
                   TargetDeployment specifies a Deployment name to route requests to.
@@ -117,6 +134,11 @@ spec:
                 description: |-
                   TargetNamespace specifies the namespace to look for the target workload.
                   Defaults to the CR's namespace if not specified.
+                type: string
+              targetPod:
+                description: |-
+                  TargetPod specifies a pod name to route requests to directly.
+                  When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
               targetPodOrdinal:
                 description: |-
@@ -198,6 +220,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              createdByController:
+                description: |-
+                  CreatedByController indicates if this controller created the external resource via POST.
+                  Used to determine default OnDelete behavior (Delete if true, Orphan if false).
+                type: boolean
               driftDetected:
                 description: DriftDetected indicates whether drift was detected between
                   the spec and external resource
