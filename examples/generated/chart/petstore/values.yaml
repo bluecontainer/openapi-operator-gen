@@ -7,8 +7,6 @@ controllerManager:
       capabilities:
         drop:
         - ALL
-    env:
-      apiBaseUrl: http://api-server:8080
     image:
       repository: controller
       tag: latest

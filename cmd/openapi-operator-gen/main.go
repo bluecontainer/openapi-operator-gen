@@ -160,8 +160,10 @@ func parseIDFieldMap(s string) map[string]string {
 }
 
 func runGenerate(cmd *cobra.Command, args []string) error {
-	// Set the generator version for embedding in generated go.mod
+	// Set the generator version and commit info for embedding in generated go.mod
 	cfg.GeneratorVersion = version
+	cfg.CommitHash = commit
+	cfg.CommitTimestamp = date
 
 	// Parse filter flags into config slices
 	cfg.IncludePaths = parseCommaSeparated(includePaths)
@@ -290,10 +292,10 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Generate example CR samples (always generated, includes aggregate sample if enabled)
+	// Generate example CR samples (always generated, includes aggregate/bundle samples if enabled)
 	fmt.Println("Generating example CR samples...")
 	samplesGen := generator.NewSamplesGenerator(cfg)
-	if err := samplesGen.Generate(crds, aggregate); err != nil {
+	if err := samplesGen.Generate(crds, aggregate, bundle); err != nil {
 		return fmt.Errorf("failed to generate example CRs: %w", err)
 	}
 	fmt.Println("  Generated config/samples/*.yaml")

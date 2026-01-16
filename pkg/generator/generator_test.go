@@ -1013,6 +1013,103 @@ func TestTypesGenerator_ConvertFieldsWithNestedTypes_NoNestedTypes(t *testing.T)
 // Integration Test
 // =============================================================================
 
+// =============================================================================
+// Version Handling Tests
+// =============================================================================
+
+func TestIsValidSemver(t *testing.T) {
+	tests := []struct {
+		version  string
+		expected bool
+	}{
+		{"v1.0.0", true},
+		{"v0.0.1", true},
+		{"v10.20.30", true},
+		{"v0.0.0", true},
+		{"v1.2.3-dirty", false},
+		{"v0.0.7-10-gd5024c8-dirty", false},
+		{"v1.0.0-rc1", false},
+		{"v1.0", false},
+		{"v1", false},
+		{"1.0.0", false},
+		{"", false},
+		{"dev", false},
+		{"latest", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			result := isValidSemver(tt.version)
+			if result != tt.expected {
+				t.Errorf("isValidSemver(%q) = %v, expected %v", tt.version, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractBaseSemver(t *testing.T) {
+	tests := []struct {
+		version  string
+		expected string
+	}{
+		// Clean versions pass through
+		{"v1.0.0", "v1.0.0"},
+		{"v0.0.7", "v0.0.7"},
+		// Dirty/commit versions extract base version only
+		{"v0.0.7-dirty", "v0.0.7"},
+		{"v0.0.7-10-gd5024c8-dirty", "v0.0.7"},
+		{"v1.2.3-5-gabcdef", "v1.2.3"},
+		{"v10.20.30-1-g1234567-dirty", "v10.20.30"},
+		{"v0.0.7-10-gd5024c8", "v0.0.7"},
+		// Invalid versions fall back to v0.0.0
+		{"", "v0.0.0"},
+		{"dev", "v0.0.0"},
+		{"latest", "v0.0.0"},
+		{"1.0.0", "v1.0.0"},  // no 'v' prefix - still extracts valid semver
+		{"v1.0", "v0.0.0"},   // only 2 parts
+		{"v1", "v0.0.0"},     // only 1 part
+		{"vX.Y.Z", "v0.0.0"}, // non-numeric
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			result := extractBaseSemver(tt.version)
+			if result != tt.expected {
+				t.Errorf("extractBaseSemver(%q) = %q, expected %q", tt.version, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIncrementPatchVersion(t *testing.T) {
+	tests := []struct {
+		version  string
+		expected string
+	}{
+		{"v0.0.0", "v0.0.1"},
+		{"v0.0.7", "v0.0.8"},
+		{"v1.2.3", "v1.2.4"},
+		{"v10.20.30", "v10.20.31"},
+		{"v0.0.99", "v0.0.100"},
+		// Invalid versions return as-is
+		{"invalid", "invalid"},
+		{"v1.2", "v1.2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			result := incrementPatchVersion(tt.version)
+			if result != tt.expected {
+				t.Errorf("incrementPatchVersion(%q) = %q, expected %q", tt.version, result, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Integration Test
+// =============================================================================
+
 func TestFullGeneration(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{

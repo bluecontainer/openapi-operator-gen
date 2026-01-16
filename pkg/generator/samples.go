@@ -55,9 +55,22 @@ type ExampleAggregateCRData struct {
 	AllKinds         []string // All kinds combined
 }
 
+// ExampleBundleCRData holds data for example bundle CR template
+type ExampleBundleCRData struct {
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
+}
+
 // Generate generates example CR YAML files for all CRDs
-// aggregate is optional - pass nil if not generating aggregate CRD
-func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition) error {
+// aggregate and bundle are optional - pass nil if not generating those CRDs
+func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition, bundle *mapper.BundleDefinition) error {
 	// Create samples directory
 	samplesDir := filepath.Join(g.config.OutputDir, "config", "samples")
 	if err := os.MkdirAll(samplesDir, 0755); err != nil {
@@ -89,6 +102,14 @@ func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *map
 			return fmt.Errorf("failed to generate example aggregate CR: %w", err)
 		}
 		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(aggregate.Kind)))
+	}
+
+	// Generate bundle sample if bundle CRD is enabled
+	if bundle != nil {
+		if err := g.generateExampleBundleCR(samplesDir, bundle); err != nil {
+			return fmt.Errorf("failed to generate example bundle CR: %w", err)
+		}
+		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(bundle.Kind)))
 	}
 
 	// Generate kustomization.yaml for samples
@@ -280,6 +301,42 @@ func (g *SamplesGenerator) generateExampleAggregateCR(samplesDir string, aggrega
 	}
 
 	filename := fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(aggregate.Kind))
+	examplePath := filepath.Join(samplesDir, filename)
+
+	file, err := os.Create(examplePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+func (g *SamplesGenerator) generateExampleBundleCR(samplesDir string, bundle *mapper.BundleDefinition) error {
+	data := ExampleBundleCRData{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         bundle.APIGroup,
+		APIVersion:       bundle.APIVersion,
+		Kind:             bundle.Kind,
+		KindLower:        strings.ToLower(bundle.Kind),
+		ResourceKinds:    bundle.ResourceKinds,
+		QueryKinds:       bundle.QueryKinds,
+		ActionKinds:      bundle.ActionKinds,
+		AllKinds:         bundle.AllKinds,
+	}
+
+	tmpl, err := template.New("example-bundle").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.ExampleBundleCRTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filename := fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(bundle.Kind))
 	examplePath := filepath.Join(samplesDir, filename)
 
 	file, err := os.Create(examplePath)

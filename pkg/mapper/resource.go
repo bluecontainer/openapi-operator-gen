@@ -33,6 +33,7 @@ type CRDDefinition struct {
 	HasDelete bool // True if DELETE method is available for this resource
 	HasPost   bool // True if POST method is available for this resource
 	HasPut    bool // True if PUT method is available for this resource
+	HasPatch  bool // True if PATCH method is available for this resource
 
 	// UpdateWithPost enables using POST for updates when PUT is not available.
 	// This is set when --update-with-post flag is used AND HasPut is false AND HasPost is true.
@@ -838,6 +839,8 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 				if crd.PutPath == "" {
 					crd.PutPath = op.Path
 				}
+			case "PATCH":
+				crd.HasPatch = true
 			case "GET":
 				if crd.GetPath == "" {
 					crd.GetPath = op.Path
@@ -845,8 +848,8 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 			}
 		}
 
-		// Set UpdateWithPost if configured for this path and PUT is not available but POST is
-		if m.config.ShouldUpdateWithPost(resource.Path) && !crd.HasPut && crd.HasPost {
+		// Set UpdateWithPost if configured for this path and neither PUT nor PATCH is available but POST is
+		if m.config.ShouldUpdateWithPost(resource.Path) && !crd.HasPut && !crd.HasPatch && crd.HasPost {
 			crd.UpdateWithPost = true
 		}
 

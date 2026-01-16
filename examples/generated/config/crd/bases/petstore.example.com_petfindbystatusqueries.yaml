@@ -220,6 +220,14 @@ spec:
                               id:
                                 format: int64
                                 type: integer
+                              mergeOnUpdate:
+                                default: true
+                                description: |-
+                                  MergeOnUpdate controls whether updates merge the spec with the current API state.
+                                  When true (default), the controller will GET the current resource state and merge
+                                  only the fields specified in the spec before sending PUT/PATCH, preserving fields
+                                  not specified in the spec. When false, the spec is sent as-is (full replacement).
+                                type: boolean
                               name:
                                 type: string
                               photoUrls:
@@ -526,6 +534,14 @@ spec:
                             id:
                               format: int64
                               type: integer
+                            mergeOnUpdate:
+                              default: true
+                              description: |-
+                                MergeOnUpdate controls whether updates merge the spec with the current API state.
+                                When true (default), the controller will GET the current resource state and merge
+                                only the fields specified in the spec before sending PUT/PATCH, preserving fields
+                                not specified in the spec. When false, the spec is sent as-is (full replacement).
+                              type: boolean
                             name:
                               type: string
                             photoUrls:

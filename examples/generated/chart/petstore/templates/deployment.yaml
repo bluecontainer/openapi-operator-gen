@@ -24,8 +24,6 @@ spec:
         command:
         - /manager
         env:
-        - name: API_BASE_URL
-          value: {{ quote .Values.controllerManager.manager.env.apiBaseUrl }}
         - name: POD_NAME
           valueFrom:
             fieldRef:

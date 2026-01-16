@@ -528,6 +528,18 @@ type {{ .Kind }}Spec struct {
 {{- end }}
 	// +optional
 	ReadOnly bool `json:"readOnly,omitempty"`
+
+	// MergeOnUpdate controls whether updates merge the spec with the current API state.
+	// When true (default), the controller will GET the current resource state and merge
+	// only the fields specified in the spec before sending PUT/PATCH, preserving fields
+	// not specified in the spec. When false, the spec is sent as-is (full replacement).
+{{- if .HasPatch }}
+	// Note: This resource supports PATCH which inherently performs partial updates.
+	// MergeOnUpdate only affects PUT requests when PATCH is not used.
+{{- end }}
+	// +optional
+	// +kubebuilder:default=true
+	MergeOnUpdate *bool `json:"mergeOnUpdate,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}

@@ -649,25 +649,60 @@ spec:
 ```
 
 {{- $hasExternalIDRef := false }}
+{{- $hasPathParams := false }}
 {{- range .CRDs }}
 {{- if .NeedsExternalIDRef }}
 {{- $hasExternalIDRef = true }}
+{{- else if not .IsQuery }}
+{{- if not .IsAction }}
+{{- $hasPathParams = true }}
 {{- end }}
 {{- end }}
-{{- if $hasExternalIDRef }}
+{{- end }}
 ### Importing Existing Resources
 
-Reference an existing resource in the REST API:
+{{- if $hasExternalIDRef }}
+
+For CRDs without path parameters, use `externalIDRef` to reference an existing resource:
 
 ```yaml
 apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
-kind: {{ (index .CRDs 0).Kind }}
+{{- range .CRDs }}
+{{- if .NeedsExternalIDRef }}
+kind: {{ .Kind }}
+{{- break }}
+{{- end }}
+{{- end }}
 metadata:
   name: imported-resource
 spec:
   externalIDRef: "existing-id-123"
   # Spec fields will be synced to match the external resource
 ```
+{{- end }}
+{{- if $hasPathParams }}
+
+For CRDs with path parameters (e.g., `/pet/{petId}`), the ID field in the spec serves as the external reference:
+
+```yaml
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+{{- range .CRDs }}
+{{- if not .NeedsExternalIDRef }}
+{{- if not .IsQuery }}
+{{- if not .IsAction }}
+kind: {{ .Kind }}
+{{- break }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+metadata:
+  name: imported-resource
+spec:
+  id: 12345  # References the existing resource by its ID
+  # Other spec fields...
+```
+{{- end }}
 
 ### Read-Only Observation
 
@@ -679,10 +714,13 @@ kind: {{ (index .CRDs 0).Kind }}
 metadata:
   name: observed-resource
 spec:
+{{- if $hasExternalIDRef }}
   externalIDRef: "existing-id-123"
+{{- else }}
+  id: 12345  # ID of the resource to observe
+{{- end }}
   readOnly: true
 ```
-{{- end }}
 {{- end }}
 
 ## Deploying to Kubernetes

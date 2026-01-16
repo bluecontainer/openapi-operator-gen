@@ -831,7 +831,7 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 					))
 			}
 
-{{- if .HasPut }}
+{{- if or .HasPatch .HasPut }}
 			if !hasDrift {
 				// No drift - skip update
 				logger.Info("No drift detected, skipping update", "externalID", responseExternalID)
@@ -847,9 +847,15 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 				return nil
 			}
 
-			// Drift detected - proceed with PUT
+			// Drift detected - proceed with update
 			logger.Info("Drift detected, updating resource", "externalID", responseExternalID)
-			return r.updateResource(ctx, instance, baseURL, responseExternalID)
+{{- if .HasPatch }}
+			// Prefer PATCH for partial updates (inherently does partial update)
+			return r.patchResource(ctx, instance, baseURL, responseExternalID)
+{{- else }}
+			// Use PUT with merge support
+			return r.updateResource(ctx, instance, baseURL, responseExternalID, respData)
+{{- end }}
 {{- else }}
 {{- if .UpdateWithPost }}
 			if !hasDrift {
@@ -867,7 +873,7 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 
 			// Drift detected - proceed with POST (UpdateWithPost mode)
 			logger.Info("Drift detected, updating resource with POST", "externalID", responseExternalID)
-			return r.updateResourceWithPost(ctx, instance, baseURL, responseExternalID)
+			return r.updateResourceWithPost(ctx, instance, baseURL, responseExternalID, respData)
 {{- else }}
 			// No PUT method available - just record the current state (read-only sync)
 			logger.Info("Resource exists, recording current state (no PUT available)", "externalID", responseExternalID)
@@ -1010,10 +1016,96 @@ func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{
 }
 {{- end }}
 
+{{- if .HasPatch }}
+
+// patchResource performs a PATCH to partially update an existing resource.
+// PATCH inherently performs partial updates, only modifying the fields specified in the request.
+func (r *{{ .Kind }}Reconciler) patchResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
+	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "PATCH",
+		trace.WithAttributes(
+			attribute.String("http.method", "PATCH"),
+			attribute.String("http.url", baseURL),
+			attribute.String("resource.externalID", externalID),
+		))
+	defer span.End()
+
+	logger := log.FromContext(ctx)
+	start := time.Now()
+
+	url := r.buildResourceURL(baseURL, instance)
+	span.SetAttributes(attribute.String("http.url", url))
+
+	// Marshal spec, excluding controller-specific fields
+	specData, err := r.marshalSpecForAPI(instance)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(specData))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to create PATCH request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+
+	logger.Info("Patching resource", "url", url)
+	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
+	if err != nil {
+		r.recordAPICallMetrics(ctx, "PATCH", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to execute PATCH request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		r.recordAPICallMetrics(ctx, "PATCH", "error", resp.StatusCode, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to read PATCH response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		r.recordAPICallMetrics(ctx, "PATCH", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("PATCH failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	r.recordAPICallMetrics(ctx, "PATCH", "success", resp.StatusCode, duration)
+
+	now := metav1.Now()
+{{- if .HasPost }}
+	instance.Status.ExternalID = externalID
+{{- end }}
+	instance.Status.Response = &{{ .APIVersion }}.{{ .Kind }}EndpointResponse{
+		Success:     true,
+		StatusCode:  resp.StatusCode,
+		Data:        &k8sruntime.RawExtension{Raw: body},
+		LastUpdated: &now,
+	}
+	instance.Status.DriftDetected = false
+	instance.Status.LastGetTime = &now
+
+	logger.Info("Successfully patched resource", "externalID", externalID)
+	return nil
+}
+{{- end }}
+
 {{- if .HasPut }}
 
 // updateResource performs a PUT to update an existing resource.
-func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
+// If mergeOnUpdate is true (default), it merges the spec with the current API state before sending.
+func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string, currentState map[string]interface{}) error {
 	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "PUT",
 		trace.WithAttributes(
 			attribute.String("http.method", "PUT"),
@@ -1040,7 +1132,25 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 		return fmt.Errorf("failed to marshal spec: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(specData))
+	// Check if mergeOnUpdate is enabled (default: true)
+	mergeEnabled := instance.Spec.MergeOnUpdate == nil || *instance.Spec.MergeOnUpdate
+	span.SetAttributes(attribute.Bool("merge_on_update", mergeEnabled))
+
+	var requestBody []byte
+	if mergeEnabled && currentState != nil {
+		// Merge spec with current API state
+		requestBody, err = r.mergeSpecWithCurrentState(specData, currentState)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return fmt.Errorf("failed to merge spec with current state: %w", err)
+		}
+		logger.Info("Merged spec with current API state for PUT")
+	} else {
+		requestBody = specData
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(requestBody))
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -1048,7 +1158,7 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Info("Updating resource", "url", url)
+	logger.Info("Updating resource", "url", url, "mergeEnabled", mergeEnabled)
 	resp, err := r.HTTPClient.Do(req)
 	duration := time.Since(start).Seconds()
 
@@ -1098,11 +1208,61 @@ func (r *{{ .Kind }}Reconciler) updateResource(ctx context.Context, instance *{{
 }
 {{- end }}
 
+{{- if or .HasPut .UpdateWithPost }}
+
+// mergeSpecWithCurrentState merges the spec fields with the current API state.
+// Fields explicitly set in the spec override the current state, while unset fields are preserved.
+func (r *{{ .Kind }}Reconciler) mergeSpecWithCurrentState(specData []byte, currentState map[string]interface{}) ([]byte, error) {
+	var specMap map[string]interface{}
+	if err := json.Unmarshal(specData, &specMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal spec: %w", err)
+	}
+
+	// Start with current state as base
+	merged := make(map[string]interface{})
+	for k, v := range currentState {
+		merged[k] = v
+	}
+
+	// Overlay spec fields (only non-zero/non-empty values)
+	for k, v := range specMap {
+		if !r.isZeroValue(v) {
+			merged[k] = v
+		}
+	}
+
+	return json.Marshal(merged)
+}
+
+// isZeroValue checks if a value is considered "zero" or empty for merge purposes.
+// Zero values are not overlaid onto the current state, preserving the API's current value.
+func (r *{{ .Kind }}Reconciler) isZeroValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	switch val := v.(type) {
+	case string:
+		return val == ""
+	case float64:
+		return val == 0
+	case bool:
+		return !val
+	case []interface{}:
+		return len(val) == 0
+	case map[string]interface{}:
+		return len(val) == 0
+	default:
+		return false
+	}
+}
+{{- end }}
+
 {{- if .UpdateWithPost }}
 
 // updateResourceWithPost performs a POST to update an existing resource (when PUT is not available).
 // This is used when the API uses POST for both creation and updates.
-func (r *{{ .Kind }}Reconciler) updateResourceWithPost(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string) error {
+// If mergeOnUpdate is true (default), it merges the spec with the current API state before sending.
+func (r *{{ .Kind }}Reconciler) updateResourceWithPost(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, baseURL string, externalID string, currentState map[string]interface{}) error {
 	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "POST_UPDATE",
 		trace.WithAttributes(
 			attribute.String("http.method", "POST"),
@@ -1127,7 +1287,25 @@ func (r *{{ .Kind }}Reconciler) updateResourceWithPost(ctx context.Context, inst
 		return fmt.Errorf("failed to marshal spec: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(specData))
+	// Check if mergeOnUpdate is enabled (default: true)
+	mergeEnabled := instance.Spec.MergeOnUpdate == nil || *instance.Spec.MergeOnUpdate
+	span.SetAttributes(attribute.Bool("merge_on_update", mergeEnabled))
+
+	var requestBody []byte
+	if mergeEnabled && currentState != nil {
+		// Merge spec with current API state
+		requestBody, err = r.mergeSpecWithCurrentState(specData, currentState)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return fmt.Errorf("failed to merge spec with current state: %w", err)
+		}
+		logger.Info("Merged spec with current API state for POST update")
+	} else {
+		requestBody = specData
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(requestBody))
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -1135,7 +1313,7 @@ func (r *{{ .Kind }}Reconciler) updateResourceWithPost(ctx context.Context, inst
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Info("Updating resource with POST", "url", url)
+	logger.Info("Updating resource with POST", "url", url, "mergeEnabled", mergeEnabled)
 	resp, err := r.HTTPClient.Do(req)
 	duration := time.Since(start).Seconds()
 
@@ -1205,6 +1383,7 @@ func (r *{{ .Kind }}Reconciler) marshalSpecForAPI(instance *{{ .APIVersion }}.{{
 	delete(specMap, "externalIDRef")
 {{- end }}
 	delete(specMap, "readOnly")
+	delete(specMap, "mergeOnUpdate")
 
 	{{- if .ResourcePathParams }}
 	// Remove path parameter fields (they're used in URL, not body)

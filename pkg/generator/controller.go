@@ -75,6 +75,7 @@ type ControllerTemplateData struct {
 	HasDelete bool // True if DELETE method is available for this resource
 	HasPost   bool // True if POST method is available for this resource
 	HasPut    bool // True if PUT method is available for this resource
+	HasPatch  bool // True if PATCH method is available for this resource
 
 	// UpdateWithPost enables using POST for updates when PUT is not available.
 	// This is set when --update-with-post flag is used AND HasPut is false AND HasPost is true.
@@ -133,6 +134,7 @@ type MainTemplateData struct {
 	Year             int
 	GeneratorVersion string
 	APIVersion       string
+	APIGroup         string
 	ModuleName       string
 	AppName          string
 	CRDs             []CRDMainData
@@ -140,6 +142,10 @@ type MainTemplateData struct {
 	AggregateKind    string // Kind name of the aggregate CRD (e.g., "StatusAggregate")
 	HasBundle        bool   // True if bundle CRD is generated
 	BundleKind       string // Kind name of the bundle CRD (e.g., "PetstoreBundle")
+	// Version info for the generated operator
+	OperatorVersion string // Pseudo-version for go.mod (e.g., v0.0.8-0.20260115203556-d5024c8e6620)
+	CommitHash      string // Git commit hash (12 chars)
+	CommitTimestamp string // Commit timestamp in YYYYMMDDHHMMSS format (UTC)
 }
 
 // CRDMainData holds CRD data for main.go
@@ -259,6 +265,7 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		HasDelete:      crd.HasDelete,
 		HasPost:        crd.HasPost,
 		HasPut:         crd.HasPut,
+		HasPatch:       crd.HasPatch,
 		UpdateWithPost: crd.UpdateWithPost,
 		// Per-method paths
 		GetPath:        crd.GetPath,
@@ -594,13 +601,32 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggrega
 		return fmt.Errorf("failed to create cmd directory: %w", err)
 	}
 
+	// Build version info for the generated operator
+	operatorVersion := g.config.GeneratorVersion
+	if !isValidSemver(operatorVersion) {
+		operatorVersion = g.buildPseudoVersion()
+	}
+
+	// Prepare commit hash (ensure 12 chars)
+	commitHash := g.config.CommitHash
+	if len(commitHash) > 12 {
+		commitHash = commitHash[:12]
+	}
+
+	// Normalize timestamp to YYYYMMDDHHMMSS format
+	timestamp := normalizeTimestamp(g.config.CommitTimestamp)
+
 	data := MainTemplateData{
 		Year:             time.Now().Year(),
 		GeneratorVersion: g.config.GeneratorVersion,
 		APIVersion:       g.config.APIVersion,
+		APIGroup:         g.config.APIGroup,
 		ModuleName:       g.config.ModuleName,
 		AppName:          strings.Split(g.config.APIGroup, ".")[0],
 		CRDs:             make([]CRDMainData, 0, len(crds)),
+		OperatorVersion:  operatorVersion,
+		CommitHash:       commitHash,
+		CommitTimestamp:  timestamp,
 	}
 
 	for _, crd := range crds {
@@ -640,27 +666,120 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggrega
 }
 
 func (g *ControllerGenerator) generateGoMod(hasAggregate bool, hasBundle bool) error {
-	// Use the generator version for the dependency
-	// Only use clean semver versions (vX.Y.Z), otherwise fall back to v0.0.0
-	// which will be resolved to latest by go mod tidy
-	version := g.config.GeneratorVersion
-	if !isValidSemver(version) {
-		version = "v0.0.0"
+	// Determine the module version to use in go.mod require directive
+	// If version is a clean semver (vX.Y.Z), use it as-is
+	// Otherwise, construct a proper Go module pseudo-version
+	moduleVersion := g.config.GeneratorVersion
+	if !isValidSemver(moduleVersion) {
+		moduleVersion = g.buildPseudoVersion()
 	}
 
 	data := struct {
 		ModuleName       string
-		GeneratorVersion string
+		GeneratorVersion string // Original generator version for the comment (e.g., v0.0.7-10-gd5024c8-dirty)
+		ModuleVersion    string // Valid Go module version for require directive (e.g., v0.0.8-0.20260115203556-d5024c8e6620)
 		HasAggregate     bool
 		HasBundle        bool
 	}{
 		ModuleName:       g.config.ModuleName,
-		GeneratorVersion: version,
+		GeneratorVersion: g.config.GeneratorVersion, // Original version for comment
+		ModuleVersion:    moduleVersion,             // Pseudo-version for dependency
 		HasAggregate:     hasAggregate,
 		HasBundle:        hasBundle,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
 	return g.executeTemplate(templates.GoModTemplate, data, outputPath)
+}
+
+// buildPseudoVersion constructs a Go module pseudo-version from config fields.
+// Format: vX.Y.(Z+1)-0.YYYYMMDDHHMMSS-COMMIT12
+// Example: v0.0.8-0.20260115203556-d5024c8e6620
+func (g *ControllerGenerator) buildPseudoVersion() string {
+	// Extract base version from GeneratorVersion (e.g., v0.0.7 from v0.0.7-10-gd5024c8-dirty)
+	baseVersion := extractBaseSemver(g.config.GeneratorVersion)
+
+	// If we have commit hash and timestamp, build a proper pseudo-version
+	commitHash := g.config.CommitHash
+	timestamp := g.config.CommitTimestamp
+
+	// Ensure commit hash is at least 12 characters
+	if len(commitHash) > 0 && len(timestamp) > 0 {
+		// Pad commit hash to 12 chars if needed
+		if len(commitHash) < 12 {
+			commitHash = commitHash + strings.Repeat("0", 12-len(commitHash))
+		} else if len(commitHash) > 12 {
+			commitHash = commitHash[:12]
+		}
+
+		// Convert timestamp to YYYYMMDDHHMMSS format if needed
+		// Input may be ISO format (2026-01-15T20:35:56Z) or already YYYYMMDDHHMMSS
+		timestamp = normalizeTimestamp(timestamp)
+
+		// Increment patch version for pseudo-version
+		// e.g., v0.0.7 -> v0.0.8
+		incrementedVersion := incrementPatchVersion(baseVersion)
+
+		// Format: vX.Y.Z-0.YYYYMMDDHHMMSS-COMMIT12
+		return fmt.Sprintf("%s-0.%s-%s", incrementedVersion, timestamp, commitHash)
+	}
+
+	// Fallback to base version if no commit info available
+	return baseVersion
+}
+
+// normalizeTimestamp converts a timestamp to YYYYMMDDHHMMSS format.
+// Handles ISO format (2026-01-15T20:35:56Z) or passes through if already in target format.
+func normalizeTimestamp(ts string) string {
+	// If already in YYYYMMDDHHMMSS format (14 digits), return as-is
+	if len(ts) == 14 && isAllDigits(ts) {
+		return ts
+	}
+
+	// Try parsing ISO format
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		// Try parsing without timezone
+		t, err = time.Parse("2006-01-02T15:04:05", ts)
+		if err != nil {
+			// Return original if can't parse
+			return ts
+		}
+	}
+
+	return t.UTC().Format("20060102150405")
+}
+
+// isAllDigits checks if a string contains only digits
+func isAllDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// incrementPatchVersion increments the patch version of a semver string.
+// e.g., v0.0.7 -> v0.0.8, v1.2.3 -> v1.2.4
+func incrementPatchVersion(version string) string {
+	v := strings.TrimPrefix(version, "v")
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return version
+	}
+
+	// Parse and increment patch version
+	patch := 0
+	for _, c := range parts[2] {
+		if c >= '0' && c <= '9' {
+			patch = patch*10 + int(c-'0')
+		} else {
+			break
+		}
+	}
+	patch++
+
+	return fmt.Sprintf("v%s.%s.%d", parts[0], parts[1], patch)
 }
 
 // isValidSemver checks if a version string is a clean semver (vX.Y.Z)
@@ -694,6 +813,49 @@ func isValidSemver(version string) bool {
 		}
 	}
 	return true
+}
+
+// extractBaseSemver extracts the base semantic version from a git describe version.
+// For example:
+//   - "v0.0.7" -> "v0.0.7"
+//   - "v0.0.7-10-gd5024c8-dirty" -> "v0.0.7"
+//   - "v0.0.7-dirty" -> "v0.0.7"
+//
+// Returns "v0.0.0" if no valid base version can be extracted.
+func extractBaseSemver(version string) string {
+	if version == "" || version == "dev" {
+		return "v0.0.0"
+	}
+
+	// Remove leading 'v' for processing
+	v := strings.TrimPrefix(version, "v")
+
+	// Split on '-' to get the base version part
+	// e.g., "0.0.7-10-gd5024c8-dirty" -> ["0.0.7", "10", "gd5024c8", "dirty"]
+	parts := strings.Split(v, "-")
+	if len(parts) == 0 {
+		return "v0.0.0"
+	}
+
+	// The first part should be X.Y.Z
+	baseParts := strings.Split(parts[0], ".")
+	if len(baseParts) != 3 {
+		return "v0.0.0"
+	}
+
+	// Validate each part is numeric
+	for _, part := range baseParts {
+		if part == "" {
+			return "v0.0.0"
+		}
+		for _, c := range part {
+			if c < '0' || c > '9' {
+				return "v0.0.0"
+			}
+		}
+	}
+
+	return "v" + parts[0]
 }
 
 func (g *ControllerGenerator) generateDockerfile() error {

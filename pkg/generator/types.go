@@ -63,6 +63,7 @@ type CRDTypeData struct {
 	// HTTP method availability (for Resource CRDs)
 	HasDelete bool // True if DELETE method is available
 	HasPost   bool // True if POST method is available
+	HasPatch  bool // True if PATCH method is available
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
@@ -136,6 +137,7 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			// HTTP method availability
 			HasDelete: crd.HasDelete,
 			HasPost:   crd.HasPost,
+			HasPatch:  crd.HasPatch,
 			// ExternalIDRef handling
 			NeedsExternalIDRef: crd.NeedsExternalIDRef,
 		}

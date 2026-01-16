@@ -86,6 +86,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [How Reconciliation Works](#how-reconciliation-works)
   - [Importing Existing Resources](#importing-existing-resources)
   - [Read-Only Mode](#read-only-mode)
+  - [Partial Updates](#partial-updates)
   - [Multi-Endpoint Observation](#multi-endpoint-observation)
   - [Status Fields](#status-fields)
 - [Example: Petstore Operator](#example-petstore-operator)
@@ -1875,10 +1876,13 @@ Every generated CR includes these controller-specific fields in the spec:
 | `targetStatefulSet` | StatefulSet name for per-CR workload discovery |
 | `targetDeployment` | Deployment name for per-CR workload discovery |
 | `targetNamespace` | Namespace for target workload (defaults to CR namespace) |
-| `externalIDRef` | Reference an existing external resource by ID |
+| `externalIDRef` | Reference an existing external resource by ID (only for CRDs without path parameters) |
 | `readOnly` | If true, only observe the resource (no create/update/delete) |
+| `mergeOnUpdate` | If true (default), merge spec with current API state before updates (see [Partial Updates](#partial-updates)) |
 
 These fields are stripped from the payload when sending requests to the REST API.
+
+**Note:** The `externalIDRef` field is only generated for CRDs where the REST API doesn't use path parameters to identify resources. When path parameters exist (e.g., `/pet/{petId}`), the ID field in the spec (e.g., `id`) serves as the external reference instead. See [Importing Existing Resources](#importing-existing-resources) for details.
 
 #### Targeting Behavior
 
@@ -1943,6 +1947,32 @@ When `externalIDRef` is set:
 - Drift detection compares your spec with the existing resource
 - Updates are applied if the spec differs from the external state
 
+#### When is `externalIDRef` available?
+
+The `externalIDRef` field is only generated for CRDs where the REST API path does **not** contain path parameters to identify the resource. For example:
+
+| API Pattern | Identifier | `externalIDRef` |
+|-------------|------------|-----------------|
+| `POST /pet` → `GET /pet/{petId}` | `petId` path param | Not needed - use `id` field in spec |
+| `POST /user` → `GET /user/{username}` | `username` path param | Not needed - use `username` field in spec |
+| `POST /orders` → `GET /orders/{orderId}` | `orderId` path param | Not needed - use `id` field in spec |
+| `POST /config` → `GET /config` (no path param) | None in path | **Available** - use `externalIDRef` |
+
+When the REST API uses path parameters like `/pet/{petId}`, the identifier field (e.g., `id`, `petId`) is already part of the spec and serves as the external reference. In these cases, to import an existing resource, simply set the ID field:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: imported-pet
+spec:
+  id: 12345  # The petId path parameter - references existing pet
+  name: Fluffy
+  status: available
+```
+
+The `externalIDRef` field is only generated when there's no path parameter to identify the resource.
+
 ### Read-Only Mode
 
 For observation-only use cases, you can create read-only CRs that never modify the external resource:
@@ -1963,6 +1993,84 @@ When `readOnly: true`:
 - No finalizer is added (CR can be deleted without affecting external resource)
 - Status is updated with the current external state
 - State will be `Observed` (success) or `NotFound` (resource doesn't exist)
+
+### Partial Updates
+
+By default, the controller performs **partial updates** when reconciling resources. This means only the fields you specify in the CR spec are updated, while other fields in the external resource are preserved.
+
+#### How It Works
+
+When `mergeOnUpdate: true` (the default):
+
+1. **GET**: Controller fetches the current state from the REST API
+2. **Merge**: Your spec fields are merged with the current API state
+3. **Update**: The merged payload is sent via PUT (or POST if using `--update-with-post`)
+
+This prevents accidentally overwriting fields in the external resource that aren't specified in your CR.
+
+#### Example
+
+Suppose the external API has a Pet with this state:
+
+```json
+{
+  "id": 123,
+  "name": "Fluffy",
+  "status": "available",
+  "category": { "id": 1, "name": "Dogs" },
+  "photoUrls": ["http://example.com/photo1.jpg"]
+}
+```
+
+And your CR only specifies:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  id: 123
+  name: "Fluffy Updated"  # Only changing the name
+```
+
+With `mergeOnUpdate: true` (default), the controller will:
+1. GET the current state (all fields)
+2. Merge your spec (`name: "Fluffy Updated"`) onto it
+3. PUT the full merged object, preserving `status`, `category`, and `photoUrls`
+
+Without merging (`mergeOnUpdate: false`), unspecified fields might be sent as zero values, potentially overwriting data in the API.
+
+#### Disabling Merge
+
+To send the spec as-is without merging (full replacement mode):
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  mergeOnUpdate: false  # Disable merge - send spec as-is
+  id: 123
+  name: "Fluffy"
+  status: "available"
+```
+
+Use `mergeOnUpdate: false` when:
+- You want full control over all fields
+- The API expects complete objects on PUT
+- You intentionally want to clear fields not in your spec
+
+#### PATCH Support
+
+When the OpenAPI spec includes a PATCH method for a resource, the generated controller will automatically prefer PATCH over PUT for updates. PATCH inherently performs partial updates, so the `mergeOnUpdate` setting only affects PUT requests.
+
+| HTTP Method | Partial Update Behavior |
+|-------------|------------------------|
+| PATCH | Always partial (inherent to PATCH semantics) |
+| PUT | Partial if `mergeOnUpdate: true` (default) |
+| POST (with `--update-with-post`) | Partial if `mergeOnUpdate: true` (default) |
 
 ### Multi-Endpoint Observation
 

@@ -193,6 +193,7 @@ type CRDTypeData struct {
 	// HTTP method availability
 	HasDelete bool
 	HasPost   bool
+	HasPatch  bool
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool
@@ -449,6 +450,7 @@ type ControllerTemplateData struct {
 	HasDelete bool
 	HasPost   bool
 	HasPut    bool
+	HasPatch  bool
 
 	// UpdateWithPost enables using POST for updates when PUT is not available
 	UpdateWithPost bool
@@ -503,6 +505,61 @@ func TestControllerTemplateExecution(t *testing.T) {
 	}
 	if !strings.Contains(output, "petFinalizer") {
 		t.Error("Output doesn't contain expected finalizer constant")
+	}
+}
+
+func TestControllerTemplateWithUpdateWithPost(t *testing.T) {
+	tmpl, err := template.New("controller").Parse(ControllerTemplate)
+	if err != nil {
+		t.Fatalf("Failed to parse ControllerTemplate: %v", err)
+	}
+
+	data := ControllerTemplateData{
+		Year:              2024,
+		GeneratorVersion:  "v0.0.1",
+		APIGroup:          "petstore.example.com",
+		APIVersion:        "v1alpha1",
+		ModuleName:        "github.com/example/petstore-operator",
+		Kind:              "Widget",
+		KindLower:         "widget",
+		Plural:            "widgets",
+		BasePath:          "/widget",
+		IsQuery:           false,
+		HasResourceParams: false,
+		HasDelete:         false, // No DELETE
+		HasPost:           true,  // Has POST
+		HasPut:            false, // No PUT
+		HasPatch:          false, // No PATCH
+		UpdateWithPost:    true,  // Use POST for updates
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.Execute(&buf, data)
+	if err != nil {
+		t.Errorf("Failed to execute ControllerTemplate with UpdateWithPost: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "package controller") {
+		t.Error("Output doesn't contain expected package declaration")
+	}
+	if !strings.Contains(output, "WidgetReconciler") {
+		t.Error("Output doesn't contain expected WidgetReconciler type")
+	}
+	// UpdateWithPost should generate updateResourceWithPost function
+	if !strings.Contains(output, "func (r *WidgetReconciler) updateResourceWithPost") {
+		t.Error("Output doesn't contain expected updateResourceWithPost function")
+	}
+	// UpdateWithPost should also generate merge helper functions
+	if !strings.Contains(output, "func (r *WidgetReconciler) mergeSpecWithCurrentState") {
+		t.Error("Output doesn't contain expected mergeSpecWithCurrentState function")
+	}
+	if !strings.Contains(output, "func (r *WidgetReconciler) isZeroValue") {
+		t.Error("Output doesn't contain expected isZeroValue function")
+	}
+	// Should check for mergeOnUpdate in updateResourceWithPost
+	if !strings.Contains(output, "instance.Spec.MergeOnUpdate") {
+		t.Error("Output doesn't contain expected MergeOnUpdate check")
 	}
 }
 
@@ -901,6 +958,7 @@ type MainTemplateData struct {
 	Year             int
 	GeneratorVersion string
 	APIVersion       string
+	APIGroup         string
 	ModuleName       string
 	AppName          string
 	CRDs             []CRDMainData
@@ -908,6 +966,10 @@ type MainTemplateData struct {
 	AggregateKind    string
 	HasBundle        bool
 	BundleKind       string
+	// Version info for the generated operator
+	OperatorVersion string
+	CommitHash      string
+	CommitTimestamp string
 }
 
 func TestMainTemplateExecution(t *testing.T) {
@@ -920,6 +982,7 @@ func TestMainTemplateExecution(t *testing.T) {
 		Year:             2024,
 		GeneratorVersion: "v0.0.1",
 		APIVersion:       "v1alpha1",
+		APIGroup:         "petstore.example.com",
 		ModuleName:       "github.com/example/petstore-operator",
 		AppName:          "petstore",
 		CRDs: []CRDMainData{
@@ -927,6 +990,9 @@ func TestMainTemplateExecution(t *testing.T) {
 			{Kind: "User", IsQuery: false},
 			{Kind: "PetFindByTags", IsQuery: true},
 		},
+		OperatorVersion: "v0.0.2-0.20260115203556-d5024c8e6620",
+		CommitHash:      "d5024c8e6620",
+		CommitTimestamp: "20260115203556",
 	}
 
 	var buf bytes.Buffer
@@ -951,6 +1017,10 @@ func TestMainTemplateExecution(t *testing.T) {
 	if !strings.Contains(output, "PetFindByTagsReconciler") {
 		t.Error("Output doesn't contain expected PetFindByTagsReconciler setup")
 	}
+	// Verify version info is included (check for generatorVersion variable assignment)
+	if !strings.Contains(output, "generatorVersion") {
+		t.Error("Output doesn't contain expected generatorVersion variable")
+	}
 }
 
 func TestMainTemplateWithSingleCRD(t *testing.T) {
@@ -963,11 +1033,15 @@ func TestMainTemplateWithSingleCRD(t *testing.T) {
 		Year:             2024,
 		GeneratorVersion: "v0.0.1",
 		APIVersion:       "v1alpha1",
+		APIGroup:         "simple.example.com",
 		ModuleName:       "github.com/example/simple-operator",
 		AppName:          "simple",
 		CRDs: []CRDMainData{
 			{Kind: "Resource", IsQuery: false},
 		},
+		OperatorVersion: "v0.0.1",
+		CommitHash:      "abc123def456",
+		CommitTimestamp: "20260115120000",
 	}
 
 	var buf bytes.Buffer
