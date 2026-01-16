@@ -1710,9 +1710,9 @@ spec:
 
 If a CR doesn't specify a target and no global configuration exists, reconciliation will fail with:
 ```
-no endpoint configured: set global endpoint (--base-url, --statefulset-name,
+no endpoint configured: set global endpoint (--base-url, --pod-name, --statefulset-name,
 --deployment-name, or --helm-release) or specify per-CR targeting
-(targetHelmRelease, targetStatefulSet, or targetDeployment)
+(targetBaseURL, targetPod, targetHelmRelease, targetStatefulSet, or targetDeployment)
 ```
 
 ### 1. Static URL Mode
@@ -1775,6 +1775,7 @@ All endpoint flags are optional. If no global endpoint is configured, each CR mu
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--base-url` | Static REST API base URL | (optional) |
+| `--pod-name` | Pod name for direct endpoint targeting | (optional) |
 | `--statefulset-name` | StatefulSet name for endpoint discovery | (optional) |
 | `--deployment-name` | Deployment name for endpoint discovery | (optional) |
 | `--helm-release` | Helm release name for endpoint discovery | (optional) |
@@ -1885,6 +1886,26 @@ This is the simplest targeting option and takes highest priority over all other 
 - You need to target a specific URL without workload discovery
 - Testing against a local development server
 
+#### Target by Pod Name
+
+Target a specific pod directly by name:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  name: Fluffy
+  targetPod: petstore-api-0           # Routes to this specific pod
+  targetNamespace: production          # Optional: namespace
+```
+
+This is useful when:
+- You want to target a specific pod without StatefulSet/Deployment discovery
+- Testing against a specific pod instance
+- The pod is not managed by a StatefulSet or Deployment
+
 ### Spec Fields Reference
 
 Every generated CR includes these controller-specific fields in the spec:
@@ -1892,6 +1913,7 @@ Every generated CR includes these controller-specific fields in the spec:
 | Field | Description |
 |-------|-------------|
 | `targetBaseURL` | Static base URL for the REST API (highest priority, overrides all other targeting) |
+| `targetPod` | Pod name to route requests to directly |
 | `targetPodOrdinal` | StatefulSet pod ordinal to route requests to (by-ordinal strategy) |
 | `targetHelmRelease` | Helm release name for per-CR workload discovery |
 | `targetStatefulSet` | StatefulSet name for per-CR workload discovery |
@@ -2270,6 +2292,7 @@ All flags can be set via environment variables:
 | Variable | Flag |
 |----------|------|
 | `REST_API_BASE_URL` | `--base-url` |
+| `POD_NAME` | `--pod-name` |
 | `STATEFULSET_NAME` | `--statefulset-name` |
 | `DEPLOYMENT_NAME` | `--deployment-name` |
 | `HELM_RELEASE` | `--helm-release` |

@@ -64,11 +64,14 @@ const (
 // Config holds endpoint resolver configuration
 type Config struct {
 	// StatefulSetName is the name of the StatefulSet to discover pods from.
-	// Either StatefulSetName, DeploymentName, or HelmRelease must be specified.
+	// Either StatefulSetName, DeploymentName, PodName, or HelmRelease must be specified.
 	StatefulSetName string
 	// DeploymentName is the name of the Deployment to discover pods from.
-	// Either StatefulSetName, DeploymentName, or HelmRelease must be specified.
+	// Either StatefulSetName, DeploymentName, PodName, or HelmRelease must be specified.
 	DeploymentName string
+	// PodName is the name of a specific pod to target directly.
+	// Either StatefulSetName, DeploymentName, PodName, or HelmRelease must be specified.
+	PodName string
 	// Namespace is the namespace of the workload
 	Namespace string
 	// HelmRelease is the name of the Helm release to discover workload from.
@@ -1238,4 +1241,54 @@ func (r *Resolver) discoverDeploymentEndpoints(ctx context.Context, deployName, 
 	}
 
 	return endpoints, nil
+}
+
+// GetEndpointForPod returns an endpoint URL for a specific pod by name.
+// This supports per-CR targeting when targetPod is specified.
+func (r *Resolver) GetEndpointForPod(ctx context.Context, podName, namespace string) (string, error) {
+	logger := log.FromContext(ctx)
+
+	if namespace == "" {
+		namespace = r.GetNamespace()
+	}
+
+	// Get the specific pod
+	pod := &corev1.Pod{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      podName,
+		Namespace: namespace,
+	}, pod)
+	if err != nil {
+		return "", fmt.Errorf("failed to get Pod %s: %w", podName, err)
+	}
+
+	// Check if pod is running and has an IP
+	if pod.Status.Phase != corev1.PodRunning {
+		return "", fmt.Errorf("pod %s is not running (phase: %s)", podName, pod.Status.Phase)
+	}
+	if pod.Status.PodIP == "" {
+		return "", fmt.Errorf("pod %s has no IP address", podName)
+	}
+	if pod.DeletionTimestamp != nil {
+		return "", fmt.Errorf("pod %s is being deleted", podName)
+	}
+
+	url := fmt.Sprintf("%s://%s:%d%s", r.config.Scheme, pod.Status.PodIP, r.config.Port, r.config.BasePath)
+
+	logger.Info("Resolved pod endpoint",
+		"pod", podName,
+		"namespace", namespace,
+		"url", url)
+
+	return url, nil
+}
+
+// IsPodConfigured returns true if the resolver is configured to target a specific pod
+func (r *Resolver) IsPodConfigured() bool {
+	return r.config.PodName != ""
+}
+
+// GetConfiguredPodName returns the configured pod name (for global targeting)
+func (r *Resolver) GetConfiguredPodName() string {
+	return r.config.PodName
 }

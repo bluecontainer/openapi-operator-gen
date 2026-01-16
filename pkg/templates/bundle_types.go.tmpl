@@ -149,6 +149,11 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
 
+	// TargetPod specifies a pod name to route requests to directly.
+	// This is applied to all child resources created by the bundle.
+	// +optional
+	TargetPod string `json:"targetPod,omitempty"`
+
 	// TargetNamespace specifies the namespace for the target workload.
 	// This is applied to all child resources created by the bundle.
 	// +optional

@@ -59,6 +59,7 @@ func main() {
 	// Workload discovery mode
 	var stsName string
 	var deployName string
+	var podName string
 	var namespace string
 	var stsServiceName string
 	var port int
@@ -82,6 +83,7 @@ func main() {
 	// Workload discovery mode flags
 	flag.StringVar(&stsName, "statefulset-name", "", "Name of the StatefulSet to discover endpoints from")
 	flag.StringVar(&deployName, "deployment-name", "", "Name of the Deployment to discover endpoints from")
+	flag.StringVar(&podName, "pod-name", "", "Name of a specific pod to target directly")
 	flag.StringVar(&namespace, "namespace", "", "Namespace of the workload (defaults to operator namespace)")
 	flag.StringVar(&stsServiceName, "service", "", "Headless service name for DNS discovery (StatefulSet only)")
 	flag.IntVar(&port, "port", 8080, "Port number for REST API on pods")
@@ -143,6 +145,9 @@ func main() {
 	if deployName == "" {
 		deployName = os.Getenv("DEPLOYMENT_NAME")
 	}
+	if podName == "" {
+		podName = os.Getenv("POD_NAME")
+	}
 	if helmRelease == "" {
 		helmRelease = os.Getenv("HELM_RELEASE")
 	}
@@ -160,11 +165,11 @@ func main() {
 	}
 
 	// Check if global endpoint configuration is provided
-	useWorkloadDiscovery := stsName != "" || deployName != "" || helmRelease != ""
+	useWorkloadDiscovery := stsName != "" || deployName != "" || podName != "" || helmRelease != ""
 	hasGlobalConfig := useWorkloadDiscovery || baseURL != ""
 
 	if !hasGlobalConfig {
-		setupLog.Info("No global endpoint configuration provided - CRs must specify targetHelmRelease, targetStatefulSet, or targetDeployment")
+		setupLog.Info("No global endpoint configuration provided - CRs must specify targetBaseURL, targetPod, targetHelmRelease, targetStatefulSet, or targetDeployment")
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -193,6 +198,7 @@ func main() {
 	cfg := endpoint.Config{
 		StatefulSetName: stsName,
 		DeploymentName:  deployName,
+		PodName:         podName,
 		Namespace:       namespace,
 		HelmRelease:     helmRelease,
 		WorkloadKind:    endpoint.WorkloadKind(workloadKind),
@@ -207,7 +213,8 @@ func main() {
 	resolver := endpoint.NewResolver(mgr.GetClient(), cfg)
 
 	// Start resolver's background refresh only if global workload discovery is configured
-	if useWorkloadDiscovery {
+	// (not needed for pod-name mode since we target a specific pod)
+	if useWorkloadDiscovery && podName == "" {
 		if err := resolver.Start(ctx); err != nil {
 			setupLog.Error(err, "unable to start endpoint resolver")
 			os.Exit(1)
@@ -232,6 +239,10 @@ func main() {
 				"strategy", strategy,
 				"discovery", discoveryMode)
 		}
+	} else if podName != "" {
+		setupLog.Info("Using pod endpoint discovery",
+			"pod", podName,
+			"namespace", namespace)
 	} else if baseURL != "" {
 		setupLog.Info("Using static base URL", "url", baseURL)
 	}

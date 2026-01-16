@@ -110,6 +110,10 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	TargetDeployment string `json:"targetDeployment,omitempty"`
 
+	// TargetPod specifies a pod name to route requests to directly.
+	// +optional
+	TargetPod string `json:"targetPod,omitempty"`
+
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
@@ -313,6 +317,10 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	TargetDeployment string `json:"targetDeployment,omitempty"`
 
+	// TargetPod specifies a pod name to route requests to directly.
+	// +optional
+	TargetPod string `json:"targetPod,omitempty"`
+
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
@@ -513,6 +521,11 @@ type {{ .Kind }}Spec struct {
 	// When set, overrides the operator's global endpoint configuration for this CR.
 	// +optional
 	TargetDeployment string `json:"targetDeployment,omitempty"`
+
+	// TargetPod specifies a pod name to route requests to directly.
+	// When set, overrides the operator's global endpoint configuration for this CR.
+	// +optional
+	TargetPod string `json:"targetPod,omitempty"`
 
 	// TargetNamespace specifies the namespace to look for the target workload.
 	// Defaults to the CR's namespace if not specified.

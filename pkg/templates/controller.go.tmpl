@@ -544,6 +544,7 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 	delete(specMap, "targetHelmRelease")
 	delete(specMap, "targetStatefulSet")
 	delete(specMap, "targetDeployment")
+	delete(specMap, "targetPod")
 	delete(specMap, "targetNamespace")
 	delete(specMap, "targetBaseURL")
 {{- if .NeedsExternalIDRef }}
@@ -708,6 +709,11 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 			namespace = instance.Namespace
 		}
 
+		// Per-CR pod targeting
+		if instance.Spec.TargetPod != "" {
+			return r.EndpointResolver.GetEndpointForPod(ctx, instance.Spec.TargetPod, namespace)
+		}
+
 		// Per-CR Helm release targeting
 		if instance.Spec.TargetHelmRelease != "" {
 			return r.EndpointResolver.GetEndpointForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace, instance.Spec.TargetPodOrdinal)
@@ -721,6 +727,11 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 		// Per-CR Deployment targeting
 		if instance.Spec.TargetDeployment != "" {
 			return r.EndpointResolver.GetEndpointForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
+		}
+
+		// Global pod-name targeting (from operator flags)
+		if r.EndpointResolver.IsPodConfigured() {
+			return r.EndpointResolver.GetEndpointForPod(ctx, r.EndpointResolver.GetConfiguredPodName(), namespace)
 		}
 
 		// By-ordinal strategy
@@ -754,6 +765,15 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		namespace = instance.Namespace
 	}
 
+	// Per-CR pod targeting (returns single endpoint)
+	if instance.Spec.TargetPod != "" {
+		url, err := r.EndpointResolver.GetEndpointForPod(ctx, instance.Spec.TargetPod, namespace)
+		if err != nil {
+			return nil, err
+		}
+		return []string{url}, nil
+	}
+
 	// Per-CR Helm release targeting
 	if instance.Spec.TargetHelmRelease != "" {
 		return r.EndpointResolver.GetAllEndpointsForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace)
@@ -767,6 +787,15 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 	// Per-CR Deployment targeting
 	if instance.Spec.TargetDeployment != "" {
 		return r.EndpointResolver.GetAllEndpointsForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
+	}
+
+	// Global pod-name targeting (returns single endpoint)
+	if r.EndpointResolver.IsPodConfigured() {
+		url, err := r.EndpointResolver.GetEndpointForPod(ctx, r.EndpointResolver.GetConfiguredPodName(), namespace)
+		if err != nil {
+			return nil, err
+		}
+		return []string{url}, nil
 	}
 
 	// Fall back to global all-healthy endpoints
@@ -1405,6 +1434,7 @@ func (r *{{ .Kind }}Reconciler) marshalSpecForAPI(instance *{{ .APIVersion }}.{{
 	delete(specMap, "targetHelmRelease")
 	delete(specMap, "targetStatefulSet")
 	delete(specMap, "targetDeployment")
+	delete(specMap, "targetPod")
 	delete(specMap, "targetNamespace")
 	delete(specMap, "targetBaseURL")
 {{- if .NeedsExternalIDRef }}
