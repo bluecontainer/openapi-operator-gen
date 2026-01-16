@@ -153,6 +153,12 @@ type {{ .Kind }}Spec struct {
 	// This is applied to all child resources created by the bundle.
 	// +optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+
+	// TargetBaseURL specifies a static base URL for the REST API.
+	// This is applied to all child resources created by the bundle.
+	// Example: "http://api.example.com:8080"
+	// +optional
+	TargetBaseURL string `json:"targetBaseURL,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}

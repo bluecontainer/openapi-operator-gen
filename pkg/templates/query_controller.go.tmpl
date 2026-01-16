@@ -241,6 +241,11 @@ func (r *{{ .Kind }}Reconciler) getBaseURLByOrdinal(ctx context.Context, ordinal
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
 func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) (string, error) {
+	// Per-CR static base URL takes highest priority
+	if instance.Spec.TargetBaseURL != "" {
+		return instance.Spec.TargetBaseURL, nil
+	}
+
 	if r.EndpointResolver != nil {
 		namespace := instance.Spec.TargetNamespace
 		if namespace == "" {
@@ -270,6 +275,11 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 // resolveAllHealthyEndpoints returns all healthy endpoint URLs based on CR targeting fields.
 // This is used for all-healthy strategy fan-out operations.
 func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]string, error) {
+	// Per-CR static base URL takes highest priority
+	if instance.Spec.TargetBaseURL != "" {
+		return []string{instance.Spec.TargetBaseURL}, nil
+	}
+
 	if r.EndpointResolver == nil {
 		// No resolver - return single static URL
 		url, err := r.getBaseURL(ctx)

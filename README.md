@@ -1866,12 +1866,32 @@ spec:
 
 Note: `targetPodOrdinal` is ignored when targeting a Deployment.
 
+#### Target by Base URL
+
+For direct control over the API endpoint without workload discovery:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  name: Fluffy
+  targetBaseURL: "http://api.example.com:8080"  # Direct URL to the REST API
+```
+
+This is the simplest targeting option and takes highest priority over all other targeting methods. It's useful when:
+- The API is hosted externally (not in the Kubernetes cluster)
+- You need to target a specific URL without workload discovery
+- Testing against a local development server
+
 ### Spec Fields Reference
 
 Every generated CR includes these controller-specific fields in the spec:
 
 | Field | Description |
 |-------|-------------|
+| `targetBaseURL` | Static base URL for the REST API (highest priority, overrides all other targeting) |
 | `targetPodOrdinal` | StatefulSet pod ordinal to route requests to (by-ordinal strategy) |
 | `targetHelmRelease` | Helm release name for per-CR workload discovery |
 | `targetStatefulSet` | StatefulSet name for per-CR workload discovery |
