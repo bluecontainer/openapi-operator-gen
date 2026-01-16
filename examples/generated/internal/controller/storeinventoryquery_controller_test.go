@@ -116,7 +116,8 @@ func TestStoreInventoryQueryReconciler_E2E(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	// Create fake client with the object
@@ -202,7 +203,8 @@ func TestStoreInventoryQueryReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -285,7 +287,8 @@ func TestStoreInventoryQueryReconciler_CreateResource(t *testing.T) {
 			Name:      "new-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -348,7 +351,8 @@ func TestStoreInventoryQueryReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -411,7 +415,8 @@ func TestStoreInventoryQueryReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -474,7 +479,8 @@ func TestStoreInventoryQueryReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -543,7 +549,8 @@ func TestStoreInventoryQueryReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -598,7 +605,8 @@ func TestStoreInventoryQueryReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -654,7 +662,8 @@ func TestStoreInventoryQueryReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -864,7 +873,6 @@ func TestStoreInventoryQueryReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-
 // TestStoreInventoryQueryReconciler_QueryParams verifies that query parameters from spec
 // are correctly appended to the HTTP request URL
 func TestStoreInventoryQueryReconciler_QueryParams(t *testing.T) {
@@ -897,7 +905,8 @@ func TestStoreInventoryQueryReconciler_QueryParams(t *testing.T) {
 			Name:      "test-storeinventoryquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.StoreInventoryQuerySpec{},
+		Spec: v1alpha1.StoreInventoryQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -974,3 +983,4 @@ func TestStoreInventoryQueryReconciler_QueryParams(t *testing.T) {
 		t.Errorf("expected query path pattern %q in URL (prefix=%q, suffix=%q)", expectedQueryPath, staticPrefix, staticSuffix)
 	}
 }
+
