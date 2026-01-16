@@ -86,6 +86,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [How Reconciliation Works](#how-reconciliation-works)
   - [Importing Existing Resources](#importing-existing-resources)
   - [Read-Only Mode](#read-only-mode)
+  - [OnDelete Policy](#ondelete-policy)
   - [Partial Updates](#partial-updates)
   - [Multi-Endpoint Observation](#multi-endpoint-observation)
   - [Status Fields](#status-fields)
@@ -1879,6 +1880,7 @@ Every generated CR includes these controller-specific fields in the spec:
 | `externalIDRef` | Reference an existing external resource by ID (only for CRDs without path parameters) |
 | `readOnly` | If true, only observe the resource (no create/update/delete) |
 | `mergeOnUpdate` | If true (default), merge spec with current API state before updates (see [Partial Updates](#partial-updates)) |
+| `onDelete` | Policy for external resource on CR deletion: `Delete`, `Orphan`, or `Restore` (see [OnDelete Policy](#ondelete-policy)) |
 
 These fields are stripped from the payload when sending requests to the REST API.
 
@@ -1993,6 +1995,74 @@ When `readOnly: true`:
 - No finalizer is added (CR can be deleted without affecting external resource)
 - Status is updated with the current external state
 - State will be `Observed` (success) or `NotFound` (resource doesn't exist)
+
+### OnDelete Policy
+
+The `onDelete` field controls what happens to external resources when the CR is deleted. This is especially important for resources adopted via `externalIDRef` that weren't created by the operator.
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: imported-pet
+spec:
+  externalIDRef: "12345"
+  name: Fluffy
+  onDelete: Orphan  # Don't delete the external resource
+```
+
+#### OnDelete Values
+
+| Value | Description |
+|-------|-------------|
+| `Delete` | Delete the external resource when the CR is deleted |
+| `Orphan` | Leave the external resource unchanged when the CR is deleted |
+| `Restore` | Restore the original state captured when the resource was adopted |
+
+#### Default Behavior
+
+If `onDelete` is not specified, the controller uses smart defaults:
+
+| Resource Origin | Default `onDelete` |
+|-----------------|-------------------|
+| Created by controller (via POST) | `Delete` |
+| Adopted via `externalIDRef` | `Orphan` |
+
+This ensures:
+- Resources created by the operator are cleaned up when the CR is deleted
+- Existing resources that were imported are not accidentally deleted
+
+#### Original State Restoration
+
+When adopting a resource via `externalIDRef`, the controller captures the original state:
+
+```yaml
+status:
+  createdByController: false
+  originalState: {"id": 12345, "name": "Original Name", "status": "available"}
+  adoptedAt: "2026-01-05T10:00:00Z"
+```
+
+With `onDelete: Restore`, this captured state is restored via PUT (or POST if using `--update-with-post`) before the CR is deleted.
+
+#### Example: Safely Managing Existing Resources
+
+```yaml
+# Import an existing resource without risk of deletion
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: production-pet
+spec:
+  externalIDRef: "prod-12345"
+  name: "Updated Name"     # Make changes via reconciliation
+  onDelete: Restore        # Restore original state on CR deletion
+```
+
+When this CR is deleted:
+1. Controller reads the captured `originalState`
+2. Sends PUT/POST to restore the original values
+3. CR is removed from Kubernetes
 
 ### Partial Updates
 
@@ -2121,6 +2191,9 @@ Each CR has a status subresource with:
 | `response` | Last response body from the REST API (single endpoint) |
 | `responses` | Map of endpoint URL to response (multi-endpoint mode) |
 | `driftDetected` | Whether drift was detected between spec and external state |
+| `createdByController` | Whether the controller created this resource (vs adopted via `externalIDRef`) |
+| `originalState` | Captured state when resource was adopted (for `onDelete: Restore`) |
+| `adoptedAt` | Timestamp when the resource was first adopted via `externalIDRef` |
 
 #### EndpointResponse Structure (for multi-endpoint mode)
 
