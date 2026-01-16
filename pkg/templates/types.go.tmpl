@@ -540,6 +540,16 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	// +kubebuilder:default=true
 	MergeOnUpdate *bool `json:"mergeOnUpdate,omitempty"`
+
+{{- if .HasDelete }}
+	// OnDelete specifies what to do with the external resource when the CR is deleted.
+	// - Delete: Delete the external resource (default for resources created by the controller)
+	// - Orphan: Leave the external resource as-is (default for resources adopted via ExternalIDRef)
+	// - Restore: Restore the original state captured when the resource was first adopted
+	// +kubebuilder:validation:Enum=Delete;Orphan;Restore
+	// +optional
+	OnDelete string `json:"onDelete,omitempty"`
+{{- end }}
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}
@@ -598,6 +608,25 @@ type {{ .Kind }}Status struct {
 	// LastGetTime is the last time the resource was fetched from the REST API via GET
 	// +optional
 	LastGetTime *metav1.Time `json:"lastGetTime,omitempty"`
+
+{{- if .HasDelete }}
+	// CreatedByController indicates if this controller created the external resource via POST.
+	// Used to determine default OnDelete behavior (Delete if true, Orphan if false).
+	// +optional
+	CreatedByController bool `json:"createdByController,omitempty"`
+
+{{- if .NeedsExternalIDRef }}
+	// OriginalState stores the state of the resource when first adopted via ExternalIDRef.
+	// Used for OnDelete=Restore to revert changes made by the controller.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	OriginalState *runtime.RawExtension `json:"originalState,omitempty"`
+
+	// AdoptedAt is when this CR first adopted the external resource via ExternalIDRef.
+	// +optional
+	AdoptedAt *metav1.Time `json:"adoptedAt,omitempty"`
+{{- end }}
+{{- end }}
 }
 
 // {{ .Kind }}EndpointResponse contains the response from a single endpoint for {{ .Kind }} resources

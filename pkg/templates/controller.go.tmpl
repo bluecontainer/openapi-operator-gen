@@ -549,6 +549,10 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 	delete(specMap, "externalIDRef")
 {{- end }}
 	delete(specMap, "readOnly")
+	delete(specMap, "mergeOnUpdate")
+{{- if .HasDelete }}
+	delete(specMap, "onDelete")
+{{- end }}
 
 	// Compare each field in spec with API response
 	for key, specValue := range specMap {
@@ -820,6 +824,15 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 			// Extract external ID from response if available (for resources identified by path params)
 			responseExternalID := r.extractExternalIDFromResponse(respData, externalID)
 
+{{- if and .HasDelete .NeedsExternalIDRef }}
+			// Snapshot original state on first adoption via ExternalIDRef
+			if instance.Spec.ExternalIDRef != "" && instance.Status.OriginalState == nil {
+				instance.Status.OriginalState = &k8sruntime.RawExtension{Raw: body}
+				instance.Status.AdoptedAt = &now
+				logger.Info("Captured original state for ExternalIDRef resource", "externalID", responseExternalID)
+			}
+{{- end }}
+
 			if hasDrift {
 				// Increment drift detected count
 				instance.Status.DriftDetectedCount++
@@ -1010,6 +1023,9 @@ func (r *{{ .Kind }}Reconciler) createResource(ctx context.Context, instance *{{
 	}
 	instance.Status.DriftDetected = false
 	instance.Status.LastGetTime = &now
+{{- if .HasDelete }}
+	instance.Status.CreatedByController = true
+{{- end }}
 
 	logger.Info("Successfully created resource", "externalID", instance.Status.ExternalID)
 	return nil
@@ -1384,6 +1400,9 @@ func (r *{{ .Kind }}Reconciler) marshalSpecForAPI(instance *{{ .APIVersion }}.{{
 {{- end }}
 	delete(specMap, "readOnly")
 	delete(specMap, "mergeOnUpdate")
+{{- if .HasDelete }}
+	delete(specMap, "onDelete")
+{{- end }}
 
 	{{- if .ResourcePathParams }}
 	// Remove path parameter fields (they're used in URL, not body)
@@ -1515,11 +1534,48 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 
 {{- if .HasPost }}
 	if instance.Status.ExternalID == "" {
-		logger.Info("No external ID, skipping delete")
+		logger.Info("No external ID, skipping finalization")
 		return nil
 	}
 {{- end }}
 
+	// Determine deletion policy
+	policy := instance.Spec.OnDelete
+	if policy == "" {
+		// Default: Delete if we created it, Orphan if we adopted it
+		if instance.Status.CreatedByController {
+			policy = "Delete"
+		} else {
+			policy = "Orphan"
+		}
+	}
+
+	logger.Info("Finalizing resource", "policy", policy, "createdByController", instance.Status.CreatedByController)
+
+	switch policy {
+	case "Restore":
+{{- if .NeedsExternalIDRef }}
+		if instance.Status.OriginalState == nil {
+			logger.Info("No original state to restore, orphaning instead")
+			return nil
+		}
+		return r.restoreOriginalState(ctx, instance)
+{{- else }}
+		// Restore not supported without ExternalIDRef - orphan instead
+		logger.Info("Restore not supported (no ExternalIDRef), orphaning instead")
+		return nil
+{{- end }}
+	case "Orphan":
+		logger.Info("Orphaning external resource", "externalID", r.getExternalID(instance))
+		return nil
+	case "Delete":
+		// Continue with delete logic below
+	default:
+		logger.Info("Unknown OnDelete policy, defaulting to Orphan", "policy", policy)
+		return nil
+	}
+
+	// Delete the external resource
 	// Check if using all-healthy strategy (fan out to multiple endpoints)
 	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
 		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
@@ -1562,6 +1618,72 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 
 	return r.deleteFromEndpoint(ctx, instance, baseURL)
 }
+
+{{- if .NeedsExternalIDRef }}
+// restoreOriginalState restores the external resource to its original state captured during adoption.
+func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) error {
+	ctx, span := {{ .KindLower }}Tracer.Start(ctx, "RestoreOriginalState",
+		trace.WithAttributes(
+			attribute.String("resource.externalID", r.getExternalID(instance)),
+		))
+	defer span.End()
+
+	logger := log.FromContext(ctx)
+	start := time.Now()
+
+	baseURL, err := r.resolveBaseURL(ctx, instance)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to resolve base URL: %w", err)
+	}
+
+	url := r.buildResourceURL(baseURL, instance)
+	span.SetAttributes(attribute.String("http.url", url))
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(instance.Status.OriginalState.Raw))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to create restore request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	logger.Info("Restoring original state", "url", url)
+	resp, err := r.HTTPClient.Do(req)
+	duration := time.Since(start).Seconds()
+
+	if err != nil {
+		r.recordAPICallMetrics(ctx, "PUT", "error", 0, duration)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return fmt.Errorf("failed to restore original state: %w", err)
+	}
+	defer resp.Body.Close()
+
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
+	// 404 is acceptable - resource may have been deleted externally
+	if resp.StatusCode == http.StatusNotFound {
+		r.recordAPICallMetrics(ctx, "PUT", "not_found", resp.StatusCode, duration)
+		logger.Info("Resource not found during restore (may have been deleted externally)")
+		return nil
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		r.recordAPICallMetrics(ctx, "PUT", "error", resp.StatusCode, duration)
+		err := fmt.Errorf("restore failed: %s - %s", resp.Status, string(body))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	r.recordAPICallMetrics(ctx, "PUT", "success", resp.StatusCode, duration)
+	logger.Info("Successfully restored original state", "externalID", r.getExternalID(instance))
+	return nil
+}
+{{- end }}
 {{- end }}
 
 func (r *{{ .Kind }}Reconciler) updateStatus(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, state, message string) {
