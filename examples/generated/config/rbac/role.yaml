@@ -11,6 +11,8 @@ rules:
   - petfindbystatusquerys
   - petfindbytagsquerys
   - pets
+  - petstoreaggregates
+  - petstorebundles
   - petuploadimageactions
   - storeinventoryquerys
   - usercreatewithlistactions
@@ -30,6 +32,8 @@ rules:
   resources:
   - orders/finalizers
   - pets/finalizers
+  - petstoreaggregates/finalizers
+  - petstorebundles/finalizers
   - users/finalizers
   verbs:
   - update
@@ -40,6 +44,8 @@ rules:
   - petfindbystatusquerys/status
   - petfindbytagsquerys/status
   - pets/status
+  - petstoreaggregates/status
+  - petstorebundles/status
   - petuploadimageactions/status
   - storeinventoryquerys/status
   - usercreatewithlistactions/status

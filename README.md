@@ -17,6 +17,11 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Options](#options)
   - [Example](#example)
   - [Swagger 2.0 Support](#swagger-20-support)
+- [Update With POST](#update-with-post)
+  - [When to Use](#when-to-use)
+  - [Usage](#usage-1)
+  - [How It Works](#how-it-works)
+  - [Behavior by HTTP Method Availability](#behavior-by-http-method-availability)
 - [OpenAPI Schema Support](#openapi-schema-support)
   - [Nested Objects](#nested-objects)
   - [Supported Types](#supported-types)
@@ -39,6 +44,29 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Multi-Endpoint Action Execution](#multi-endpoint-action-execution)
   - [Typed Results](#typed-results)
   - [Action vs Resource vs Query Endpoints](#action-vs-resource-vs-query-endpoints)
+- [Status Aggregator CRD](#status-aggregator-crd)
+  - [Enabling the Aggregator CRD](#enabling-the-aggregator-crd)
+  - [Supported Resource Types](#supported-resource-types)
+  - [Aggregation Strategies](#aggregation-strategies)
+  - [Resource Selection Methods](#resource-selection-methods)
+  - [Explicit Resource References](#explicit-resource-references)
+  - [Dynamic Resource Selectors](#dynamic-resource-selectors)
+  - [Combining Selection Methods](#combining-selection-methods)
+  - [Aggregating All CRD Types](#aggregating-all-crd-types)
+  - [CEL Derived Values](#cel-derived-values)
+  - [CEL Variables](#cel-variables)
+  - [CEL Aggregate Functions](#cel-aggregate-functions)
+  - [Aggregator Status Fields](#aggregator-status-fields)
+- [Bundle CRD](#bundle-crd)
+  - [Enabling the Bundle CRD](#enabling-the-bundle-crd)
+  - [Bundle Spec Structure](#bundle-spec-structure)
+  - [Automatic Dependency Derivation](#automatic-dependency-derivation)
+  - [Explicit Dependencies](#explicit-dependencies)
+  - [Conditional Resource Creation](#conditional-resource-creation)
+  - [Ready Conditions](#ready-conditions)
+  - [Sync Waves](#sync-waves)
+  - [Bundle Examples](#bundle-examples)
+  - [Bundle Status Fields](#bundle-status-fields)
 - [Generated Output](#generated-output)
 - [Building the Generated Operator](#building-the-generated-operator)
 - [Running the Operator](#running-the-operator)
@@ -58,6 +86,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - [How Reconciliation Works](#how-reconciliation-works)
   - [Importing Existing Resources](#importing-existing-resources)
   - [Read-Only Mode](#read-only-mode)
+  - [OnDelete Policy](#ondelete-policy)
+  - [Partial Updates](#partial-updates)
   - [Multi-Endpoint Observation](#multi-endpoint-observation)
   - [Status Fields](#status-fields)
 - [Example: Petstore Operator](#example-petstore-operator)
@@ -357,6 +387,17 @@ openapi-operator-gen generate \
 | `--module`, `-m` | Go module name for generated code | Required |
 | `--mapping` | Resource mapping mode: `per-resource` or `single-crd` | `per-resource` |
 | `--root-kind` | Kind name for root `/` endpoint | Derived from spec filename |
+| `--include-paths` | Only include paths matching these patterns (comma-separated, glob supported) | All paths |
+| `--exclude-paths` | Exclude paths matching these patterns (comma-separated, glob supported) | None |
+| `--include-tags` | Only include endpoints with these OpenAPI tags (comma-separated) | All tags |
+| `--exclude-tags` | Exclude endpoints with these OpenAPI tags (comma-separated) | None |
+| `--include-operations` | Only include operations with these operationIds (comma-separated, glob supported) | All operations |
+| `--exclude-operations` | Exclude operations with these operationIds (comma-separated, glob supported) | None |
+| `--update-with-post` | Use POST for updates when PUT is not available (see [Update With POST](#update-with-post)) | Disabled |
+| `--id-field-map` | Explicit mapping of path params to body fields (e.g., `orderId=id,petId=id`) | Auto-detect |
+| `--no-id-merge` | Disable automatic merging of path ID parameters with body 'id' fields | `false` |
+| `--aggregate` | Generate a Status Aggregator CRD (see [Status Aggregator CRD](#status-aggregator-crd)) | `false` |
+| `--bundle` | Generate an Inline Composition Bundle CRD (see [Bundle CRD](#bundle-crd)) | `false` |
 
 ### Example: Local File
 
@@ -415,6 +456,62 @@ openapi-operator-gen generate \
 - Swagger 2.0 specs are converted to OpenAPI 3.0 using the [kin-openapi](https://github.com/getkin/kin-openapi) library
 - The conversion handles path parameters, query parameters, request bodies, and response schemas
 - Most Swagger 2.0 features map cleanly to OpenAPI 3.0 equivalents
+
+## Update With POST
+
+Some REST APIs use POST for both creating and updating resources, rather than using PUT for updates. The `--update-with-post` flag enables the generated operator to use POST for updates when the API doesn't support PUT.
+
+### When to Use
+
+Use this flag when your API:
+- Uses POST for both create and update operations
+- Doesn't provide a PUT endpoint for resource updates
+- Implements "upsert" semantics with POST (create or update based on existence)
+
+### Usage
+
+The flag accepts:
+- `*` - Enable POST-for-updates on all resources that lack PUT
+- Comma-separated paths - Enable only for specific endpoints (glob patterns supported)
+
+```bash
+# Enable for all resources without PUT
+openapi-operator-gen generate \
+  --spec api.yaml \
+  --output ./generated \
+  --group myapp.example.com \
+  --version v1alpha1 \
+  --update-with-post "*"
+
+# Enable only for specific paths
+openapi-operator-gen generate \
+  --spec api.yaml \
+  --output ./generated \
+  --group myapp.example.com \
+  --version v1alpha1 \
+  --update-with-post "/store/order,/users/*"
+```
+
+### How It Works
+
+When `--update-with-post` is enabled for a resource:
+
+1. **GET-first reconciliation**: The controller still fetches the current state from the API
+2. **Drift detection**: Compares the CR spec with the fetched resource
+3. **POST for updates**: If drift is detected, uses POST (instead of PUT) to update the resource
+4. **ID preservation**: The external ID from the initial creation is preserved in subsequent updates
+
+This is particularly useful for APIs like the Petstore `/store/order` endpoint, which only supports POST and GET (no PUT).
+
+### Behavior by HTTP Method Availability
+
+| Has GET | Has POST | Has PUT | `--update-with-post` | Behavior |
+|---------|----------|---------|---------------------|----------|
+| ✓ | ✓ | ✓ | Any | Uses PUT for updates (standard) |
+| ✓ | ✓ | ✗ | Enabled | Uses POST for updates |
+| ✓ | ✓ | ✗ | Disabled | Read-only sync (no updates) |
+| ✓ | ✗ | ✗ | Any | Read-only sync |
+| ✗ | ✓ | ✗ | Any | POST-only (no GET for drift detection) |
 
 ## OpenAPI Schema Support
 
@@ -841,6 +938,620 @@ type PetUploadImageResult struct {
 | `/pet` | GET, POST | Resource |
 | `/pet/{petId}` | GET, PUT, DELETE | Resource |
 
+## Status Aggregator CRD
+
+The generator can create an optional Status Aggregator CRD that aggregates status information from multiple resources into a single view. This is useful for monitoring the health of multiple related resources, computing derived values across resources, and creating dashboards.
+
+### Enabling the Aggregator CRD
+
+Add the `--aggregate` flag when generating:
+
+```bash
+openapi-operator-gen generate \
+  --spec petstore.yaml \
+  --output ./generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator \
+  --aggregate
+```
+
+This creates a `<AppName>Aggregate` CRD (e.g., `PetstoreAggregate`) that can observe and aggregate status from other CRDs.
+
+### Supported Resource Types
+
+The aggregate CRD can aggregate status from all CRD types generated by the operator:
+
+| CRD Type | Success State | Timestamp Field |
+|----------|---------------|-----------------|
+| Resource (CRUD) | `Synced` or `Observed` | `lastSyncTime` |
+| Query | `Queried` | `lastQueryTime` |
+| Action | `Completed` | `lastExecutionTime` |
+
+All CRD types use `Failed` state for failures and `Pending` for initial state.
+
+### Aggregation Strategies
+
+The aggregator supports three strategies for determining overall health:
+
+| Strategy | Description |
+|----------|-------------|
+| `AllHealthy` | Healthy only if ALL selected resources are in success state (default) |
+| `AnyHealthy` | Healthy if ANY selected resource is in success state |
+| `Quorum` | Healthy if more than half of selected resources are in success state |
+
+Example:
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: all-resources
+spec:
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+    - kind: User
+  aggregationStrategy: AllHealthy
+```
+
+### Resource Selection Methods
+
+Two methods are available for selecting resources to aggregate:
+
+1. **Explicit References** (`resources`): Reference specific resources by name
+2. **Dynamic Selectors** (`resourceSelectors`): Select resources by kind, labels, or patterns
+
+You can use either method or combine both in a single aggregate.
+
+### Explicit Resource References
+
+Reference specific resources by name for precise control:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: specific-resources
+spec:
+  resources:
+    - kind: Order
+      name: my-order
+    - kind: Pet
+      name: my-pet
+      namespace: other-ns  # Optional: defaults to aggregate's namespace
+  aggregationStrategy: AllHealthy
+```
+
+### Dynamic Resource Selectors
+
+Select resources to aggregate by kind, labels, or name patterns:
+
+```yaml
+spec:
+  resourceSelectors:
+    # Select all resources of a kind
+    - kind: Order
+
+    # Filter by labels
+    - kind: Pet
+      matchLabels:
+        environment: production
+
+    # Filter by name pattern (regex)
+    - kind: User
+      namePattern: "^admin-.*"
+```
+
+### Combining Selection Methods
+
+Use both explicit references and dynamic selectors together:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: mixed-selection
+spec:
+  # Explicitly include critical resources
+  resources:
+    - kind: Order
+      name: critical-order
+  # Also include all resources matching criteria
+  resourceSelectors:
+    - kind: Pet
+      matchLabels:
+        tier: backend
+  aggregationStrategy: AllHealthy
+```
+
+### Aggregating All CRD Types
+
+Include Resource, Query, and Action CRDs in a single aggregate:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: all-types
+spec:
+  resourceSelectors:
+    # CRUD Resources (state: Synced/Observed)
+    - kind: Order
+    - kind: Pet
+    # Query CRDs (state: Queried)
+    - kind: PetFindbystatusQuery
+    - kind: StoreInventoryQuery
+    # Action CRDs (state: Completed)
+    - kind: PetUploadimageAction
+  aggregationStrategy: AllHealthy
+  derivedValues:
+    # Count by CRD type using state
+    - name: syncedResources
+      expression: "resources.filter(r, r.status.state == 'Synced' || r.status.state == 'Observed').size()"
+    - name: queriedCount
+      expression: "resources.filter(r, r.status.state == 'Queried').size()"
+    - name: completedActions
+      expression: "resources.filter(r, r.status.state == 'Completed').size()"
+```
+
+### CEL Derived Values
+
+Compute custom values from aggregated resources using [CEL (Common Expression Language)](https://github.com/google/cel-spec) expressions. Results are stored in `.status.computedValues`.
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: with-metrics
+spec:
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+  aggregationStrategy: AllHealthy
+  derivedValues:
+    # Calculate percentage of synced resources
+    - name: syncPercentage
+      expression: "summary.total > 0 ? (summary.synced * 100) / summary.total : 0"
+
+    # Check if all resources are synced
+    - name: allSynced
+      expression: "summary.total > 0 && summary.synced == summary.total"
+
+    # Count resources in a specific state
+    - name: failedResources
+      expression: "resources.filter(r, r.status.state == 'Failed').size()"
+```
+
+### CEL Variables
+
+CEL expressions have access to the following variables:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `resources` | `list` | All aggregated resources across all kinds |
+| `summary` | `map` | Object with `total`, `synced`, `failed`, `pending` counts |
+| `<kind>s` | `list` | Kind-specific list (lowercase plural, e.g., `orders`, `pets`, `users`) |
+
+Each resource in the lists contains:
+
+| Field | Description |
+|-------|-------------|
+| `kind` | Resource kind (e.g., "Order", "Pet") |
+| `metadata` | Map with `name`, `namespace`, `labels`, `annotations` |
+| `spec` | Full spec fields from the CR |
+| `status` | Full status fields from the CR |
+
+Example expressions using different variables:
+
+```yaml
+derivedValues:
+  # Using resources variable (all kinds)
+  - name: totalResources
+    expression: "resources.size()"
+
+  # Using summary variable
+  - name: healthPercentage
+    expression: "summary.total > 0 ? (summary.synced * 100) / summary.total : 0"
+
+  # Using kind-specific variables
+  - name: orderCount
+    expression: "orders.size()"
+
+  - name: petCount
+    expression: "pets.size()"
+
+  # Accessing spec fields
+  - name: highValueOrders
+    expression: "orders.filter(r, has(r.spec.quantity) && r.spec.quantity > 10).size()"
+
+  # Accessing status fields
+  - name: syncedPets
+    expression: "pets.filter(r, r.status.state == 'Synced').size()"
+```
+
+### CEL Aggregate Functions
+
+Custom aggregate functions are available for computing values across lists:
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `sum(list)` | Sum of numeric values | `sum(orders.map(r, r.spec.quantity))` |
+| `max(list)` | Maximum value | `max(orders.map(r, r.spec.quantity))` |
+| `min(list)` | Minimum value | `min(orders.map(r, r.spec.quantity))` |
+| `avg(list)` | Average value | `avg(orders.map(r, r.spec.quantity))` |
+
+Example with aggregate functions:
+
+```yaml
+derivedValues:
+  # Sum of all order quantities
+  - name: totalOrderQuantity
+    expression: "sum(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+
+  # Maximum quantity across orders
+  - name: maxOrderQuantity
+    expression: "max(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+
+  # Average quantity
+  - name: avgOrderQuantity
+    expression: "avg(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+
+  # Sum of quantities for synced orders only
+  - name: syncedOrdersQuantity
+    expression: "sum(orders.filter(r, r.status.state == 'Synced').map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+```
+
+### Aggregator Status Fields
+
+The aggregator status contains:
+
+| Field | Description |
+|-------|-------------|
+| `state` | `Pending`, `Healthy`, `Degraded`, or `Unknown` |
+| `message` | Human-readable status message |
+| `summary.total` | Total number of matched resources |
+| `summary.synced` | Number of resources in Synced state |
+| `summary.failed` | Number of resources in Failed state |
+| `summary.pending` | Number of resources in Pending/other states |
+| `resources` | List of individual resource statuses |
+| `computedValues` | Results of CEL expression evaluations |
+| `lastAggregationTime` | Timestamp of last aggregation |
+
+Example status:
+
+```yaml
+status:
+  state: Degraded
+  message: "1 of 3 resources failed"
+  summary:
+    total: 3
+    synced: 2
+    failed: 1
+    pending: 0
+  resources:
+    - kind: Order
+      name: order-1
+      namespace: default
+      state: Synced
+    - kind: Pet
+      name: fluffy
+      namespace: default
+      state: Synced
+    - kind: User
+      name: admin
+      namespace: default
+      state: Failed
+      message: "API returned 500"
+  computedValues:
+    - name: syncPercentage
+      value: "66"
+    - name: totalOrderQuantity
+      value: "150"
+  lastAggregationTime: "2026-01-05T10:00:00Z"
+```
+
+## Bundle CRD
+
+The generator can create an optional Bundle CRD (Inline Composition) that allows you to define and manage multiple child resources as a single unit. This is useful for deploying related resources together with dependency ordering and lifecycle management.
+
+### Enabling the Bundle CRD
+
+Add the `--bundle` flag when generating:
+
+```bash
+openapi-operator-gen generate \
+  --spec petstore.yaml \
+  --output ./generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator \
+  --bundle
+```
+
+This creates a `<AppName>Bundle` CRD (e.g., `PetstoreBundle`) that can create and manage child resources.
+
+### Bundle Spec Structure
+
+A bundle defines embedded resource specs that are created as child CRs:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: my-bundle
+spec:
+  # Optional: Target settings inherited by child resources
+  targetHelmRelease: my-release
+  targetNamespace: backend
+
+  # Optional: Pause reconciliation
+  paused: false
+
+  # Optional: Sync wave for ordered deployment with other bundles
+  syncWave: 0
+
+  # Resource definitions
+  resources:
+    - id: my-pet           # Unique identifier within the bundle
+      kind: Pet            # CRD kind to create
+      spec:                # Spec for the child resource
+        name: "Fluffy"
+        status: available
+```
+
+Each resource in the `resources` array creates a child CR with owner references, ensuring automatic cleanup when the bundle is deleted.
+
+### Automatic Dependency Derivation
+
+Bundle CRD automatically derives dependencies from `${resources.<id>...}` variable references in your specs. You don't need to explicitly declare `dependsOn` when using variable references.
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: auto-deps-bundle
+spec:
+  resources:
+    # Parent resource
+    - id: parent
+      kind: Pet
+      spec:
+        name: "Parent Pet"
+
+    # Child resource - dependency on 'parent' is automatically derived
+    # from the ${resources.parent...} reference below
+    - id: child
+      kind: Pet
+      spec:
+        # This reference creates an implicit dependency on 'parent'
+        name: "Child of ${resources.parent.status.externalID}"
+```
+
+The controller parses all spec fields and CEL expressions to find `${resources.<id>...}` patterns and automatically adds them to the dependency graph. This means:
+
+- References like `${resources.parent.status.externalID}` create a dependency on `parent`
+- References in `readyWhen` and `skipWhen` conditions are also parsed
+- No explicit `dependsOn` declaration needed for referenced resources
+
+### Explicit Dependencies
+
+You can also explicitly declare dependencies when there's no variable reference but you still need ordering:
+
+```yaml
+spec:
+  resources:
+    - id: database
+      kind: Pet
+      spec:
+        name: "Database"
+
+    - id: app
+      kind: Pet
+      spec:
+        name: "Application"
+      dependsOn:
+        - database  # Explicit dependency
+```
+
+Explicit `dependsOn` and automatic derivation are combined - the final dependency set is the union of both.
+
+### Conditional Resource Creation
+
+Skip resource creation based on CEL conditions:
+
+```yaml
+spec:
+  resources:
+    - id: main
+      kind: Pet
+      spec:
+        name: "Main Resource"
+
+    - id: optional
+      kind: Pet
+      spec:
+        name: "Optional Resource"
+      skipWhen:
+        - "resources.main.status.state != 'Synced'"  # Skip until main is synced
+```
+
+Resources with `skipWhen` conditions that evaluate to `true` are not created.
+
+### Ready Conditions
+
+Define custom conditions for when a resource is considered ready:
+
+```yaml
+spec:
+  resources:
+    - id: backend
+      kind: Pet
+      spec:
+        name: "Backend Service"
+      readyWhen:
+        - "resources.backend.status.state == 'Synced'"
+        - "resources.backend.status.externalID != ''"
+
+    - id: frontend
+      kind: Pet
+      spec:
+        name: "Frontend Service"
+      dependsOn:
+        - backend  # Wait for backend to be ready
+      readyWhen:
+        - "resources.frontend.status.state == 'Synced'"
+```
+
+Resources are considered ready when all `readyWhen` conditions evaluate to `true`. Dependent resources wait for their dependencies to be ready before creation.
+
+### Sync Waves
+
+Sync waves allow ordering of bundle deployments:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: infrastructure
+spec:
+  syncWave: -1  # Deploy first (lower numbers first)
+  resources:
+    - id: database
+      kind: Pet
+      spec:
+        name: "Database"
+---
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: application
+spec:
+  syncWave: 0  # Deploy after infrastructure
+  resources:
+    - id: app
+      kind: Pet
+      spec:
+        name: "Application"
+```
+
+Bundles with lower `syncWave` values are processed first.
+
+### Bundle Examples
+
+#### Simple Bundle
+
+Create multiple resources without explicit dependencies:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: simple-bundle
+spec:
+  resources:
+    - id: pet-1
+      kind: Pet
+      spec:
+        name: "Pet One"
+    - id: pet-2
+      kind: Pet
+      spec:
+        name: "Pet Two"
+```
+
+#### Bundle with Variable References
+
+Use variable references for automatic dependency ordering:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: reference-bundle
+spec:
+  resources:
+    - id: parent
+      kind: Pet
+      spec:
+        name: "Parent"
+
+    - id: child
+      kind: Pet
+      spec:
+        # Automatic dependency on 'parent' from this reference
+        name: "Child of ${resources.parent.status.externalID}"
+```
+
+#### Paused Bundle
+
+Suspend reconciliation temporarily:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: paused-bundle
+spec:
+  paused: true  # No reconciliation until set to false
+  resources:
+    - id: example
+      kind: Pet
+      spec:
+        name: "Paused Resource"
+```
+
+### Bundle Status Fields
+
+The bundle status provides detailed information about child resources:
+
+| Field | Description |
+|-------|-------------|
+| `state` | Overall state: `Pending`, `Progressing`, `Ready`, `Degraded`, or `Paused` |
+| `message` | Human-readable status message |
+| `observedGeneration` | Last observed spec generation |
+| `summary.total` | Total number of resources in the bundle |
+| `summary.ready` | Number of resources in ready state |
+| `summary.pending` | Number of pending resources |
+| `summary.failed` | Number of failed resources |
+| `resources` | Per-resource status details |
+| `lastReconcileTime` | Timestamp of last reconciliation |
+
+Example status:
+
+```yaml
+status:
+  state: Progressing
+  message: "2 of 3 resources ready"
+  observedGeneration: 1
+  summary:
+    total: 3
+    ready: 2
+    pending: 1
+    failed: 0
+  resources:
+    - id: parent
+      kind: Pet
+      name: my-bundle-parent
+      namespace: default
+      state: Ready
+      message: "Resource synced successfully"
+    - id: child
+      kind: Pet
+      name: my-bundle-child
+      namespace: default
+      state: Ready
+      message: "Resource synced successfully"
+    - id: grandchild
+      kind: Pet
+      name: my-bundle-grandchild
+      namespace: default
+      state: Pending
+      message: "Waiting for dependencies"
+  lastReconcileTime: "2026-01-05T10:00:00Z"
+```
+
+The bundle controller uses a DAG (Directed Acyclic Graph) to determine the correct creation order based on both explicit `dependsOn` declarations and automatically derived dependencies from variable references.
+
 ## Generated Output
 
 ```
@@ -999,9 +1710,9 @@ spec:
 
 If a CR doesn't specify a target and no global configuration exists, reconciliation will fail with:
 ```
-no endpoint configured: set global endpoint (--base-url, --statefulset-name,
+no endpoint configured: set global endpoint (--base-url, --pod-name, --statefulset-name,
 --deployment-name, or --helm-release) or specify per-CR targeting
-(targetHelmRelease, targetStatefulSet, or targetDeployment)
+(targetBaseURL, targetPod, targetHelmRelease, targetStatefulSet, or targetDeployment)
 ```
 
 ### 1. Static URL Mode
@@ -1064,6 +1775,7 @@ All endpoint flags are optional. If no global endpoint is configured, each CR mu
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--base-url` | Static REST API base URL | (optional) |
+| `--pod-name` | Pod name for direct endpoint targeting | (optional) |
 | `--statefulset-name` | StatefulSet name for endpoint discovery | (optional) |
 | `--deployment-name` | Deployment name for endpoint discovery | (optional) |
 | `--helm-release` | Helm release name for endpoint discovery | (optional) |
@@ -1155,21 +1867,66 @@ spec:
 
 Note: `targetPodOrdinal` is ignored when targeting a Deployment.
 
+#### Target by Base URL
+
+For direct control over the API endpoint without workload discovery:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  name: Fluffy
+  targetBaseURL: "http://api.example.com:8080"  # Direct URL to the REST API
+```
+
+This is the simplest targeting option and takes highest priority over all other targeting methods. It's useful when:
+- The API is hosted externally (not in the Kubernetes cluster)
+- You need to target a specific URL without workload discovery
+- Testing against a local development server
+
+#### Target by Pod Name
+
+Target a specific pod directly by name:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  name: Fluffy
+  targetPod: petstore-api-0           # Routes to this specific pod
+  targetNamespace: production          # Optional: namespace
+```
+
+This is useful when:
+- You want to target a specific pod without StatefulSet/Deployment discovery
+- Testing against a specific pod instance
+- The pod is not managed by a StatefulSet or Deployment
+
 ### Spec Fields Reference
 
 Every generated CR includes these controller-specific fields in the spec:
 
 | Field | Description |
 |-------|-------------|
+| `targetBaseURL` | Static base URL for the REST API (highest priority, overrides all other targeting) |
+| `targetPod` | Pod name to route requests to directly |
 | `targetPodOrdinal` | StatefulSet pod ordinal to route requests to (by-ordinal strategy) |
 | `targetHelmRelease` | Helm release name for per-CR workload discovery |
 | `targetStatefulSet` | StatefulSet name for per-CR workload discovery |
 | `targetDeployment` | Deployment name for per-CR workload discovery |
 | `targetNamespace` | Namespace for target workload (defaults to CR namespace) |
-| `externalIDRef` | Reference an existing external resource by ID |
+| `externalIDRef` | Reference an existing external resource by ID (only for CRDs without path parameters) |
 | `readOnly` | If true, only observe the resource (no create/update/delete) |
+| `mergeOnUpdate` | If true (default), merge spec with current API state before updates (see [Partial Updates](#partial-updates)) |
+| `onDelete` | Policy for external resource on CR deletion: `Delete`, `Orphan`, or `Restore` (see [OnDelete Policy](#ondelete-policy)) |
 
 These fields are stripped from the payload when sending requests to the REST API.
+
+**Note:** The `externalIDRef` field is only generated for CRDs where the REST API doesn't use path parameters to identify resources. When path parameters exist (e.g., `/pet/{petId}`), the ID field in the spec (e.g., `id`) serves as the external reference instead. See [Importing Existing Resources](#importing-existing-resources) for details.
 
 #### Targeting Behavior
 
@@ -1234,6 +1991,32 @@ When `externalIDRef` is set:
 - Drift detection compares your spec with the existing resource
 - Updates are applied if the spec differs from the external state
 
+#### When is `externalIDRef` available?
+
+The `externalIDRef` field is only generated for CRDs where the REST API path does **not** contain path parameters to identify the resource. For example:
+
+| API Pattern | Identifier | `externalIDRef` |
+|-------------|------------|-----------------|
+| `POST /pet` → `GET /pet/{petId}` | `petId` path param | Not needed - use `id` field in spec |
+| `POST /user` → `GET /user/{username}` | `username` path param | Not needed - use `username` field in spec |
+| `POST /orders` → `GET /orders/{orderId}` | `orderId` path param | Not needed - use `id` field in spec |
+| `POST /config` → `GET /config` (no path param) | None in path | **Available** - use `externalIDRef` |
+
+When the REST API uses path parameters like `/pet/{petId}`, the identifier field (e.g., `id`, `petId`) is already part of the spec and serves as the external reference. In these cases, to import an existing resource, simply set the ID field:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: imported-pet
+spec:
+  id: 12345  # The petId path parameter - references existing pet
+  name: Fluffy
+  status: available
+```
+
+The `externalIDRef` field is only generated when there's no path parameter to identify the resource.
+
 ### Read-Only Mode
 
 For observation-only use cases, you can create read-only CRs that never modify the external resource:
@@ -1254,6 +2037,152 @@ When `readOnly: true`:
 - No finalizer is added (CR can be deleted without affecting external resource)
 - Status is updated with the current external state
 - State will be `Observed` (success) or `NotFound` (resource doesn't exist)
+
+### OnDelete Policy
+
+The `onDelete` field controls what happens to external resources when the CR is deleted. This is especially important for resources adopted via `externalIDRef` that weren't created by the operator.
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: imported-pet
+spec:
+  externalIDRef: "12345"
+  name: Fluffy
+  onDelete: Orphan  # Don't delete the external resource
+```
+
+#### OnDelete Values
+
+| Value | Description |
+|-------|-------------|
+| `Delete` | Delete the external resource when the CR is deleted |
+| `Orphan` | Leave the external resource unchanged when the CR is deleted |
+| `Restore` | Restore the original state captured when the resource was adopted |
+
+#### Default Behavior
+
+If `onDelete` is not specified, the controller uses smart defaults:
+
+| Resource Origin | Default `onDelete` |
+|-----------------|-------------------|
+| Created by controller (via POST) | `Delete` |
+| Adopted via `externalIDRef` | `Orphan` |
+
+This ensures:
+- Resources created by the operator are cleaned up when the CR is deleted
+- Existing resources that were imported are not accidentally deleted
+
+#### Original State Restoration
+
+When adopting a resource via `externalIDRef`, the controller captures the original state:
+
+```yaml
+status:
+  createdByController: false
+  originalState: {"id": 12345, "name": "Original Name", "status": "available"}
+  adoptedAt: "2026-01-05T10:00:00Z"
+```
+
+With `onDelete: Restore`, this captured state is restored via PUT (or POST if using `--update-with-post`) before the CR is deleted.
+
+#### Example: Safely Managing Existing Resources
+
+```yaml
+# Import an existing resource without risk of deletion
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: production-pet
+spec:
+  externalIDRef: "prod-12345"
+  name: "Updated Name"     # Make changes via reconciliation
+  onDelete: Restore        # Restore original state on CR deletion
+```
+
+When this CR is deleted:
+1. Controller reads the captured `originalState`
+2. Sends PUT/POST to restore the original values
+3. CR is removed from Kubernetes
+
+### Partial Updates
+
+By default, the controller performs **partial updates** when reconciling resources. This means only the fields you specify in the CR spec are updated, while other fields in the external resource are preserved.
+
+#### How It Works
+
+When `mergeOnUpdate: true` (the default):
+
+1. **GET**: Controller fetches the current state from the REST API
+2. **Merge**: Your spec fields are merged with the current API state
+3. **Update**: The merged payload is sent via PUT (or POST if using `--update-with-post`)
+
+This prevents accidentally overwriting fields in the external resource that aren't specified in your CR.
+
+#### Example
+
+Suppose the external API has a Pet with this state:
+
+```json
+{
+  "id": 123,
+  "name": "Fluffy",
+  "status": "available",
+  "category": { "id": 1, "name": "Dogs" },
+  "photoUrls": ["http://example.com/photo1.jpg"]
+}
+```
+
+And your CR only specifies:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  id: 123
+  name: "Fluffy Updated"  # Only changing the name
+```
+
+With `mergeOnUpdate: true` (default), the controller will:
+1. GET the current state (all fields)
+2. Merge your spec (`name: "Fluffy Updated"`) onto it
+3. PUT the full merged object, preserving `status`, `category`, and `photoUrls`
+
+Without merging (`mergeOnUpdate: false`), unspecified fields might be sent as zero values, potentially overwriting data in the API.
+
+#### Disabling Merge
+
+To send the spec as-is without merging (full replacement mode):
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  mergeOnUpdate: false  # Disable merge - send spec as-is
+  id: 123
+  name: "Fluffy"
+  status: "available"
+```
+
+Use `mergeOnUpdate: false` when:
+- You want full control over all fields
+- The API expects complete objects on PUT
+- You intentionally want to clear fields not in your spec
+
+#### PATCH Support
+
+When the OpenAPI spec includes a PATCH method for a resource, the generated controller will automatically prefer PATCH over PUT for updates. PATCH inherently performs partial updates, so the `mergeOnUpdate` setting only affects PUT requests.
+
+| HTTP Method | Partial Update Behavior |
+|-------------|------------------------|
+| PATCH | Always partial (inherent to PATCH semantics) |
+| PUT | Partial if `mergeOnUpdate: true` (default) |
+| POST (with `--update-with-post`) | Partial if `mergeOnUpdate: true` (default) |
 
 ### Multi-Endpoint Observation
 
@@ -1304,6 +2233,9 @@ Each CR has a status subresource with:
 | `response` | Last response body from the REST API (single endpoint) |
 | `responses` | Map of endpoint URL to response (multi-endpoint mode) |
 | `driftDetected` | Whether drift was detected between spec and external state |
+| `createdByController` | Whether the controller created this resource (vs adopted via `externalIDRef`) |
+| `originalState` | Captured state when resource was adopted (for `onDelete: Restore`) |
+| `adoptedAt` | Timestamp when the resource was first adopted via `externalIDRef` |
 
 #### EndpointResponse Structure (for multi-endpoint mode)
 
@@ -1360,6 +2292,7 @@ All flags can be set via environment variables:
 | Variable | Flag |
 |----------|------|
 | `REST_API_BASE_URL` | `--base-url` |
+| `POD_NAME` | `--pod-name` |
 | `STATEFULSET_NAME` | `--statefulset-name` |
 | `DEPLOYMENT_NAME` | `--deployment-name` |
 | `HELM_RELEASE` | `--helm-release` |

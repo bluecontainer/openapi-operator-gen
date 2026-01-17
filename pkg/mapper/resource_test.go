@@ -171,7 +171,7 @@ func TestMapType_Array(t *testing.T) {
 		{
 			name:     "array without items",
 			schema:   &parser.Schema{Type: "array"},
-			expected: "[]interface{}",
+			expected: "[]runtime.RawExtension",
 		},
 		{
 			name: "nested array",
@@ -207,7 +207,7 @@ func TestMapType_Object(t *testing.T) {
 		{
 			name:     "object without properties",
 			schema:   &parser.Schema{Type: "object"},
-			expected: "map[string]interface{}",
+			expected: "*runtime.RawExtension",
 		},
 		{
 			name: "object with properties",
@@ -235,8 +235,8 @@ func TestMapType_Unknown(t *testing.T) {
 	m := &Mapper{config: &config.Config{}}
 	schema := &parser.Schema{Type: "unknown"}
 	result := m.mapType(schema)
-	if result != "interface{}" {
-		t.Errorf("expected 'interface{}', got %q", result)
+	if result != "*runtime.RawExtension" {
+		t.Errorf("expected '*runtime.RawExtension', got %q", result)
 	}
 }
 
@@ -244,8 +244,8 @@ func TestMapType_EmptyType(t *testing.T) {
 	m := &Mapper{config: &config.Config{}}
 	schema := &parser.Schema{}
 	result := m.mapType(schema)
-	if result != "interface{}" {
-		t.Errorf("expected 'interface{}', got %q", result)
+	if result != "*runtime.RawExtension" {
+		t.Errorf("expected '*runtime.RawExtension', got %q", result)
 	}
 }
 

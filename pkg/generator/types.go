@@ -26,28 +26,31 @@ func NewTypesGenerator(cfg *config.Config) *TypesGenerator {
 
 // TypesTemplateData holds data for the types template
 type TypesTemplateData struct {
-	Year        int
-	APIVersion  string
-	APIGroup    string
-	ModuleName  string
-	CRDs        []CRDTypeData
-	NestedTypes []NestedTypeData // Nested types to generate (for Category, Tag, etc.)
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	APIGroup         string
+	ModuleName       string
+	CRDs             []CRDTypeData
+	NestedTypes      []NestedTypeData // Nested types to generate (for Category, Tag, etc.)
 }
 
 // CRDTypeData holds CRD-specific data for template
 type CRDTypeData struct {
-	Kind            string
-	Plural          string
-	ShortNames      []string
-	Spec            *SpecData
-	IsQuery         bool                     // True if this is a query CRD
-	QueryPath       string                   // Full query path for query CRDs
-	QueryParams     []mapper.QueryParamField // Query parameters for query CRDs
-	ResponseType    string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
-	ResponseIsArray bool                     // True if response is an array
-	ResultItemType  string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
-	ResultFields    []FieldData              // Fields for the result type (empty if UsesSharedType)
-	UsesSharedType  bool                     // True if ResultItemType is a shared type from another CRD
+	Kind               string
+	Plural             string
+	ShortNames         []string
+	Spec               *SpecData
+	IsQuery            bool                     // True if this is a query CRD
+	QueryPath          string                   // Full query path for query CRDs
+	QueryParams        []mapper.QueryParamField // Query parameters for query CRDs
+	ResponseType       string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
+	ResponseIsArray    bool                     // True if response is an array
+	ResultItemType     string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
+	ResultFields       []FieldData              // Fields for the result type (empty if UsesSharedType)
+	UsesSharedType     bool                     // True if ResultItemType is a shared type from another CRD
+	IsPrimitiveArray   bool                     // True if response is a primitive array ([]string, []int, etc.)
+	PrimitiveArrayType string                   // Base type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
 	IsAction       bool   // True if this is an action CRD
@@ -56,6 +59,14 @@ type CRDTypeData struct {
 	ParentResource string // Parent resource kind (e.g., "Pet")
 	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
 	ActionName     string // Action name (e.g., "uploadImage")
+
+	// HTTP method availability (for Resource CRDs)
+	HasDelete bool // True if DELETE method is available
+	HasPost   bool // True if POST method is available
+	HasPatch  bool // True if PATCH method is available
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 }
 
 // SpecData holds spec field data
@@ -94,25 +105,28 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 	// Prepare template data
 	data := TypesTemplateData{
-		Year:       time.Now().Year(),
-		APIVersion: g.config.APIVersion,
-		APIGroup:   g.config.APIGroup,
-		ModuleName: g.config.ModuleName,
-		CRDs:       make([]CRDTypeData, 0, len(crds)),
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		APIGroup:         g.config.APIGroup,
+		ModuleName:       g.config.ModuleName,
+		CRDs:             make([]CRDTypeData, 0, len(crds)),
 	}
 
 	for _, crd := range crds {
 		crdData := CRDTypeData{
-			Kind:            crd.Kind,
-			Plural:          crd.Plural,
-			ShortNames:      crd.ShortNames,
-			IsQuery:         crd.IsQuery,
-			QueryPath:       crd.QueryPath,
-			QueryParams:     crd.QueryParams,
-			ResponseType:    crd.ResponseType,
-			ResponseIsArray: crd.ResponseIsArray,
-			ResultItemType:  crd.ResultItemType,
-			UsesSharedType:  crd.UsesSharedType,
+			Kind:               crd.Kind,
+			Plural:             crd.Plural,
+			ShortNames:         crd.ShortNames,
+			IsQuery:            crd.IsQuery,
+			QueryPath:          crd.QueryPath,
+			QueryParams:        crd.QueryParams,
+			ResponseType:       crd.ResponseType,
+			ResponseIsArray:    crd.ResponseIsArray,
+			ResultItemType:     crd.ResultItemType,
+			UsesSharedType:     crd.UsesSharedType,
+			IsPrimitiveArray:   crd.IsPrimitiveArray,
+			PrimitiveArrayType: crd.PrimitiveArrayType,
 			// Action fields
 			IsAction:       crd.IsAction,
 			ActionPath:     crd.ActionPath,
@@ -120,6 +134,12 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			ParentResource: crd.ParentResource,
 			ParentIDParam:  crd.ParentIDParam,
 			ActionName:     crd.ActionName,
+			// HTTP method availability
+			HasDelete: crd.HasDelete,
+			HasPost:   crd.HasPost,
+			HasPatch:  crd.HasPatch,
+			// ExternalIDRef handling
+			NeedsExternalIDRef: crd.NeedsExternalIDRef,
 		}
 
 		if crd.Spec != nil {
@@ -157,15 +177,17 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 	// Generate groupversion_info.go
 	gvData := struct {
-		Year       int
-		APIVersion string
-		APIGroup   string
-		GroupName  string
+		Year             int
+		GeneratorVersion string
+		APIVersion       string
+		APIGroup         string
+		GroupName        string
 	}{
-		Year:       time.Now().Year(),
-		APIVersion: g.config.APIVersion,
-		APIGroup:   g.config.APIGroup,
-		GroupName:  strings.Split(g.config.APIGroup, ".")[0],
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		APIGroup:         g.config.APIGroup,
+		GroupName:        strings.Split(g.config.APIGroup, ".")[0],
 	}
 
 	if err := g.generateFile(
@@ -265,6 +287,80 @@ func (g *TypesGenerator) generateFile(path, tmplContent string, data interface{}
 
 	if err := tmpl.Execute(file, data); err != nil {
 		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// AggregateTypesTemplateData holds data for the aggregate types template
+type AggregateTypesTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	Kind             string
+	Plural           string
+	ResourceKinds    []string
+}
+
+// GenerateAggregateTypes generates the aggregate CRD types
+func (g *TypesGenerator) GenerateAggregateTypes(aggregate *mapper.AggregateDefinition) error {
+	outputDir := filepath.Join(g.config.OutputDir, "api", g.config.APIVersion)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	data := AggregateTypesTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		Kind:             aggregate.Kind,
+		Plural:           aggregate.Plural,
+		ResourceKinds:    aggregate.ResourceKinds,
+	}
+
+	outputPath := filepath.Join(outputDir, "aggregate_types.go")
+	if err := g.generateFile(outputPath, templates.AggregateTypesTemplate, data); err != nil {
+		return fmt.Errorf("failed to generate aggregate_types.go: %w", err)
+	}
+
+	return nil
+}
+
+// BundleTypesTemplateData holds data for the bundle types template
+type BundleTypesTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	Kind             string
+	Plural           string
+	ResourceKinds    []string
+	QueryKinds       []string
+	ActionKinds      []string
+	AllKinds         []string
+}
+
+// GenerateBundleTypes generates the bundle CRD types
+func (g *TypesGenerator) GenerateBundleTypes(bundle *mapper.BundleDefinition) error {
+	outputDir := filepath.Join(g.config.OutputDir, "api", g.config.APIVersion)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	data := BundleTypesTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		Kind:             bundle.Kind,
+		Plural:           bundle.Plural,
+		ResourceKinds:    bundle.ResourceKinds,
+		QueryKinds:       bundle.QueryKinds,
+		ActionKinds:      bundle.ActionKinds,
+		AllKinds:         bundle.AllKinds,
+	}
+
+	outputPath := filepath.Join(outputDir, "bundle_types.go")
+	if err := g.generateFile(outputPath, templates.BundleTypesTemplate, data); err != nil {
+		return fmt.Errorf("failed to generate bundle_types.go: %w", err)
 	}
 
 	return nil

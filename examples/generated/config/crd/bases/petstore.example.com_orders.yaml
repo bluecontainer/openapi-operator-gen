@@ -54,19 +54,28 @@ spec:
             properties:
               complete:
                 type: boolean
-              externalIDRef:
-                description: |-
-                  ExternalIDRef references an existing resource in the external REST API by its ID.
-                  When set, the controller will GET this resource instead of creating a new one.
-                  This is useful for importing existing resources or for read-only observation.
-                type: string
               id:
                 format: int64
                 type: integer
-              orderId:
-                description: ID of order that needs to be fetched
-                format: int64
-                type: integer
+              mergeOnUpdate:
+                default: true
+                description: |-
+                  MergeOnUpdate controls whether updates merge the spec with the current API state.
+                  When true (default), the controller will GET the current resource state and merge
+                  only the fields specified in the spec before sending PUT/PATCH, preserving fields
+                  not specified in the spec. When false, the spec is sent as-is (full replacement).
+                type: boolean
+              onDelete:
+                description: |-
+                  OnDelete specifies what to do with the external resource when the CR is deleted.
+                  - Delete: Delete the external resource (default for resources created by the controller)
+                  - Orphan: Leave the external resource as-is (default for resources adopted via ExternalIDRef)
+                  - Restore: Restore the original state captured when the resource was first adopted
+                enum:
+                - Delete
+                - Orphan
+                - Restore
+                type: string
               petId:
                 format: int64
                 type: integer
@@ -78,7 +87,6 @@ spec:
                   ReadOnly indicates that this CR is for observation only.
                   When true, the controller will only GET the resource and update status,
                   without performing any create, update, or delete operations.
-                  Requires ExternalIDRef to be set.
                 type: boolean
               shipDate:
                 format: date-time
@@ -89,6 +97,12 @@ spec:
                 - placed
                 - approved
                 - delivered
+                type: string
+              targetBaseURL:
+                description: |-
+                  TargetBaseURL specifies a static base URL for the REST API.
+                  When set, overrides all other endpoint configuration for this CR.
+                  Example: "http://api.example.com:8080"
                 type: string
               targetDeployment:
                 description: |-
@@ -106,6 +120,11 @@ spec:
                   TargetNamespace specifies the namespace to look for the target workload.
                   Defaults to the CR's namespace if not specified.
                 type: string
+              targetPod:
+                description: |-
+                  TargetPod specifies a pod name to route requests to directly.
+                  When set, overrides the operator's global endpoint configuration for this CR.
+                type: string
               targetPodOrdinal:
                 description: |-
                   TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
@@ -118,8 +137,6 @@ spec:
                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                   When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
-            required:
-            - orderId
             type: object
           status:
             description: OrderStatus defines the observed state of Order
@@ -185,13 +202,23 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              createdByController:
+                description: |-
+                  CreatedByController indicates if this controller created the external resource via POST.
+                  Used to determine default OnDelete behavior (Delete if true, Orphan if false).
+                type: boolean
               driftDetected:
                 description: DriftDetected indicates whether drift was detected between
                   the spec and external resource
                 type: boolean
+              driftDetectedCount:
+                description: DriftDetectedCount is the number of times drift has been
+                  detected (cumulative)
+                format: int64
+                type: integer
               externalID:
                 description: ExternalID is the ID of the resource in the external
-                  REST API
+                  REST API (set from POST response)
                 type: string
               lastGetTime:
                 description: LastGetTime is the last time the resource was fetched

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/bluecontainer/openapi-operator-gen/internal/config"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
@@ -24,13 +25,14 @@ func NewSamplesGenerator(cfg *config.Config) *SamplesGenerator {
 
 // ExampleCRData holds data for example CR template
 type ExampleCRData struct {
-	APIGroup   string
-	APIVersion string
-	Kind       string
-	KindLower  string
-	IsQuery    bool
-	IsAction   bool
-	SpecFields []ExampleFieldData
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	IsQuery          bool
+	IsAction         bool
+	SpecFields       []ExampleFieldData
 }
 
 // ExampleFieldData holds field data for example CR
@@ -40,8 +42,35 @@ type ExampleFieldData struct {
 	IsTargeting  bool
 }
 
+// ExampleAggregateCRData holds data for example aggregate CR template
+type ExampleAggregateCRData struct {
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
+}
+
+// ExampleBundleCRData holds data for example bundle CR template
+type ExampleBundleCRData struct {
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
+}
+
 // Generate generates example CR YAML files for all CRDs
-func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition) error {
+// aggregate and bundle are optional - pass nil if not generating those CRDs
+func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition, bundle *mapper.BundleDefinition) error {
 	// Create samples directory
 	samplesDir := filepath.Join(g.config.OutputDir, "config", "samples")
 	if err := os.MkdirAll(samplesDir, 0755); err != nil {
@@ -57,13 +86,30 @@ func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		}
 		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(crd.Kind)))
 
-		// Generate example CR with externalIDRef (only for resource CRDs, not queries/actions)
-		if !crd.IsQuery && !crd.IsAction {
+		// Generate example CR with externalIDRef (only for resource CRDs that need it)
+		// ExternalIDRef is only needed when there are no path parameters to identify the resource
+		if !crd.IsQuery && !crd.IsAction && crd.NeedsExternalIDRef {
 			if err := g.generateExampleCRRef(samplesDir, crd); err != nil {
 				return fmt.Errorf("failed to generate example CR ref for %s: %w", crd.Kind, err)
 			}
 			sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s_ref.yaml", g.config.APIVersion, strings.ToLower(crd.Kind)))
 		}
+	}
+
+	// Generate aggregate sample if aggregate CRD is enabled
+	if aggregate != nil {
+		if err := g.generateExampleAggregateCR(samplesDir, aggregate); err != nil {
+			return fmt.Errorf("failed to generate example aggregate CR: %w", err)
+		}
+		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(aggregate.Kind)))
+	}
+
+	// Generate bundle sample if bundle CRD is enabled
+	if bundle != nil {
+		if err := g.generateExampleBundleCR(samplesDir, bundle); err != nil {
+			return fmt.Errorf("failed to generate example bundle CR: %w", err)
+		}
+		sampleFiles = append(sampleFiles, fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(bundle.Kind)))
 	}
 
 	// Generate kustomization.yaml for samples
@@ -76,13 +122,14 @@ func (g *SamplesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 func (g *SamplesGenerator) generateExampleCR(samplesDir string, crd *mapper.CRDDefinition) error {
 	data := ExampleCRData{
-		APIGroup:   crd.APIGroup,
-		APIVersion: crd.APIVersion,
-		Kind:       crd.Kind,
-		KindLower:  strings.ToLower(crd.Kind),
-		IsQuery:    crd.IsQuery,
-		IsAction:   crd.IsAction,
-		SpecFields: g.convertToExampleFields(crd.Spec),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         crd.APIGroup,
+		APIVersion:       crd.APIVersion,
+		Kind:             crd.Kind,
+		KindLower:        strings.ToLower(crd.Kind),
+		IsQuery:          crd.IsQuery,
+		IsAction:         crd.IsAction,
+		SpecFields:       g.convertToExampleFields(crd.Spec),
 	}
 
 	tmpl, err := template.New("example").Parse(templates.ExampleCRTemplate)
@@ -108,12 +155,13 @@ func (g *SamplesGenerator) generateExampleCR(samplesDir string, crd *mapper.CRDD
 
 func (g *SamplesGenerator) generateExampleCRRef(samplesDir string, crd *mapper.CRDDefinition) error {
 	data := ExampleCRData{
-		APIGroup:   crd.APIGroup,
-		APIVersion: crd.APIVersion,
-		Kind:       crd.Kind,
-		KindLower:  strings.ToLower(crd.Kind),
-		IsQuery:    crd.IsQuery,
-		IsAction:   crd.IsAction,
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         crd.APIGroup,
+		APIVersion:       crd.APIVersion,
+		Kind:             crd.Kind,
+		KindLower:        strings.ToLower(crd.Kind),
+		IsQuery:          crd.IsQuery,
+		IsAction:         crd.IsAction,
 	}
 
 	tmpl, err := template.New("example-ref").Parse(templates.ExampleCRRefTemplate)
@@ -139,9 +187,11 @@ func (g *SamplesGenerator) generateExampleCRRef(samplesDir string, crd *mapper.C
 
 func (g *SamplesGenerator) generateSamplesKustomization(samplesDir string, sampleFiles []string) error {
 	data := struct {
-		SampleFiles []string
+		GeneratorVersion string
+		SampleFiles      []string
 	}{
-		SampleFiles: sampleFiles,
+		GeneratorVersion: g.config.GeneratorVersion,
+		SampleFiles:      sampleFiles,
 	}
 
 	tmpl, err := template.New("samples-kustomization").Parse(templates.KustomizationSamplesTemplate)
@@ -215,6 +265,9 @@ func (g *SamplesGenerator) generateExampleValue(f *mapper.FieldDefinition) strin
 		return fmt.Sprintf("[%q]", "item1")
 	case "[]int", "[]int32", "[]int64":
 		return "[1, 2, 3]"
+	case "metav1.Time":
+		// Generate a valid RFC 3339 timestamp for date-time fields
+		return fmt.Sprintf("%q", time.Now().UTC().Format(time.RFC3339))
 	default:
 		if strings.HasPrefix(goType, "[]") {
 			return "[]"
@@ -225,4 +278,76 @@ func (g *SamplesGenerator) generateExampleValue(f *mapper.FieldDefinition) strin
 		// For complex types, return empty object
 		return "{}"
 	}
+}
+
+func (g *SamplesGenerator) generateExampleAggregateCR(samplesDir string, aggregate *mapper.AggregateDefinition) error {
+	data := ExampleAggregateCRData{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         aggregate.APIGroup,
+		APIVersion:       aggregate.APIVersion,
+		Kind:             aggregate.Kind,
+		KindLower:        strings.ToLower(aggregate.Kind),
+		ResourceKinds:    aggregate.ResourceKinds,
+		QueryKinds:       aggregate.QueryKinds,
+		ActionKinds:      aggregate.ActionKinds,
+		AllKinds:         aggregate.AllKinds,
+	}
+
+	tmpl, err := template.New("example-aggregate").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.ExampleAggregateCRTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filename := fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(aggregate.Kind))
+	examplePath := filepath.Join(samplesDir, filename)
+
+	file, err := os.Create(examplePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+func (g *SamplesGenerator) generateExampleBundleCR(samplesDir string, bundle *mapper.BundleDefinition) error {
+	data := ExampleBundleCRData{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         bundle.APIGroup,
+		APIVersion:       bundle.APIVersion,
+		Kind:             bundle.Kind,
+		KindLower:        strings.ToLower(bundle.Kind),
+		ResourceKinds:    bundle.ResourceKinds,
+		QueryKinds:       bundle.QueryKinds,
+		ActionKinds:      bundle.ActionKinds,
+		AllKinds:         bundle.AllKinds,
+	}
+
+	tmpl, err := template.New("example-bundle").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.ExampleBundleCRTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filename := fmt.Sprintf("%s_%s.yaml", g.config.APIVersion, strings.ToLower(bundle.Kind))
+	examplePath := filepath.Join(samplesDir, filename)
+
+	file, err := os.Create(examplePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
 }

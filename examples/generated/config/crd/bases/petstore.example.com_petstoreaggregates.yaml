@@ -1,0 +1,330 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: petstoreaggregates.petstore.example.com
+spec:
+  group: petstore.example.com
+  names:
+    kind: PetstoreAggregate
+    listKind: PetstoreAggregateList
+    plural: petstoreaggregates
+    shortNames:
+    - agg
+    singular: petstoreaggregate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.summary.total
+      name: Total
+      type: integer
+    - jsonPath: .status.summary.synced
+      name: Synced
+      type: integer
+    - jsonPath: .status.summary.failed
+      name: Failed
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: PetstoreAggregate is the Schema for aggregating status across
+          multiple resources
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PetstoreAggregateSpec defines the desired state of PetstoreAggregate
+            properties:
+              aggregationStrategy:
+                default: AllHealthy
+                description: AggregationStrategy determines how to combine resource
+                  statuses
+                enum:
+                - AllHealthy
+                - AnyHealthy
+                - Quorum
+                type: string
+              derivedValues:
+                description: DerivedValues defines CEL expressions to compute custom
+                  values from aggregated resources
+                items:
+                  description: DerivedValue defines a CEL expression to compute a
+                    derived value from aggregated resources
+                  properties:
+                    expression:
+                      description: |-
+                        Expression is a CEL expression that computes a value from the aggregated resources
+                        Available variables:
+                          - resources: list of ALL resource objects across all kinds
+                          - summary: map with total, synced, failed, pending counts
+                          - <kind>s: kind-specific lists (e.g., orders, pets, users) - lowercase plural
+                        Each resource object contains:
+                          - kind: string (e.g., "Order", "Pet", "User")
+                          - metadata: map with name, namespace, labels, annotations
+                          - spec: map containing all spec fields from the CR
+                          - status: map containing all status fields from the CR
+                        Available aggregate functions:
+                          - sum(list): sum of numeric values in a list
+                          - max(list): maximum value in a list
+                          - min(list): minimum value in a list
+                          - avg(list): average of values in a list
+                        Example expressions:
+                          - "summary.synced * 100 / summary.total" (percentage synced)
+                          - "orders.size()" (count orders using kind-specific variable)
+                          - "sum(orders.map(r, r.spec.quantity))" (sum of order quantities)
+                          - "avg(pets.filter(r, r.status.state == 'Synced').map(r, r.spec.price))" (avg synced pet price)
+                          - "max(orders.map(r, r.spec.quantity))" (max order quantity)
+                      type: string
+                    name:
+                      description: Name is the unique name for this derived value
+                      pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
+                      type: string
+                  required:
+                  - expression
+                  - name
+                  type: object
+                type: array
+              resourceSelectors:
+                description: |-
+                  ResourceSelectors specifies patterns to dynamically select resources for aggregation.
+                  Use this to aggregate resources matching labels or name patterns.
+                  At least one of Resources or ResourceSelectors must be specified.
+                items:
+                  description: ResourceSelector defines how to select resources for
+                    aggregation using patterns and labels
+                  properties:
+                    kind:
+                      description: Kind specifies the resource kind to select (e.g.,
+                        "Pet", "Order")
+                      type: string
+                    matchLabels:
+                      additionalProperties:
+                        type: string
+                      description: MatchLabels is a map of labels to match resources
+                      type: object
+                    namePattern:
+                      description: NamePattern is a regex pattern to filter resources
+                        by name
+                      type: string
+                  required:
+                  - kind
+                  type: object
+                type: array
+              resources:
+                description: |-
+                  Resources specifies explicit resource references to aggregate by name.
+                  Use this for precise control over which specific resources to include.
+                  At least one of Resources or ResourceSelectors must be specified.
+                items:
+                  description: ResourceReference explicitly references a resource
+                    by name for aggregation
+                  properties:
+                    kind:
+                      description: Kind specifies the resource kind (e.g., "Pet",
+                        "Order")
+                      type: string
+                    name:
+                      description: Name is the resource name
+                      type: string
+                    namespace:
+                      description: Namespace is the resource namespace (defaults to
+                        the aggregate's namespace if not specified)
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+            type: object
+          status:
+            description: PetstoreAggregateStatus defines the observed state of PetstoreAggregate
+            properties:
+              computedValues:
+                description: ComputedValues contains the results of evaluating CEL
+                  expressions from spec.derivedValues
+                items:
+                  description: ComputedValue holds the result of evaluating a CEL
+                    expression
+                  properties:
+                    error:
+                      description: Error contains any error message if the expression
+                        failed to evaluate
+                      type: string
+                    name:
+                      description: Name is the name of the derived value
+                      type: string
+                    value:
+                      description: Value is the computed result as a string (numbers,
+                        booleans, strings are all stringified)
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              conditions:
+                description: Conditions represent the latest available observations
+                  of an object's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastAggregationTime:
+                description: LastAggregationTime is when the status was last aggregated
+                format: date-time
+                type: string
+              message:
+                description: Message is a human-readable message about the current
+                  state
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the last observed generation
+                format: int64
+                type: integer
+              resources:
+                description: Resources contains the status of each aggregated resource
+                items:
+                  description: AggregatedResourceStatus represents the status of a
+                    single aggregated resource
+                  properties:
+                    externalID:
+                      description: ExternalID is the external API ID if available
+                      type: string
+                    kind:
+                      description: Kind is the resource kind
+                      type: string
+                    lastSyncTime:
+                      description: LastSyncTime is when the resource was last synced
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is the status message from the resource
+                      type: string
+                    name:
+                      description: Name is the resource name
+                      type: string
+                    namespace:
+                      description: Namespace is the resource namespace
+                      type: string
+                    state:
+                      description: State is the current state of the resource
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  - namespace
+                  - state
+                  type: object
+                type: array
+              state:
+                description: State represents the aggregated state
+                enum:
+                - Pending
+                - Healthy
+                - Degraded
+                - Unknown
+                type: string
+              summary:
+                description: Summary contains counts of resources by state
+                properties:
+                  failed:
+                    description: Failed is the number of resources in Failed state
+                    type: integer
+                  pending:
+                    description: Pending is the number of resources in Pending or
+                      other states
+                    type: integer
+                  synced:
+                    description: Synced is the number of resources in Synced state
+                    type: integer
+                  total:
+                    description: Total is the total number of matched resources
+                    type: integer
+                required:
+                - failed
+                - pending
+                - synced
+                - total
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

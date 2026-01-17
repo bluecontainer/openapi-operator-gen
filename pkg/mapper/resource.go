@@ -11,27 +11,49 @@ import (
 
 // CRDDefinition represents a Kubernetes CRD to be generated
 type CRDDefinition struct {
-	APIGroup    string
-	APIVersion  string
-	Kind        string
-	Plural      string
-	ShortNames  []string
-	Scope       string // Namespaced or Cluster
-	Description string
-	Spec        *FieldDefinition
-	Status      *FieldDefinition
-	Operations  []OperationMapping
-	BasePath    string
+	APIGroup     string
+	APIVersion   string
+	Kind         string
+	Plural       string
+	ShortNames   []string
+	Scope        string // Namespaced or Cluster
+	Description  string
+	Spec         *FieldDefinition
+	Status       *FieldDefinition
+	Operations   []OperationMapping
+	BasePath     string
+	ResourcePath string // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
+
+	// Per-method paths (when different methods use different paths)
+	GetPath    string // Path for GET operations (e.g., /pet/{petId})
+	PutPath    string // Path for PUT operations (e.g., /pet - when ID is in body)
+	DeletePath string // Path for DELETE operations (e.g., /pet/{petId})
+
+	// HTTP method availability (for conditional controller logic)
+	HasDelete bool // True if DELETE method is available for this resource
+	HasPost   bool // True if POST method is available for this resource
+	HasPut    bool // True if PUT method is available for this resource
+	HasPatch  bool // True if PATCH method is available for this resource
+
+	// UpdateWithPost enables using POST for updates when PUT is not available.
+	// This is set when --update-with-post flag is used AND HasPut is false AND HasPost is true.
+	UpdateWithPost bool
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 
 	// Query endpoint fields
-	IsQuery         bool               // True if this is a query/action CRD
-	QueryPath       string             // Full query path (e.g., /pet/findByTags)
-	QueryParams     []QueryParamField  // Query parameters for building URL
-	ResponseType    string             // Go type for response (e.g., "[]Pet", "Pet")
-	ResponseIsArray bool               // True if response is an array
-	ResultItemType  string             // Item type if ResponseIsArray (e.g., "Pet")
-	ResultFields    []*FieldDefinition // Fields for the result type (used to generate result struct)
-	UsesSharedType  bool               // True if ResultItemType is a shared type from another CRD
+	IsQuery            bool               // True if this is a query/action CRD
+	QueryPath          string             // Full query path (e.g., /pet/findByTags)
+	QueryPathParams    []QueryParamField  // Path parameters for query endpoints (e.g., serviceName, parameterName)
+	QueryParams        []QueryParamField  // Query parameters for building URL
+	ResponseType       string             // Go type for response (e.g., "[]Pet", "Pet")
+	ResponseIsArray    bool               // True if response is an array
+	ResultItemType     string             // Item type if ResponseIsArray (e.g., "Pet")
+	ResultFields       []*FieldDefinition // Fields for the result type (used to generate result struct)
+	UsesSharedType     bool               // True if ResultItemType is a shared type from another CRD
+	IsPrimitiveArray   bool               // True if response is a simple array of primitives ([]string, []int, etc.)
+	PrimitiveArrayType string             // The Go type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
 	IsAction       bool   // True if this is an action CRD (one-shot operation)
@@ -40,6 +62,13 @@ type CRDDefinition struct {
 	ParentResource string // Parent resource kind (e.g., "Pet")
 	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
 	ActionName     string // Action name (e.g., "uploadImage")
+
+	// IDFieldMappings stores mappings from path parameters to body fields.
+	// This is used when a path param like {orderId} maps to the body's "id" field.
+	// The controller uses this to:
+	// 1. Build URLs using the merged field's value
+	// 2. Optionally rename the field in the JSON body when sending to the API
+	IDFieldMappings []IDFieldMapping
 }
 
 // QueryParamField represents a query parameter as a spec field
@@ -51,6 +80,8 @@ type QueryParamField struct {
 	Required    bool
 	IsArray     bool   // True if this is an array parameter (e.g., tags[])
 	ItemType    string // Type of array items if IsArray is true
+	IsPointer   bool   // True if this is a pointer type (for optional numeric types)
+	BaseType    string // Base type without pointer (e.g., "int64" for "*int64")
 }
 
 // OperationMapping maps a CRD operation to a REST API call
@@ -73,6 +104,17 @@ type FieldDefinition struct {
 	Fields      []*FieldDefinition // nested fields for structs
 	ItemType    *FieldDefinition   // for arrays/slices
 	Enum        []string
+	// PathParamName is set when this field is merged with a path parameter.
+	// The controller uses this to substitute the field value into the URL path.
+	// e.g., for orderId -> id merge, the "id" field will have PathParamName = "orderId"
+	PathParamName string
+}
+
+// IDFieldMapping represents a mapping from a path parameter to a body field.
+// This is used to handle cases where {orderId} in the URL maps to "id" in the request body.
+type IDFieldMapping struct {
+	PathParam string // The path parameter name (e.g., "orderId")
+	BodyField string // The body field name (e.g., "id")
 }
 
 // ValidationRules contains kubebuilder validation markers
@@ -128,20 +170,28 @@ func (m *Mapper) MapResources(spec *parser.ParsedSpec) ([]*CRDDefinition, error)
 // mapQueryEndpoints converts query endpoints to CRD definitions
 func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, knownKinds map[string]bool) []*CRDDefinition {
 	crds := make([]*CRDDefinition, 0, len(queryEndpoints))
+	seenKinds := make(map[string]bool)
 
 	for _, qe := range queryEndpoints {
+		// Skip duplicate Kind names to avoid redeclaration errors
+		if seenKinds[qe.Name] {
+			continue
+		}
+		seenKinds[qe.Name] = true
+
 		crd := &CRDDefinition{
-			APIGroup:    m.config.APIGroup,
-			APIVersion:  m.config.APIVersion,
-			Kind:        qe.Name,
-			Plural:      strings.ToLower(qe.Name) + "s",
-			ShortNames:  []string{}, // Query CRDs don't get short names to avoid conflicts
-			Scope:       "Namespaced",
-			Description: qe.Summary,
-			BasePath:    qe.BasePath,
-			IsQuery:     true,
-			QueryPath:   qe.Path,
-			QueryParams: m.mapQueryParams(qe.QueryParams),
+			APIGroup:        m.config.APIGroup,
+			APIVersion:      m.config.APIVersion,
+			Kind:            qe.Name,
+			Plural:          strings.ToLower(qe.Name) + "s",
+			ShortNames:      []string{}, // Query CRDs don't get short names to avoid conflicts
+			Scope:           "Namespaced",
+			Description:     qe.Summary,
+			BasePath:        qe.BasePath,
+			IsQuery:         true,
+			QueryPath:       qe.Path,
+			QueryPathParams: m.mapQueryPathParams(qe.PathParams),
+			QueryParams:     m.mapQueryParams(qe.QueryParams),
 		}
 
 		// Generate spec fields from query parameters
@@ -171,8 +221,15 @@ func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, known
 // mapActionEndpoints converts action endpoints to CRD definitions
 func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, knownKinds map[string]bool) []*CRDDefinition {
 	crds := make([]*CRDDefinition, 0, len(actionEndpoints))
+	seenKinds := make(map[string]bool)
 
 	for _, ae := range actionEndpoints {
+		// Skip duplicate Kind names to avoid redeclaration errors
+		if seenKinds[ae.Name] {
+			continue
+		}
+		seenKinds[ae.Name] = true
+
 		crd := &CRDDefinition{
 			APIGroup:       m.config.APIGroup,
 			APIVersion:     m.config.APIVersion,
@@ -465,9 +522,15 @@ func (m *Mapper) mapResponseSchema(crd *CRDDefinition, qe *parser.QueryEndpoint,
 			crd.ResultFields = m.schemaToResultFields(itemSchema)
 			crd.ResponseType = "[]" + crd.ResultItemType
 		} else {
-			// Simple array type (e.g., []string)
-			crd.ResponseType = "[]" + m.mapType(itemSchema)
+			// Simple array type (e.g., []string, []int64)
+			itemType := m.mapType(itemSchema)
+			crd.ResponseType = "[]" + itemType
 			crd.ResultFields = nil
+			// Mark as primitive array so the template can generate proper typed field
+			if m.isPrimitiveType(itemType) {
+				crd.IsPrimitiveArray = true
+				crd.PrimitiveArrayType = itemType
+			}
 		}
 	} else if schema.Type == "object" && len(schema.Properties) > 0 {
 		// Single object response
@@ -557,10 +620,45 @@ func (m *Mapper) mapQueryParams(params []parser.Parameter) []QueryParamField {
 			field.IsArray = true
 			field.ItemType = strings.TrimPrefix(p.Type, "array:")
 			field.GoType = "[]" + m.mapParamType(field.ItemType)
+			field.BaseType = field.GoType
 		} else {
-			field.GoType = m.mapParamType(p.Type)
+			baseType := m.mapParamType(p.Type)
+			field.BaseType = baseType
+			// Add pointer for optional numeric types (matches resolveGoType in types.go)
+			if !p.Required && m.isNumericType(baseType) {
+				field.GoType = "*" + baseType
+				field.IsPointer = true
+			} else {
+				field.GoType = baseType
+			}
 		}
 
+		fields = append(fields, field)
+	}
+
+	return fields
+}
+
+// mapQueryPathParams converts parser path params to QueryParamField for query endpoints
+func (m *Mapper) mapQueryPathParams(params []parser.Parameter) []QueryParamField {
+	fields := make([]QueryParamField, 0, len(params))
+
+	for _, p := range params {
+		baseType := m.mapParamType(p.Type)
+		field := QueryParamField{
+			Name:        strcase.ToCamel(p.Name),
+			JSONName:    strcase.ToLowerCamel(p.Name),
+			Description: p.Description,
+			Required:    p.Required,
+			BaseType:    baseType,
+		}
+		// Add pointer for optional numeric types (matches resolveGoType in types.go)
+		if !p.Required && m.isNumericType(baseType) {
+			field.GoType = "*" + baseType
+			field.IsPointer = true
+		} else {
+			field.GoType = baseType
+		}
 		fields = append(fields, field)
 	}
 
@@ -580,6 +678,26 @@ func (m *Mapper) mapParamType(t string) string {
 		return "bool"
 	default:
 		return "string"
+	}
+}
+
+// isNumericType returns true if the Go type is a numeric type that should be a pointer when optional
+func (m *Mapper) isNumericType(goType string) bool {
+	switch goType {
+	case "int", "int32", "int64", "float32", "float64":
+		return true
+	default:
+		return false
+	}
+}
+
+// isPrimitiveType returns true if the Go type is a primitive type (not struct/object)
+func (m *Mapper) isPrimitiveType(goType string) bool {
+	switch goType {
+	case "string", "bool", "int", "int32", "int64", "float32", "float64":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -706,6 +824,60 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 			Operations:  m.mapOperations(resource.Operations),
 		}
 
+		// Check method availability and collect per-method paths
+		for _, op := range resource.Operations {
+			switch op.Method {
+			case "DELETE":
+				crd.HasDelete = true
+				if crd.DeletePath == "" {
+					crd.DeletePath = op.Path
+				}
+			case "POST":
+				crd.HasPost = true
+			case "PUT":
+				crd.HasPut = true
+				if crd.PutPath == "" {
+					crd.PutPath = op.Path
+				}
+			case "PATCH":
+				crd.HasPatch = true
+			case "GET":
+				if crd.GetPath == "" {
+					crd.GetPath = op.Path
+				}
+			}
+		}
+
+		// Set UpdateWithPost if configured for this path and neither PUT nor PATCH is available but POST is
+		if m.config.ShouldUpdateWithPost(resource.Path) && !crd.HasPut && !crd.HasPatch && crd.HasPost {
+			crd.UpdateWithPost = true
+		}
+
+		// Find the full resource path with parameters (prefer GET path with params)
+		// This is kept for backward compatibility with ResourcePath
+		for _, op := range resource.Operations {
+			if op.Method == "GET" && strings.Contains(op.Path, "{") {
+				crd.ResourcePath = op.Path
+				break
+			}
+		}
+		if crd.ResourcePath == "" {
+			for _, op := range resource.Operations {
+				if op.Method == "PUT" && strings.Contains(op.Path, "{") {
+					crd.ResourcePath = op.Path
+					break
+				}
+			}
+		}
+		// Fallback to BasePath if no parameterized path found
+		if crd.ResourcePath == "" {
+			crd.ResourcePath = resource.Path
+		}
+
+		// ExternalIDRef is only needed when there are no path parameters to identify the resource
+		// If path params exist (e.g., /pet/{petId}), those fields serve as the identifier
+		crd.NeedsExternalIDRef = !strings.Contains(crd.ResourcePath, "{")
+
 		// Generate spec fields from resource schema
 		if resource.Schema != nil {
 			crd.Spec = m.schemaToFieldDefinition("Spec", resource.Schema, true)
@@ -715,7 +887,8 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 		}
 
 		// Add path and query parameters from operations to spec fields
-		m.addOperationParamsToSpec(crd.Spec, resource.Operations)
+		// Use the merge-enabled version to handle ID field merging
+		m.addOperationParamsToSpecWithMerge(crd.Spec, resource.Operations, crd, crd.Kind)
 
 		// Generate status fields
 		crd.Status = m.createStatusDefinition()
@@ -726,16 +899,28 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 	return crds, nil
 }
 
-// addOperationParamsToSpec adds path and query parameters from operations to the spec
+// addOperationParamsToSpec adds path and query parameters from operations to the spec.
+// It also handles ID field merging: when a path parameter like {orderId} maps to a body field "id",
+// the path param is not added as a separate field; instead, the body field is annotated with PathParamName.
 func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []parser.Operation) {
+	m.addOperationParamsToSpecWithMerge(spec, operations, nil, "")
+}
+
+// addOperationParamsToSpecWithMerge adds path and query parameters with ID field merging support.
+// crd is used to store ID field mappings, and kindName is used for auto-detection heuristics.
+func (m *Mapper) addOperationParamsToSpecWithMerge(spec *FieldDefinition, operations []parser.Operation, crd *CRDDefinition, kindName string) {
 	if spec == nil {
 		return
 	}
 
 	// Track existing field names to avoid duplicates
+	// Also build a map for quick lookup of field definitions by JSON name
 	existingFields := make(map[string]bool)
+	fieldByJSONName := make(map[string]*FieldDefinition)
 	for _, field := range spec.Fields {
-		existingFields[strings.ToLower(field.JSONName)] = true
+		key := strings.ToLower(field.JSONName)
+		existingFields[key] = true
+		fieldByJSONName[key] = field
 	}
 
 	// Collect unique path params from all operations
@@ -751,11 +936,39 @@ func (m *Mapper) addOperationParamsToSpec(spec *FieldDefinition, operations []pa
 	for _, op := range sortedOps {
 		for _, param := range op.PathParams {
 			paramKey := strings.ToLower(param.Name)
-			if pathParamsSeen[paramKey] || existingFields[paramKey] {
+			if pathParamsSeen[paramKey] {
 				continue
 			}
 			pathParamsSeen[paramKey] = true
 
+			// Check if this path param should be merged with an existing body field
+			// Priority: 1) x-k8s-id-field extension, 2) --id-field-map flag, 3) auto-detection
+			bodyFieldName := m.config.GetIDFieldMapping(param.Name, kindName, param.IDFieldRef)
+
+			if bodyFieldName != "" {
+				// Check if the body field exists in the spec
+				bodyFieldKey := strings.ToLower(bodyFieldName)
+				if bodyField, ok := fieldByJSONName[bodyFieldKey]; ok {
+					// Merge: annotate the body field with the path param name
+					bodyField.PathParamName = param.Name
+					// Store the mapping in the CRD for controller use
+					if crd != nil {
+						crd.IDFieldMappings = append(crd.IDFieldMappings, IDFieldMapping{
+							PathParam: param.Name,
+							BodyField: bodyFieldName,
+						})
+					}
+					// Don't add the path param as a separate field
+					continue
+				}
+			}
+
+			// No merge - check if field already exists
+			if existingFields[paramKey] {
+				continue
+			}
+
+			// Add the path param as a new field
 			field := &FieldDefinition{
 				Name:        strcase.ToCamel(param.Name),
 				JSONName:    strcase.ToLowerCamel(param.Name),
@@ -824,6 +1037,20 @@ func (m *Mapper) mapSingleCRD(spec *parser.ParsedSpec) ([]*CRDDefinition, error)
 	for _, resource := range spec.Resources {
 		ops := m.mapOperations(resource.Operations)
 		crd.Operations = append(crd.Operations, ops...)
+		// Check if DELETE method is available
+		for _, op := range resource.Operations {
+			if op.Method == "DELETE" {
+				crd.HasDelete = true
+				break
+			}
+		}
+		// Check if POST method is available
+		for _, op := range resource.Operations {
+			if op.Method == "POST" {
+				crd.HasPost = true
+				break
+			}
+		}
 	}
 
 	// Create spec with resourceType field
@@ -887,23 +1114,30 @@ func (m *Mapper) mapOperations(ops []parser.Operation) []OperationMapping {
 			QueryParams: make([]string, 0),
 		}
 
+		// Collect path params first so we can use them for action classification
+		for _, p := range op.PathParams {
+			mapping.PathParams = append(mapping.PathParams, p.Name)
+		}
+		for _, p := range op.QueryParams {
+			mapping.QueryParams = append(mapping.QueryParams, p.Name)
+		}
+
 		// Map HTTP method to CRD action
+		// POST is only "Create" if it has no path params (e.g., POST /pet)
+		// POST with path params (e.g., POST /pet/{petId}) is typically an Update or Action
 		switch op.Method {
 		case "POST":
-			mapping.CRDAction = "Create"
+			if len(mapping.PathParams) == 0 {
+				mapping.CRDAction = "Create"
+			} else {
+				mapping.CRDAction = "Update" // POST with path params is an update/action
+			}
 		case "PUT", "PATCH":
 			mapping.CRDAction = "Update"
 		case "DELETE":
 			mapping.CRDAction = "Delete"
 		case "GET":
 			mapping.CRDAction = "Get"
-		}
-
-		for _, p := range op.PathParams {
-			mapping.PathParams = append(mapping.PathParams, p.Name)
-		}
-		for _, p := range op.QueryParams {
-			mapping.QueryParams = append(mapping.QueryParams, p.Name)
 		}
 
 		mappings = append(mappings, mapping)
@@ -1033,14 +1267,18 @@ func (m *Mapper) mapType(schema *parser.Schema) string {
 			itemType := m.mapType(schema.Items)
 			return "[]" + itemType
 		}
-		return "[]interface{}"
+		// Arrays without item type use RawExtension for arbitrary JSON
+		return "[]runtime.RawExtension"
 	case "object":
 		if len(schema.Properties) == 0 {
-			return "map[string]interface{}"
+			// Objects without properties use RawExtension for arbitrary JSON
+			// This is compatible with controller-gen (interface{} is not)
+			return "*runtime.RawExtension"
 		}
 		return "struct"
 	default:
-		return "interface{}"
+		// Unknown types use RawExtension for arbitrary JSON
+		return "*runtime.RawExtension"
 	}
 }
 
@@ -1127,4 +1365,144 @@ func (m *Mapper) generateShortNames(kind string) []string {
 	}
 
 	return shortNames
+}
+
+// AggregateDefinition represents a Status Aggregator CRD definition (Option 4)
+// This is a read-only CRD that observes and aggregates status from existing resources
+type AggregateDefinition struct {
+	APIGroup   string
+	APIVersion string
+	Kind       string
+	Plural     string
+	// ResourceKinds are the CRUD CRD kinds this aggregate can observe
+	ResourceKinds []string
+	// QueryKinds are the Query CRD kinds this aggregate can observe
+	QueryKinds []string
+	// ActionKinds are the Action CRD kinds this aggregate can observe
+	ActionKinds []string
+	// AllKinds is the combined list of all kinds (for iteration convenience)
+	AllKinds []string
+}
+
+// ResourceSelector defines how to select resources to aggregate
+type ResourceSelector struct {
+	Group       string            // API group (e.g., "petstore.example.com")
+	Kind        string            // Resource kind (e.g., "Pet")
+	NamePattern string            // Regex pattern for resource names
+	MatchLabels map[string]string // Label selector
+}
+
+// AggregationStrategy defines how to combine resource statuses
+type AggregationStrategy string
+
+const (
+	// AllHealthy requires all resources to be healthy
+	AllHealthy AggregationStrategy = "AllHealthy"
+	// AnyHealthy requires at least one resource to be healthy
+	AnyHealthy AggregationStrategy = "AnyHealthy"
+	// Quorum requires a majority of resources to be healthy
+	Quorum AggregationStrategy = "Quorum"
+)
+
+// MatchType defines how matchers are combined
+type MatchType string
+
+const (
+	// AnyResourceMatchesAnyCondition - any resource matches any condition
+	AnyResourceMatchesAnyCondition MatchType = "AnyResourceMatchesAnyCondition"
+	// AnyResourceMatchesAllConditions - any resource matches all conditions
+	AnyResourceMatchesAllConditions MatchType = "AnyResourceMatchesAllConditions"
+	// AllResourcesMatchAnyCondition - all resources match any condition
+	AllResourcesMatchAnyCondition MatchType = "AllResourcesMatchAnyCondition"
+	// AllResourcesMatchAllConditions - all resources match all conditions (default)
+	AllResourcesMatchAllConditions MatchType = "AllResourcesMatchAllConditions"
+)
+
+// CreateAggregateDefinition creates an aggregate CRD definition from existing CRDs
+func (m *Mapper) CreateAggregateDefinition(crds []*CRDDefinition) *AggregateDefinition {
+	// Collect resource kinds by type
+	resourceKinds := make([]string, 0)
+	queryKinds := make([]string, 0)
+	actionKinds := make([]string, 0)
+	allKinds := make([]string, 0)
+
+	for _, crd := range crds {
+		allKinds = append(allKinds, crd.Kind)
+		if crd.IsQuery {
+			queryKinds = append(queryKinds, crd.Kind)
+		} else if crd.IsAction {
+			actionKinds = append(actionKinds, crd.Kind)
+		} else {
+			resourceKinds = append(resourceKinds, crd.Kind)
+		}
+	}
+
+	// Derive aggregate kind name from API group
+	// e.g., "petstore.example.com" -> "PetstoreAggregate"
+	appName := strings.Split(m.config.APIGroup, ".")[0]
+	aggregateKind := strcase.ToCamel(appName) + "Aggregate"
+
+	return &AggregateDefinition{
+		APIGroup:      m.config.APIGroup,
+		APIVersion:    m.config.APIVersion,
+		Kind:          aggregateKind,
+		Plural:        strings.ToLower(aggregateKind) + "s",
+		ResourceKinds: resourceKinds,
+		QueryKinds:    queryKinds,
+		ActionKinds:   actionKinds,
+		AllKinds:      allKinds,
+	}
+}
+
+// BundleDefinition represents an Inline Composition CRD definition (Option 2)
+// This CRD creates and manages multiple child resources with dependency ordering
+type BundleDefinition struct {
+	APIGroup   string
+	APIVersion string
+	Kind       string
+	Plural     string
+	// ResourceKinds are the CRUD CRD kinds this bundle can create
+	ResourceKinds []string
+	// QueryKinds are the Query CRD kinds this bundle can create
+	QueryKinds []string
+	// ActionKinds are the Action CRD kinds this bundle can create
+	ActionKinds []string
+	// AllKinds is the combined list of all kinds (for iteration convenience)
+	AllKinds []string
+}
+
+// CreateBundleDefinition creates a bundle CRD definition from existing CRDs
+func (m *Mapper) CreateBundleDefinition(crds []*CRDDefinition) *BundleDefinition {
+	// Collect resource kinds by type
+	resourceKinds := make([]string, 0)
+	queryKinds := make([]string, 0)
+	actionKinds := make([]string, 0)
+	allKinds := make([]string, 0)
+
+	for _, crd := range crds {
+		allKinds = append(allKinds, crd.Kind)
+		if crd.IsQuery {
+			queryKinds = append(queryKinds, crd.Kind)
+		} else if crd.IsAction {
+			actionKinds = append(actionKinds, crd.Kind)
+		} else {
+			resourceKinds = append(resourceKinds, crd.Kind)
+		}
+	}
+
+	// Derive bundle kind name from API group
+	// e.g., "petstore.example.com" -> "PetstoreBundle"
+	appName := strings.Split(m.config.APIGroup, ".")[0]
+	bundleKind := strcase.ToCamel(appName) + "Bundle"
+
+	return &BundleDefinition{
+		APIGroup:      m.config.APIGroup,
+		APIVersion:    m.config.APIVersion,
+		Kind:          bundleKind,
+		Plural:        strings.ToLower(bundleKind) + "s",
+		ResourceKinds: resourceKinds,
+		QueryKinds:    queryKinds,
+		ActionKinds:   actionKinds,
+		AllKinds:      allKinds,
+	}
 }

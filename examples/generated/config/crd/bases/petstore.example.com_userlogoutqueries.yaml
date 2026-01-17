@@ -56,6 +56,12 @@ spec:
                   If not set, the query executes once and stores results (one-shot mode).
                   Examples: "30s", "5m", "1h"
                 type: string
+              targetBaseURL:
+                description: |-
+                  TargetBaseURL specifies a static base URL for the REST API.
+                  When set, overrides all other endpoint configuration for this CR.
+                  Example: "http://api.example.com:8080"
+                type: string
               targetDeployment:
                 description: TargetDeployment specifies a Deployment name to route
                   requests to.
@@ -67,6 +73,9 @@ spec:
               targetNamespace:
                 description: TargetNamespace specifies the namespace to look for the
                   target workload.
+                type: string
+              targetPod:
+                description: TargetPod specifies a pod name to route requests to directly.
                 type: string
               targetPodOrdinal:
                 description: TargetPodOrdinal specifies the StatefulSet pod ordinal

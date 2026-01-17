@@ -24,14 +24,15 @@ func NewCRDGenerator(cfg *config.Config) *CRDGenerator {
 
 // CRDYAMLData holds data for CRD YAML template
 type CRDYAMLData struct {
-	APIGroup   string
-	APIVersion string
-	Kind       string
-	KindLower  string
-	Plural     string
-	ShortNames []string
-	Scope      string
-	Spec       *CRDSpecData
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	Plural           string
+	ShortNames       []string
+	Scope            string
+	Spec             *CRDSpecData
 }
 
 // CRDSpecData holds spec data for CRD YAML
@@ -75,9 +76,11 @@ func (g *CRDGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 func (g *CRDGenerator) generateKustomization(outputDir string, crdFiles []string) error {
 	data := struct {
-		CRDFiles []string
+		GeneratorVersion string
+		CRDFiles         []string
 	}{
-		CRDFiles: crdFiles,
+		GeneratorVersion: g.config.GeneratorVersion,
+		CRDFiles:         crdFiles,
 	}
 
 	tmpl, err := template.New("kustomization").Parse(templates.KustomizationCRDTemplate)
@@ -101,13 +104,14 @@ func (g *CRDGenerator) generateKustomization(outputDir string, crdFiles []string
 
 func (g *CRDGenerator) generateCRD(outputDir string, crd *mapper.CRDDefinition) error {
 	data := CRDYAMLData{
-		APIGroup:   crd.APIGroup,
-		APIVersion: crd.APIVersion,
-		Kind:       crd.Kind,
-		KindLower:  strings.ToLower(crd.Kind),
-		Plural:     crd.Plural,
-		ShortNames: crd.ShortNames,
-		Scope:      crd.Scope,
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         crd.APIGroup,
+		APIVersion:       crd.APIVersion,
+		Kind:             crd.Kind,
+		KindLower:        strings.ToLower(crd.Kind),
+		Plural:           crd.Plural,
+		ShortNames:       crd.ShortNames,
+		Scope:            crd.Scope,
 	}
 
 	if crd.Spec != nil {

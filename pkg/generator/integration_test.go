@@ -33,20 +33,25 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 
 	// Create CRDs for all three types: Resource, Query, and Action
 	crds := []*mapper.CRDDefinition{
-		// Standard Resource CRD
+		// Standard Resource CRD with path parameter
 		{
-			APIGroup:   cfg.APIGroup,
-			APIVersion: cfg.APIVersion,
-			Kind:       "Pet",
-			Plural:     "pets",
-			ShortNames: []string{"pe"},
-			Scope:      "Namespaced",
-			BasePath:   "/pet",
+			APIGroup:           cfg.APIGroup,
+			APIVersion:         cfg.APIVersion,
+			Kind:               "Pet",
+			Plural:             "pets",
+			ShortNames:         []string{"pe"},
+			Scope:              "Namespaced",
+			BasePath:           "/pet",
+			ResourcePath:       "/pet/{petId}",
+			HasDelete:          true,
+			HasPost:            true,
+			NeedsExternalIDRef: false, // Path params identify the resource
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Name", JSONName: "name", GoType: "string", Required: true},
 					{Name: "Status", JSONName: "status", GoType: "string"},
 					{Name: "PhotoUrls", JSONName: "photoUrls", GoType: "[]string"},
+					{Name: "PetId", JSONName: "petId", GoType: "int64", Required: true},
 				},
 			},
 		},
@@ -136,7 +141,7 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -162,20 +167,25 @@ func TestGeneratedCodeWithE2ETests(t *testing.T) {
 		ModuleName: "github.com/example/petstore-operator",
 	}
 
-	// Create a simple Resource CRD for testing
+	// Create a simple Resource CRD for testing (with path parameter)
 	crds := []*mapper.CRDDefinition{
 		{
-			APIGroup:   cfg.APIGroup,
-			APIVersion: cfg.APIVersion,
-			Kind:       "Pet",
-			Plural:     "pets",
-			ShortNames: []string{"pe"},
-			Scope:      "Namespaced",
-			BasePath:   "/pet",
+			APIGroup:           cfg.APIGroup,
+			APIVersion:         cfg.APIVersion,
+			Kind:               "Pet",
+			Plural:             "pets",
+			ShortNames:         []string{"pe"},
+			Scope:              "Namespaced",
+			BasePath:           "/pet",
+			ResourcePath:       "/pet/{petId}",
+			HasDelete:          true,
+			HasPost:            true,
+			NeedsExternalIDRef: false, // Path params identify the resource
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Name", JSONName: "name", GoType: "string", Required: true},
 					{Name: "Status", JSONName: "status", GoType: "string"},
+					{Name: "PetId", JSONName: "petId", GoType: "int64", Required: true},
 				},
 			},
 		},
@@ -188,7 +198,7 @@ func TestGeneratedCodeWithE2ETests(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -250,7 +260,7 @@ func TestGeneratedCodeFromPetstoreSpec(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -379,6 +389,8 @@ func TestGeneratedCodeIncludesTestHelpers(t *testing.T) {
 			Plural:     "widgets",
 			Scope:      "Namespaced",
 			BasePath:   "/widgets",
+			HasDelete:  true,
+			HasPost:    true,
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Name", JSONName: "name", GoType: "string", Required: true},
@@ -394,7 +406,7 @@ func TestGeneratedCodeIncludesTestHelpers(t *testing.T) {
 	}
 
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -440,6 +452,8 @@ func TestGenerateControllerTestFile(t *testing.T) {
 			Plural:     "pets",
 			Scope:      "Namespaced",
 			BasePath:   "/pet",
+			HasDelete:  true,
+			HasPost:    true,
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Name", JSONName: "name", GoType: "string", Required: true},
@@ -450,7 +464,7 @@ func TestGenerateControllerTestFile(t *testing.T) {
 
 	// Generate the controller
 	controllerGen := NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, nil, nil); err != nil {
 		t.Fatalf("ControllerGenerator.Generate failed: %v", err)
 	}
 
@@ -622,13 +636,28 @@ func TestPetReconciler_CreateResource(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedMethod = r.Method
 		receivedPath = r.URL.Path
-		json.NewDecoder(r.Body).Decode(&receivedBody)
 
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"id":   456,
-			"name": "NewPet",
-		})
+		switch r.Method {
+		case http.MethodGet:
+			// Return 404 for GET - resource doesn't exist yet
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "not found",
+			})
+		case http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&receivedBody)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   456,
+				"name": "NewPet",
+			})
+		default:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   456,
+				"name": "NewPet",
+			})
+		}
 	}))
 	defer server.Close()
 

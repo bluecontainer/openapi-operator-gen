@@ -31,22 +31,27 @@ func NewControllerGenerator(cfg *config.Config) *ControllerGenerator {
 
 // ControllerTemplateData holds data for controller template
 type ControllerTemplateData struct {
-	Year            int
-	APIGroup        string
-	APIVersion      string
-	ModuleName      string
-	Kind            string
-	KindLower       string
-	Plural          string
-	BasePath        string
-	IsQuery         bool                     // True if this is a query CRD
-	QueryPath       string                   // Full query path for query CRDs
-	QueryParams     []mapper.QueryParamField // Query parameters for building URL
-	ResponseType    string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
-	ResponseIsArray bool                     // True if response is an array
-	ResultItemType  string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
-	HasTypedResults bool                     // True if we have typed results (not raw extension)
-	UsesSharedType  bool                     // True if ResultItemType is a shared type from another CRD
+	Year               int
+	GeneratorVersion   string
+	APIGroup           string
+	APIVersion         string
+	ModuleName         string
+	Kind               string
+	KindLower          string
+	Plural             string
+	BasePath           string
+	ResourcePath       string                   // Full path template with placeholders (e.g., /classes/{className}/variables/{variableName})
+	IsQuery            bool                     // True if this is a query CRD
+	QueryPath          string                   // Full query path for query CRDs
+	QueryPathParams    []mapper.QueryParamField // Path parameters for query endpoints
+	QueryParams        []mapper.QueryParamField // Query parameters for building URL
+	ResponseType       string                   // Go type for response (e.g., "[]Pet" or "[]PetFindByTagsResult")
+	ResponseIsArray    bool                     // True if response is an array
+	ResultItemType     string                   // Item type if ResponseIsArray (e.g., "Pet" or "PetFindByTagsResult")
+	HasTypedResults    bool                     // True if we have typed results (not raw extension)
+	UsesSharedType     bool                     // True if ResultItemType is a shared type from another CRD
+	IsPrimitiveArray   bool                     // True if response is a primitive array ([]string, []int, etc.)
+	PrimitiveArrayType string                   // Base type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
 	IsAction          bool                     // True if this is an action CRD
@@ -66,6 +71,27 @@ type ControllerTemplateData struct {
 	ResourceQueryParams []ResourceQueryParam // Query parameters for resource endpoints
 	HasResourceParams   bool                 // True if there are path or query params to handle
 
+	// HTTP method availability
+	HasDelete bool // True if DELETE method is available for this resource
+	HasPost   bool // True if POST method is available for this resource
+	HasPut    bool // True if PUT method is available for this resource
+	HasPatch  bool // True if PATCH method is available for this resource
+
+	// UpdateWithPost enables using POST for updates when PUT is not available.
+	// This is set when --update-with-post flag is used AND HasPut is false AND HasPost is true.
+	UpdateWithPost bool
+
+	// Per-method paths (when different methods use different paths)
+	GetPath    string // Path for GET operations (e.g., /pet/{petId})
+	PutPath    string // Path for PUT operations (e.g., /pet - when ID is in body)
+	DeletePath string // Path for DELETE operations (e.g., /pet/{petId})
+
+	// PutPathDiffers is true when PUT uses a different path than GET (e.g., PUT /pet vs GET /pet/{petId})
+	PutPathDiffers bool
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
+
 	// Integration test fields
 	RequiredFields    []RequiredFieldInfo // Required fields that need sample values in tests
 	HasRequiredFields bool                // True if there are required fields
@@ -73,9 +99,11 @@ type ControllerTemplateData struct {
 
 // ActionPathParam represents a path parameter in action templates
 type ActionPathParam struct {
-	Name   string // Parameter name (e.g., "userId")
-	GoName string // Go field name (e.g., "UserId")
-	GoType string // Go type (e.g., "string", "int64")
+	Name      string // Parameter name (e.g., "userId")
+	GoName    string // Go field name (e.g., "UserId")
+	GoType    string // Go type (e.g., "string", "int64")
+	IsPointer bool   // True if this is a pointer type (e.g., *int64)
+	BaseType  string // Base type without pointer (e.g., "int64" for "*int64")
 }
 
 // ActionRequestBodyField represents a request body field in action templates
@@ -103,11 +131,21 @@ type RequiredFieldInfo struct {
 
 // MainTemplateData holds data for main.go template
 type MainTemplateData struct {
-	Year       int
-	APIVersion string
-	ModuleName string
-	AppName    string
-	CRDs       []CRDMainData
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	APIGroup         string
+	ModuleName       string
+	AppName          string
+	CRDs             []CRDMainData
+	HasAggregate     bool   // True if aggregate CRD is generated
+	AggregateKind    string // Kind name of the aggregate CRD (e.g., "StatusAggregate")
+	HasBundle        bool   // True if bundle CRD is generated
+	BundleKind       string // Kind name of the bundle CRD (e.g., "PetstoreBundle")
+	// Version info for the generated operator
+	OperatorVersion string // Pseudo-version for go.mod (e.g., v0.0.8-0.20260115203556-d5024c8e6620)
+	CommitHash      string // Git commit hash (12 chars)
+	CommitTimestamp string // Commit timestamp in YYYYMMDDHHMMSS format (UTC)
 }
 
 // CRDMainData holds CRD data for main.go
@@ -118,7 +156,8 @@ type CRDMainData struct {
 }
 
 // Generate generates controller files
-func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
+// aggregate and bundle are optional - pass nil if not generating those CRDs
+func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition, bundle *mapper.BundleDefinition) error {
 	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
 	if err := os.MkdirAll(controllerDir, 0755); err != nil {
 		return fmt.Errorf("failed to create controller directory: %w", err)
@@ -144,13 +183,16 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		return fmt.Errorf("failed to generate suite_test.go: %w", err)
 	}
 
-	// Generate main.go
-	if err := g.generateMain(crds); err != nil {
+	// Note: controller utility functions (ValuesEqual, GetExternalIDIfPresent, etc.)
+	// are now in the shared library github.com/bluecontainer/openapi-operator-gen/pkg/controller
+
+	// Generate main.go (with optional aggregate and bundle info)
+	if err := g.generateMain(crds, aggregate, bundle); err != nil {
 		return fmt.Errorf("failed to generate main.go: %w", err)
 	}
 
 	// Generate go.mod for the generated operator
-	if err := g.generateGoMod(); err != nil {
+	if err := g.generateGoMod(aggregate != nil, bundle != nil); err != nil {
 		return fmt.Errorf("failed to generate go.mod: %w", err)
 	}
 
@@ -165,7 +207,7 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 	}
 
 	// Generate README.md
-	if err := g.generateReadme(crds); err != nil {
+	if err := g.generateReadme(crds, aggregate != nil, bundle != nil); err != nil {
 		return fmt.Errorf("failed to generate README: %w", err)
 	}
 
@@ -189,22 +231,27 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.CRDDefinition) error {
 	data := ControllerTemplateData{
-		Year:            time.Now().Year(),
-		APIGroup:        crd.APIGroup,
-		APIVersion:      crd.APIVersion,
-		ModuleName:      g.config.ModuleName,
-		Kind:            crd.Kind,
-		KindLower:       strings.ToLower(crd.Kind),
-		Plural:          crd.Plural,
-		BasePath:        crd.BasePath,
-		IsQuery:         crd.IsQuery,
-		QueryPath:       crd.QueryPath,
-		QueryParams:     crd.QueryParams,
-		ResponseType:    crd.ResponseType,
-		ResponseIsArray: crd.ResponseIsArray,
-		ResultItemType:  crd.ResultItemType,
-		HasTypedResults: len(crd.ResultFields) > 0 || crd.UsesSharedType,
-		UsesSharedType:  crd.UsesSharedType,
+		Year:               time.Now().Year(),
+		GeneratorVersion:   g.config.GeneratorVersion,
+		APIGroup:           crd.APIGroup,
+		APIVersion:         crd.APIVersion,
+		ModuleName:         g.config.ModuleName,
+		Kind:               crd.Kind,
+		KindLower:          strings.ToLower(crd.Kind),
+		Plural:             crd.Plural,
+		BasePath:           crd.BasePath,
+		ResourcePath:       crd.ResourcePath,
+		IsQuery:            crd.IsQuery,
+		QueryPath:          crd.QueryPath,
+		QueryPathParams:    crd.QueryPathParams,
+		QueryParams:        crd.QueryParams,
+		ResponseType:       crd.ResponseType,
+		ResponseIsArray:    crd.ResponseIsArray,
+		ResultItemType:     crd.ResultItemType,
+		HasTypedResults:    len(crd.ResultFields) > 0 || crd.UsesSharedType || crd.IsPrimitiveArray,
+		UsesSharedType:     crd.UsesSharedType,
+		IsPrimitiveArray:   crd.IsPrimitiveArray,
+		PrimitiveArrayType: crd.PrimitiveArrayType,
 		// Action fields
 		IsAction:       crd.IsAction,
 		ActionPath:     crd.ActionPath,
@@ -214,6 +261,17 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
+		// HTTP method availability
+		HasDelete:      crd.HasDelete,
+		HasPost:        crd.HasPost,
+		HasPut:         crd.HasPut,
+		HasPatch:       crd.HasPatch,
+		UpdateWithPost: crd.UpdateWithPost,
+		// Per-method paths
+		GetPath:        crd.GetPath,
+		PutPath:        crd.PutPath,
+		DeletePath:     crd.DeletePath,
+		PutPathDiffers: crd.PutPath != "" && crd.GetPath != "" && crd.PutPath != crd.GetPath,
 	}
 
 	// Populate path params (excluding parent ID)
@@ -252,27 +310,71 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		pathParamsSeen := make(map[string]bool)
 		queryParamsSeen := make(map[string]bool)
 
+		// Build a map of path param -> merged field name from IDFieldMappings
+		pathParamToFieldName := make(map[string]string)
+		for _, mapping := range crd.IDFieldMappings {
+			pathParamToFieldName[mapping.PathParam] = mapping.BodyField
+		}
+
 		for _, op := range crd.Operations {
 			for _, paramName := range op.PathParams {
 				if pathParamsSeen[paramName] {
 					continue
 				}
 				pathParamsSeen[paramName] = true
-				// Find the field in spec to get type info
+
+				// Check if this path param is merged with a body field
+				mergedFieldName := pathParamToFieldName[paramName]
+
+				// Find the field in spec to get type info and the correct GoName
 				goType := "string" // default
+				goName := strcase.ToCamel(paramName)
+				isPointer := false
+				baseType := goType
 				if crd.Spec != nil {
 					for _, field := range crd.Spec.Fields {
-						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(paramName)) {
+						// If merged, look for the body field; otherwise look for the path param field
+						targetField := paramName
+						if mergedFieldName != "" {
+							targetField = mergedFieldName
+						}
+						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(targetField)) {
 							goType = field.GoType
+							goName = field.Name // Use the actual field name (e.g., "Id" not "OrderId")
+
+							// Apply the same pointer logic as resolveGoType in types.go:
+							// Non-required primitive numeric types become pointers in the generated code
+							if !field.Required {
+								switch goType {
+								case "int", "int32", "int64", "float32", "float64":
+									goType = "*" + goType
+								}
+							}
+
+							// Check if this is a pointer type
+							if strings.HasPrefix(goType, "*") {
+								isPointer = true
+								baseType = strings.TrimPrefix(goType, "*")
+							} else {
+								baseType = goType
+							}
 							break
 						}
 					}
 				}
 				data.ResourcePathParams = append(data.ResourcePathParams, ActionPathParam{
-					Name:   paramName,
-					GoName: strcase.ToCamel(paramName),
-					GoType: goType,
+					Name:      paramName,
+					GoName:    goName,
+					GoType:    goType,
+					IsPointer: isPointer,
+					BaseType:  baseType,
 				})
+			}
+			// Only collect query params from the Create operation (POST to base path)
+			// Query params from other operations (like updatePetWithForm on /pet/{petId})
+			// should not be included in buildResourceURLForCreate
+			if op.CRDAction != "Create" {
+				continue
 			}
 			for _, paramName := range op.QueryParams {
 				if queryParamsSeen[paramName] {
@@ -301,6 +403,10 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 			}
 		}
 		data.HasResourceParams = len(data.ResourcePathParams) > 0 || len(data.ResourceQueryParams) > 0
+
+		// Use the NeedsExternalIDRef value from the CRD (set by mapper based on ResourcePath)
+		// This is true when there are no path parameters to identify the resource
+		data.NeedsExternalIDRef = crd.NeedsExternalIDRef
 	}
 
 	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(crd.Kind))
@@ -336,26 +442,32 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 
 func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapper.CRDDefinition) error {
 	data := ControllerTemplateData{
-		Year:            time.Now().Year(),
-		APIGroup:        crd.APIGroup,
-		APIVersion:      crd.APIVersion,
-		ModuleName:      g.config.ModuleName,
-		Kind:            crd.Kind,
-		KindLower:       strings.ToLower(crd.Kind),
-		Plural:          crd.Plural,
-		BasePath:        crd.BasePath,
-		IsQuery:         crd.IsQuery,
-		QueryPath:       crd.QueryPath,
-		IsAction:        crd.IsAction,
-		ActionPath:      crd.ActionPath,
-		ActionMethod:    crd.ActionMethod,
-		ResponseIsArray: crd.ResponseIsArray,
+		Year:               time.Now().Year(),
+		APIGroup:           crd.APIGroup,
+		APIVersion:         crd.APIVersion,
+		ModuleName:         g.config.ModuleName,
+		Kind:               crd.Kind,
+		KindLower:          strings.ToLower(crd.Kind),
+		Plural:             crd.Plural,
+		BasePath:           crd.BasePath,
+		ResourcePath:       crd.ResourcePath,
+		IsQuery:            crd.IsQuery,
+		QueryPath:          crd.QueryPath,
+		QueryPathParams:    crd.QueryPathParams,
+		IsAction:           crd.IsAction,
+		ActionPath:         crd.ActionPath,
+		ActionMethod:       crd.ActionMethod,
+		ResponseIsArray:    crd.ResponseIsArray,
+		IsPrimitiveArray:   crd.IsPrimitiveArray,
+		PrimitiveArrayType: crd.PrimitiveArrayType,
 
 		ParentResource: crd.ParentResource,
 		ParentIDParam:  crd.ParentIDParam,
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
+		HasDelete:      crd.HasDelete,
+		HasPost:        crd.HasPost,
 	}
 
 	filename := fmt.Sprintf("%s_controller_test.go", strings.ToLower(crd.Kind))
@@ -381,18 +493,20 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 
 // SuiteTestTemplateData holds data for the suite_test.go template
 type SuiteTestTemplateData struct {
-	Year        int
-	APIVersion  string
-	ModuleName  string
-	KubeVersion string
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	ModuleName       string
+	KubeVersion      string
 }
 
 func (g *ControllerGenerator) generateSuiteTest(outputDir string) error {
 	data := SuiteTestTemplateData{
-		Year:        time.Now().Year(),
-		APIVersion:  g.config.APIVersion,
-		ModuleName:  g.config.ModuleName,
-		KubeVersion: "1.29.0",
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		ModuleName:       g.config.ModuleName,
+		KubeVersion:      "1.29.0",
 	}
 
 	fp := filepath.Join(outputDir, "suite_test.go")
@@ -443,6 +557,7 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 		KindLower:       strings.ToLower(crd.Kind),
 		Plural:          crd.Plural,
 		BasePath:        crd.BasePath,
+		ResourcePath:    crd.ResourcePath,
 		IsQuery:         crd.IsQuery,
 		QueryPath:       crd.QueryPath,
 		IsAction:        crd.IsAction,
@@ -455,6 +570,8 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
+		HasDelete:      crd.HasDelete,
+		HasPost:        crd.HasPost,
 
 		RequiredFields:    requiredFields,
 		HasRequiredFields: len(requiredFields) > 0,
@@ -481,22 +598,54 @@ func (g *ControllerGenerator) generateIntegrationTest(outputDir string, crd *map
 	return nil
 }
 
-func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
+func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition, aggregate *mapper.AggregateDefinition, bundle *mapper.BundleDefinition) error {
 	cmdDir := filepath.Join(g.config.OutputDir, "cmd", "manager")
 	if err := os.MkdirAll(cmdDir, 0755); err != nil {
 		return fmt.Errorf("failed to create cmd directory: %w", err)
 	}
 
+	// Build version info for the generated operator
+	operatorVersion := g.config.GeneratorVersion
+	if !isValidSemver(operatorVersion) {
+		operatorVersion = g.buildPseudoVersion()
+	}
+
+	// Prepare commit hash (ensure 12 chars)
+	commitHash := g.config.CommitHash
+	if len(commitHash) > 12 {
+		commitHash = commitHash[:12]
+	}
+
+	// Normalize timestamp to YYYYMMDDHHMMSS format
+	timestamp := normalizeTimestamp(g.config.CommitTimestamp)
+
 	data := MainTemplateData{
-		Year:       time.Now().Year(),
-		APIVersion: g.config.APIVersion,
-		ModuleName: g.config.ModuleName,
-		AppName:    strings.Split(g.config.APIGroup, ".")[0],
-		CRDs:       make([]CRDMainData, 0, len(crds)),
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIVersion:       g.config.APIVersion,
+		APIGroup:         g.config.APIGroup,
+		ModuleName:       g.config.ModuleName,
+		AppName:          strings.Split(g.config.APIGroup, ".")[0],
+		CRDs:             make([]CRDMainData, 0, len(crds)),
+		OperatorVersion:  operatorVersion,
+		CommitHash:       commitHash,
+		CommitTimestamp:  timestamp,
 	}
 
 	for _, crd := range crds {
 		data.CRDs = append(data.CRDs, CRDMainData{Kind: crd.Kind, IsQuery: crd.IsQuery, IsAction: crd.IsAction})
+	}
+
+	// Add aggregate info if provided
+	if aggregate != nil {
+		data.HasAggregate = true
+		data.AggregateKind = aggregate.Kind
+	}
+
+	// Add bundle info if provided
+	if bundle != nil {
+		data.HasBundle = true
+		data.BundleKind = bundle.Kind
 	}
 
 	filepath := filepath.Join(cmdDir, "main.go")
@@ -519,24 +668,121 @@ func (g *ControllerGenerator) generateMain(crds []*mapper.CRDDefinition) error {
 	return nil
 }
 
-func (g *ControllerGenerator) generateGoMod() error {
-	// Use the generator version for the dependency
-	// Only use clean semver versions (vX.Y.Z), otherwise fall back to v0.0.0
-	// which will be resolved to latest by go mod tidy
-	version := g.config.GeneratorVersion
-	if !isValidSemver(version) {
-		version = "v0.0.0"
+func (g *ControllerGenerator) generateGoMod(hasAggregate bool, hasBundle bool) error {
+	// Determine the module version to use in go.mod require directive
+	// If version is a clean semver (vX.Y.Z), use it as-is
+	// Otherwise, construct a proper Go module pseudo-version
+	moduleVersion := g.config.GeneratorVersion
+	if !isValidSemver(moduleVersion) {
+		moduleVersion = g.buildPseudoVersion()
 	}
 
 	data := struct {
 		ModuleName       string
-		GeneratorVersion string
+		GeneratorVersion string // Original generator version for the comment (e.g., v0.0.7-10-gd5024c8-dirty)
+		ModuleVersion    string // Valid Go module version for require directive (e.g., v0.0.8-0.20260115203556-d5024c8e6620)
+		HasAggregate     bool
+		HasBundle        bool
 	}{
 		ModuleName:       g.config.ModuleName,
-		GeneratorVersion: version,
+		GeneratorVersion: g.config.GeneratorVersion, // Original version for comment
+		ModuleVersion:    moduleVersion,             // Pseudo-version for dependency
+		HasAggregate:     hasAggregate,
+		HasBundle:        hasBundle,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "go.mod")
 	return g.executeTemplate(templates.GoModTemplate, data, outputPath)
+}
+
+// buildPseudoVersion constructs a Go module pseudo-version from config fields.
+// Format: vX.Y.(Z+1)-0.YYYYMMDDHHMMSS-COMMIT12
+// Example: v0.0.8-0.20260115203556-d5024c8e6620
+func (g *ControllerGenerator) buildPseudoVersion() string {
+	// Extract base version from GeneratorVersion (e.g., v0.0.7 from v0.0.7-10-gd5024c8-dirty)
+	baseVersion := extractBaseSemver(g.config.GeneratorVersion)
+
+	// If we have commit hash and timestamp, build a proper pseudo-version
+	commitHash := g.config.CommitHash
+	timestamp := g.config.CommitTimestamp
+
+	// Ensure commit hash is at least 12 characters
+	if len(commitHash) > 0 && len(timestamp) > 0 {
+		// Pad commit hash to 12 chars if needed
+		if len(commitHash) < 12 {
+			commitHash = commitHash + strings.Repeat("0", 12-len(commitHash))
+		} else if len(commitHash) > 12 {
+			commitHash = commitHash[:12]
+		}
+
+		// Convert timestamp to YYYYMMDDHHMMSS format if needed
+		// Input may be ISO format (2026-01-15T20:35:56Z) or already YYYYMMDDHHMMSS
+		timestamp = normalizeTimestamp(timestamp)
+
+		// Increment patch version for pseudo-version
+		// e.g., v0.0.7 -> v0.0.8
+		incrementedVersion := incrementPatchVersion(baseVersion)
+
+		// Format: vX.Y.Z-0.YYYYMMDDHHMMSS-COMMIT12
+		return fmt.Sprintf("%s-0.%s-%s", incrementedVersion, timestamp, commitHash)
+	}
+
+	// Fallback to base version if no commit info available
+	return baseVersion
+}
+
+// normalizeTimestamp converts a timestamp to YYYYMMDDHHMMSS format.
+// Handles ISO format (2026-01-15T20:35:56Z) or passes through if already in target format.
+func normalizeTimestamp(ts string) string {
+	// If already in YYYYMMDDHHMMSS format (14 digits), return as-is
+	if len(ts) == 14 && isAllDigits(ts) {
+		return ts
+	}
+
+	// Try parsing ISO format
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		// Try parsing without timezone
+		t, err = time.Parse("2006-01-02T15:04:05", ts)
+		if err != nil {
+			// Return original if can't parse
+			return ts
+		}
+	}
+
+	return t.UTC().Format("20060102150405")
+}
+
+// isAllDigits checks if a string contains only digits
+func isAllDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// incrementPatchVersion increments the patch version of a semver string.
+// e.g., v0.0.7 -> v0.0.8, v1.2.3 -> v1.2.4
+func incrementPatchVersion(version string) string {
+	v := strings.TrimPrefix(version, "v")
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return version
+	}
+
+	// Parse and increment patch version
+	patch := 0
+	for _, c := range parts[2] {
+		if c >= '0' && c <= '9' {
+			patch = patch*10 + int(c-'0')
+		} else {
+			break
+		}
+	}
+	patch++
+
+	return fmt.Sprintf("v%s.%s.%d", parts[0], parts[1], patch)
 }
 
 // isValidSemver checks if a version string is a clean semver (vX.Y.Z)
@@ -572,34 +818,86 @@ func isValidSemver(version string) bool {
 	return true
 }
 
+// extractBaseSemver extracts the base semantic version from a git describe version.
+// For example:
+//   - "v0.0.7" -> "v0.0.7"
+//   - "v0.0.7-10-gd5024c8-dirty" -> "v0.0.7"
+//   - "v0.0.7-dirty" -> "v0.0.7"
+//
+// Returns "v0.0.0" if no valid base version can be extracted.
+func extractBaseSemver(version string) string {
+	if version == "" || version == "dev" {
+		return "v0.0.0"
+	}
+
+	// Remove leading 'v' for processing
+	v := strings.TrimPrefix(version, "v")
+
+	// Split on '-' to get the base version part
+	// e.g., "0.0.7-10-gd5024c8-dirty" -> ["0.0.7", "10", "gd5024c8", "dirty"]
+	parts := strings.Split(v, "-")
+	if len(parts) == 0 {
+		return "v0.0.0"
+	}
+
+	// The first part should be X.Y.Z
+	baseParts := strings.Split(parts[0], ".")
+	if len(baseParts) != 3 {
+		return "v0.0.0"
+	}
+
+	// Validate each part is numeric
+	for _, part := range baseParts {
+		if part == "" {
+			return "v0.0.0"
+		}
+		for _, c := range part {
+			if c < '0' || c > '9' {
+				return "v0.0.0"
+			}
+		}
+	}
+
+	return "v" + parts[0]
+}
+
 func (g *ControllerGenerator) generateDockerfile() error {
+	data := struct {
+		GeneratorVersion string
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+	}
 	outputPath := filepath.Join(g.config.OutputDir, "Dockerfile")
-	return g.executeTemplate(templates.DockerfileTemplate, nil, outputPath)
+	return g.executeTemplate(templates.DockerfileTemplate, data, outputPath)
 }
 
 func (g *ControllerGenerator) generateMakefile() error {
 	data := struct {
-		AppName string
+		AppName          string
+		GeneratorVersion string
 	}{
-		AppName: strings.Split(g.config.APIGroup, ".")[0],
+		AppName:          strings.Split(g.config.APIGroup, ".")[0],
+		GeneratorVersion: g.config.GeneratorVersion,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "Makefile")
 	return g.executeTemplate(templates.MakefileTemplate, data, outputPath)
 }
 
-func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition) error {
+func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAggregate bool, hasBundle bool) error {
 	// Build CRD info for template
 	type CRDInfo struct {
-		Kind     string
-		IsQuery  bool
-		IsAction bool
+		Kind               string
+		IsQuery            bool
+		IsAction           bool
+		NeedsExternalIDRef bool
 	}
 	crdInfos := make([]CRDInfo, 0, len(crds))
 	for _, crd := range crds {
 		crdInfos = append(crdInfos, CRDInfo{
-			Kind:     crd.Kind,
-			IsQuery:  crd.IsQuery,
-			IsAction: crd.IsAction,
+			Kind:               crd.Kind,
+			IsQuery:            crd.IsQuery,
+			IsAction:           crd.IsAction,
+			NeedsExternalIDRef: crd.NeedsExternalIDRef,
 		})
 	}
 
@@ -618,21 +916,33 @@ func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition) error
 		g.config.APIVersion,
 		g.config.ModuleName,
 	)
+	if hasAggregate {
+		generatorCmd += " \\\n  --aggregate"
+	}
+	if hasBundle {
+		generatorCmd += " \\\n  --bundle"
+	}
 
 	data := struct {
-		AppName      string
-		TitleAppName string
-		APIGroup     string
-		APIVersion   string
-		CRDs         []CRDInfo
-		GeneratorCmd string
+		AppName          string
+		TitleAppName     string
+		APIGroup         string
+		APIVersion       string
+		CRDs             []CRDInfo
+		GeneratorCmd     string
+		HasAggregate     bool
+		HasBundle        bool
+		GeneratorVersion string
 	}{
-		AppName:      appName,
-		TitleAppName: titleAppName,
-		APIGroup:     g.config.APIGroup,
-		APIVersion:   g.config.APIVersion,
-		CRDs:         crdInfos,
-		GeneratorCmd: generatorCmd,
+		AppName:          appName,
+		TitleAppName:     titleAppName,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		CRDs:             crdInfos,
+		GeneratorCmd:     generatorCmd,
+		HasAggregate:     hasAggregate,
+		HasBundle:        hasBundle,
+		GeneratorVersion: g.config.GeneratorVersion,
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "README.md")
 	return g.executeTemplate(templates.ReadmeTemplate, data, outputPath)
@@ -645,9 +955,11 @@ func (g *ControllerGenerator) generateBoilerplate() error {
 	}
 
 	data := struct {
-		Year int
+		Year             int
+		GeneratorVersion string
 	}{
-		Year: time.Now().Year(),
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
 	}
 	outputPath := filepath.Join(hackDir, "boilerplate.go.txt")
 	return g.executeTemplate(templates.BoilerplateTemplate, data, outputPath)
@@ -655,15 +967,17 @@ func (g *ControllerGenerator) generateBoilerplate() error {
 
 // DeploymentManifestData holds data for generating deployment YAML manifests
 type DeploymentManifestData struct {
-	Namespace string
-	AppName   string
+	Namespace        string
+	AppName          string
+	GeneratorVersion string
 }
 
 func (g *ControllerGenerator) generateDeploymentManifests() error {
 	// Derive namespace from API group (e.g., petstore.example.com -> petstore-system)
 	data := DeploymentManifestData{
-		Namespace: strings.Split(g.config.APIGroup, ".")[0] + "-system",
-		AppName:   strings.Split(g.config.APIGroup, ".")[0],
+		Namespace:        strings.Split(g.config.APIGroup, ".")[0] + "-system",
+		AppName:          strings.Split(g.config.APIGroup, ".")[0],
+		GeneratorVersion: g.config.GeneratorVersion,
 	}
 
 	// Create config directories
@@ -740,6 +1054,128 @@ func (g *ControllerGenerator) executeTemplate(tmplContent string, data interface
 	}
 
 	return os.WriteFile(outputPath, buf.Bytes(), 0644)
+}
+
+// AggregateControllerTemplateData holds data for aggregate controller template
+type AggregateControllerTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	ModuleName       string
+	Kind             string
+	KindLower        string
+	Plural           string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
+}
+
+// GenerateAggregateController generates the aggregate controller
+func (g *ControllerGenerator) GenerateAggregateController(aggregate *mapper.AggregateDefinition) error {
+	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
+	if err := os.MkdirAll(controllerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create controller directory: %w", err)
+	}
+
+	data := AggregateControllerTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         aggregate.APIGroup,
+		APIVersion:       aggregate.APIVersion,
+		ModuleName:       g.config.ModuleName,
+		Kind:             aggregate.Kind,
+		KindLower:        strings.ToLower(aggregate.Kind),
+		Plural:           aggregate.Plural,
+		ResourceKinds:    aggregate.ResourceKinds,
+		QueryKinds:       aggregate.QueryKinds,
+		ActionKinds:      aggregate.ActionKinds,
+		AllKinds:         aggregate.AllKinds,
+	}
+
+	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(aggregate.Kind))
+	fp := filepath.Join(controllerDir, filename)
+
+	tmpl, err := template.New("aggregate_controller").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.AggregateControllerTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// BundleControllerTemplateData holds data for bundle controller template
+type BundleControllerTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	ModuleName       string
+	Kind             string
+	KindLower        string
+	Plural           string
+	ResourceKinds    []string // CRUD resource kinds
+	QueryKinds       []string // Query CRD kinds
+	ActionKinds      []string // Action CRD kinds
+	AllKinds         []string // All kinds combined
+}
+
+// GenerateBundleController generates the bundle controller
+func (g *ControllerGenerator) GenerateBundleController(bundle *mapper.BundleDefinition) error {
+	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
+	if err := os.MkdirAll(controllerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create controller directory: %w", err)
+	}
+
+	data := BundleControllerTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         bundle.APIGroup,
+		APIVersion:       bundle.APIVersion,
+		ModuleName:       g.config.ModuleName,
+		Kind:             bundle.Kind,
+		KindLower:        strings.ToLower(bundle.Kind),
+		Plural:           bundle.Plural,
+		ResourceKinds:    bundle.ResourceKinds,
+		QueryKinds:       bundle.QueryKinds,
+		ActionKinds:      bundle.ActionKinds,
+		AllKinds:         bundle.AllKinds,
+	}
+
+	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(bundle.Kind))
+	fp := filepath.Join(controllerDir, filename)
+
+	tmpl, err := template.New("bundle_controller").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.BundleControllerTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
 }
 
 // copySpecFile copies the OpenAPI spec file to the output directory.

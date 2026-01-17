@@ -2,8 +2,9 @@
 
 BINARY_NAME=openapi-operator-gen
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
-DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+COMMIT?=$(shell git rev-parse HEAD 2>/dev/null || echo "none")
+# Use commit timestamp in UTC (not build time) for Go module pseudo-version generation
+DATE?=$(shell date -u -d @$$(git log -1 --date=unix --format=%cd 2>/dev/null) +%Y%m%d%H%M%S 2>/dev/null || echo "unknown")
 LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
 
 .PHONY: all build clean test fmt vet lint install
@@ -47,7 +48,11 @@ example: build
 		--output examples/generated \
 		--group petstore.example.com \
 		--version v1alpha1 \
-		--module github.com/bluecontainer/petstore-operator
+		--module github.com/bluecontainer/petstore-operator \
+		--aggregate \
+		--bundle \
+		--exclude-operations="updatePetWithForm" \
+		--update-with-post="/store/order"
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
 

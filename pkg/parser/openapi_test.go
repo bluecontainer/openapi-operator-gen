@@ -132,12 +132,16 @@ func TestExtractResourceName(t *testing.T) {
 		{"/store/order/{orderId}", "Order"}, // namespaced resource with ID param
 		{"/pets", "Pet"},
 		{"/categories", "Category"},
-		{"/user-profiles", "UserProfil"}, // singularize removes "es" from "profiles"
+		{"/user-profiles", "UserProfile"}, // singularize removes "s" from "profiles"
 		{"/user_settings", "UserSetting"},
 		{"/{id}", ""},       // only parameter
 		{"/", ""},           // empty path
 		{"", ""},            // empty string
 		{"/items/", "Item"}, // trailing slash
+		// Deeply nested paths with plural segments and singular param names
+		{"/sharedmem/classes/{className}/instances/{instanceName}/variables/{variableName}", "Variable"},
+		{"/classes/{className}", "Class"},
+		{"/variables/{variableName}", "Variable"},
 	}
 
 	for _, tt := range tests {

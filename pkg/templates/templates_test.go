@@ -189,6 +189,14 @@ type CRDTypeData struct {
 	ParentResource string
 	ParentIDParam  string
 	ActionName     string
+
+	// HTTP method availability
+	HasDelete bool
+	HasPost   bool
+	HasPatch  bool
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool
 }
 
 // NestedTypeData mimics nested type data
@@ -199,12 +207,13 @@ type NestedTypeData struct {
 
 // TypesTemplateData mimics the data structure for types template
 type TypesTemplateData struct {
-	Year        int
-	APIVersion  string
-	APIGroup    string
-	ModuleName  string
-	CRDs        []CRDTypeData
-	NestedTypes []NestedTypeData
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	APIGroup         string
+	ModuleName       string
+	CRDs             []CRDTypeData
+	NestedTypes      []NestedTypeData
 }
 
 func TestTypesTemplateExecution(t *testing.T) {
@@ -214,10 +223,11 @@ func TestTypesTemplateExecution(t *testing.T) {
 	}
 
 	data := TypesTemplateData{
-		Year:       2024,
-		APIVersion: "v1alpha1",
-		APIGroup:   "example.com",
-		ModuleName: "github.com/example/operator",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIVersion:       "v1alpha1",
+		APIGroup:         "example.com",
+		ModuleName:       "github.com/example/operator",
 		CRDs: []CRDTypeData{
 			{
 				Kind:       "Pet",
@@ -241,7 +251,9 @@ func TestTypesTemplateExecution(t *testing.T) {
 						},
 					},
 				},
-				IsQuery: false,
+				IsQuery:   false,
+				HasDelete: true,
+				HasPost:   true,
 			},
 		},
 		NestedTypes: []NestedTypeData{},
@@ -272,10 +284,11 @@ func TestTypesTemplateQueryCRDExecution(t *testing.T) {
 	}
 
 	data := TypesTemplateData{
-		Year:       2024,
-		APIVersion: "v1alpha1",
-		APIGroup:   "example.com",
-		ModuleName: "github.com/example/operator",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIVersion:       "v1alpha1",
+		APIGroup:         "example.com",
+		ModuleName:       "github.com/example/operator",
 		CRDs: []CRDTypeData{
 			{
 				Kind:            "PetFindByTags",
@@ -323,10 +336,11 @@ func TestTypesTemplateQueryCRDExecution(t *testing.T) {
 
 // GroupVersionInfoData mimics the data structure for groupversion_info template
 type GroupVersionInfoData struct {
-	Year       int
-	APIVersion string
-	APIGroup   string
-	GroupName  string
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	APIGroup         string
+	GroupName        string
 }
 
 func TestGroupVersionInfoTemplateExecution(t *testing.T) {
@@ -336,10 +350,11 @@ func TestGroupVersionInfoTemplateExecution(t *testing.T) {
 	}
 
 	data := GroupVersionInfoData{
-		Year:       2024,
-		APIVersion: "v1alpha1",
-		APIGroup:   "petstore.example.com",
-		GroupName:  "petstore",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIVersion:       "v1alpha1",
+		APIGroup:         "petstore.example.com",
+		GroupName:        "petstore",
 	}
 
 	var buf bytes.Buffer
@@ -380,23 +395,40 @@ type ResourceQueryParam struct {
 	IsArray  bool   // True if this is an array parameter
 }
 
+// QueryParamField represents a query/path parameter for query controllers
+type QueryParamField struct {
+	Name        string // Go field name (e.g., "ServiceName")
+	JSONName    string // JSON field name (e.g., "serviceName")
+	GoType      string // Go type (e.g., "string", "int64")
+	Description string
+	Required    bool
+	IsArray     bool   // True if this is an array parameter
+	ItemType    string // Type of array items if IsArray is true
+}
+
 // ControllerTemplateData mimics the data structure for controller template
 type ControllerTemplateData struct {
-	Year            int
-	APIGroup        string
-	APIVersion      string
-	ModuleName      string
-	Kind            string
-	KindLower       string
-	Plural          string
-	BasePath        string
-	IsQuery         bool
-	QueryPath       string
-	ResponseType    string
-	ResponseIsArray bool
-	ResultItemType  string
-	HasTypedResults bool
-	UsesSharedType  bool
+	Year               int
+	GeneratorVersion   string
+	APIGroup           string
+	APIVersion         string
+	ModuleName         string
+	Kind               string
+	KindLower          string
+	Plural             string
+	BasePath           string
+	ResourcePath       string
+	IsQuery            bool
+	QueryPath          string
+	QueryPathParams    []QueryParamField // Path parameters for query endpoints
+	QueryParams        []QueryParamField // Query parameters for query endpoints
+	ResponseType       string
+	ResponseIsArray    bool
+	ResultItemType     string
+	HasTypedResults    bool
+	UsesSharedType     bool
+	IsPrimitiveArray   bool
+	PrimitiveArrayType string
 
 	// Action endpoint fields
 	IsAction            bool
@@ -413,6 +445,24 @@ type ControllerTemplateData struct {
 	ResourcePathParams  []ActionPathParam
 	ResourceQueryParams []ResourceQueryParam
 	HasResourceParams   bool
+
+	// HTTP method availability
+	HasDelete bool
+	HasPost   bool
+	HasPut    bool
+	HasPatch  bool
+
+	// UpdateWithPost enables using POST for updates when PUT is not available
+	UpdateWithPost bool
+
+	// Per-method paths (when different methods use different paths)
+	GetPath        string
+	PutPath        string
+	DeletePath     string
+	PutPathDiffers bool
+
+	// ExternalIDRef handling
+	NeedsExternalIDRef bool
 }
 
 func TestControllerTemplateExecution(t *testing.T) {
@@ -423,6 +473,7 @@ func TestControllerTemplateExecution(t *testing.T) {
 
 	data := ControllerTemplateData{
 		Year:              2024,
+		GeneratorVersion:  "v0.0.1",
 		APIGroup:          "petstore.example.com",
 		APIVersion:        "v1alpha1",
 		ModuleName:        "github.com/example/petstore-operator",
@@ -432,6 +483,8 @@ func TestControllerTemplateExecution(t *testing.T) {
 		BasePath:          "/pet",
 		IsQuery:           false,
 		HasResourceParams: false,
+		HasDelete:         true,
+		HasPost:           true,
 	}
 
 	var buf bytes.Buffer
@@ -455,6 +508,61 @@ func TestControllerTemplateExecution(t *testing.T) {
 	}
 }
 
+func TestControllerTemplateWithUpdateWithPost(t *testing.T) {
+	tmpl, err := template.New("controller").Parse(ControllerTemplate)
+	if err != nil {
+		t.Fatalf("Failed to parse ControllerTemplate: %v", err)
+	}
+
+	data := ControllerTemplateData{
+		Year:              2024,
+		GeneratorVersion:  "v0.0.1",
+		APIGroup:          "petstore.example.com",
+		APIVersion:        "v1alpha1",
+		ModuleName:        "github.com/example/petstore-operator",
+		Kind:              "Widget",
+		KindLower:         "widget",
+		Plural:            "widgets",
+		BasePath:          "/widget",
+		IsQuery:           false,
+		HasResourceParams: false,
+		HasDelete:         false, // No DELETE
+		HasPost:           true,  // Has POST
+		HasPut:            false, // No PUT
+		HasPatch:          false, // No PATCH
+		UpdateWithPost:    true,  // Use POST for updates
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.Execute(&buf, data)
+	if err != nil {
+		t.Errorf("Failed to execute ControllerTemplate with UpdateWithPost: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "package controller") {
+		t.Error("Output doesn't contain expected package declaration")
+	}
+	if !strings.Contains(output, "WidgetReconciler") {
+		t.Error("Output doesn't contain expected WidgetReconciler type")
+	}
+	// UpdateWithPost should generate updateResourceWithPost function
+	if !strings.Contains(output, "func (r *WidgetReconciler) updateResourceWithPost") {
+		t.Error("Output doesn't contain expected updateResourceWithPost function")
+	}
+	// UpdateWithPost should also generate merge helper functions
+	if !strings.Contains(output, "func (r *WidgetReconciler) mergeSpecWithCurrentState") {
+		t.Error("Output doesn't contain expected mergeSpecWithCurrentState function")
+	}
+	if !strings.Contains(output, "func (r *WidgetReconciler) isZeroValue") {
+		t.Error("Output doesn't contain expected isZeroValue function")
+	}
+	// Should check for mergeOnUpdate in updateResourceWithPost
+	if !strings.Contains(output, "instance.Spec.MergeOnUpdate") {
+		t.Error("Output doesn't contain expected MergeOnUpdate check")
+	}
+}
+
 func TestQueryControllerTemplateExecution(t *testing.T) {
 	tmpl, err := template.New("querycontroller").Parse(QueryControllerTemplate)
 	if err != nil {
@@ -462,21 +570,22 @@ func TestQueryControllerTemplateExecution(t *testing.T) {
 	}
 
 	data := ControllerTemplateData{
-		Year:            2024,
-		APIGroup:        "petstore.example.com",
-		APIVersion:      "v1alpha1",
-		ModuleName:      "github.com/example/petstore-operator",
-		Kind:            "PetFindByTags",
-		KindLower:       "petfindbytags",
-		Plural:          "petfindbytags",
-		BasePath:        "/pet",
-		IsQuery:         true,
-		QueryPath:       "/pet/findByTags",
-		ResponseType:    "[]Pet",
-		ResponseIsArray: true,
-		ResultItemType:  "Pet",
-		HasTypedResults: true,
-		UsesSharedType:  true,
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		ModuleName:       "github.com/example/petstore-operator",
+		Kind:             "PetFindByTags",
+		KindLower:        "petfindbytags",
+		Plural:           "petfindbytags",
+		BasePath:         "/pet",
+		IsQuery:          true,
+		QueryPath:        "/pet/findByTags",
+		ResponseType:     "[]Pet",
+		ResponseIsArray:  true,
+		ResultItemType:   "Pet",
+		HasTypedResults:  true,
+		UsesSharedType:   true,
 	}
 
 	var buf bytes.Buffer
@@ -507,17 +616,18 @@ func TestQueryControllerTemplateWithoutTypedResults(t *testing.T) {
 	}
 
 	data := ControllerTemplateData{
-		Year:            2024,
-		APIGroup:        "petstore.example.com",
-		APIVersion:      "v1alpha1",
-		ModuleName:      "github.com/example/petstore-operator",
-		Kind:            "SearchQuery",
-		KindLower:       "searchquery",
-		Plural:          "searchqueries",
-		BasePath:        "/search",
-		IsQuery:         true,
-		QueryPath:       "/search",
-		HasTypedResults: false,
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		ModuleName:       "github.com/example/petstore-operator",
+		Kind:             "SearchQuery",
+		KindLower:        "searchquery",
+		Plural:           "searchqueries",
+		BasePath:         "/search",
+		IsQuery:          true,
+		QueryPath:        "/search",
+		HasTypedResults:  false,
 	}
 
 	var buf bytes.Buffer
@@ -542,23 +652,24 @@ func TestActionControllerTemplateExecution(t *testing.T) {
 	}
 
 	data := ControllerTemplateData{
-		Year:           2024,
-		APIGroup:       "petstore.example.com",
-		APIVersion:     "v1alpha1",
-		ModuleName:     "github.com/example/petstore-operator",
-		Kind:           "PetUploadImage",
-		KindLower:      "petuploadimage",
-		Plural:         "petuploadimages",
-		BasePath:       "/pet",
-		IsAction:       true,
-		ActionPath:     "/pet/{petId}/uploadImage",
-		ActionMethod:   "POST",
-		ParentResource: "Pet",
-		ParentIDParam:  "petId",
-		ParentIDField:  "PetId",
-		HasParentID:    true,
-		ActionName:     "uploadImage",
-		HasRequestBody: true,
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		ModuleName:       "github.com/example/petstore-operator",
+		Kind:             "PetUploadImage",
+		KindLower:        "petuploadimage",
+		Plural:           "petuploadimages",
+		BasePath:         "/pet",
+		IsAction:         true,
+		ActionPath:       "/pet/{petId}/uploadImage",
+		ActionMethod:     "POST",
+		ParentResource:   "Pet",
+		ParentIDParam:    "petId",
+		ParentIDField:    "PetId",
+		HasParentID:      true,
+		ActionName:       "uploadImage",
+		HasRequestBody:   true,
 		RequestBodyFields: []ActionRequestBodyField{
 			{JSONName: "additionalMetadata", GoName: "AdditionalMetadata"},
 			{JSONName: "file", GoName: "File"},
@@ -596,26 +707,27 @@ func TestActionControllerTemplateWithTypedResults(t *testing.T) {
 	}
 
 	data := ControllerTemplateData{
-		Year:            2024,
-		APIGroup:        "petstore.example.com",
-		APIVersion:      "v1alpha1",
-		ModuleName:      "github.com/example/petstore-operator",
-		Kind:            "PetUploadImage",
-		KindLower:       "petuploadimage",
-		Plural:          "petuploadimages",
-		BasePath:        "/pet",
-		IsAction:        true,
-		ActionPath:      "/pet/{petId}/uploadImage",
-		ActionMethod:    "POST",
-		ParentResource:  "Pet",
-		ParentIDParam:   "petId",
-		ParentIDField:   "PetId",
-		HasParentID:     true,
-		ActionName:      "uploadImage",
-		HasRequestBody:  true,
-		HasTypedResults: true,
-		ResponseIsArray: false,
-		ResultItemType:  "PetUploadImageResult",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		ModuleName:       "github.com/example/petstore-operator",
+		Kind:             "PetUploadImage",
+		KindLower:        "petuploadimage",
+		Plural:           "petuploadimages",
+		BasePath:         "/pet",
+		IsAction:         true,
+		ActionPath:       "/pet/{petId}/uploadImage",
+		ActionMethod:     "POST",
+		ParentResource:   "Pet",
+		ParentIDParam:    "petId",
+		ParentIDField:    "PetId",
+		HasParentID:      true,
+		ActionName:       "uploadImage",
+		HasRequestBody:   true,
+		HasTypedResults:  true,
+		ResponseIsArray:  false,
+		ResultItemType:   "PetUploadImageResult",
 		RequestBodyFields: []ActionRequestBodyField{
 			{JSONName: "additionalMetadata", GoName: "AdditionalMetadata"},
 		},
@@ -646,26 +758,27 @@ func TestActionControllerTemplateWithArrayTypedResults(t *testing.T) {
 	}
 
 	data := ControllerTemplateData{
-		Year:            2024,
-		APIGroup:        "petstore.example.com",
-		APIVersion:      "v1alpha1",
-		ModuleName:      "github.com/example/petstore-operator",
-		Kind:            "PetBatchUpdate",
-		KindLower:       "petbatchupdate",
-		Plural:          "petbatchupdates",
-		BasePath:        "/pet",
-		IsAction:        true,
-		ActionPath:      "/pet/batch",
-		ActionMethod:    "POST",
-		ParentResource:  "Pet",
-		ParentIDParam:   "",
-		ParentIDField:   "",
-		HasParentID:     false,
-		ActionName:      "batch",
-		HasRequestBody:  false,
-		HasTypedResults: true,
-		ResponseIsArray: true,
-		ResultItemType:  "PetBatchUpdateResult",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		ModuleName:       "github.com/example/petstore-operator",
+		Kind:             "PetBatchUpdate",
+		KindLower:        "petbatchupdate",
+		Plural:           "petbatchupdates",
+		BasePath:         "/pet",
+		IsAction:         true,
+		ActionPath:       "/pet/batch",
+		ActionMethod:     "POST",
+		ParentResource:   "Pet",
+		ParentIDParam:    "",
+		ParentIDField:    "",
+		HasParentID:      false,
+		ActionName:       "batch",
+		HasRequestBody:   false,
+		HasTypedResults:  true,
+		ResponseIsArray:  true,
+		ResultItemType:   "PetBatchUpdateResult",
 	}
 
 	var buf bytes.Buffer
@@ -693,10 +806,11 @@ func TestTypesTemplateActionCRDExecution(t *testing.T) {
 	}
 
 	data := TypesTemplateData{
-		Year:       2024,
-		APIVersion: "v1alpha1",
-		APIGroup:   "example.com",
-		ModuleName: "github.com/example/operator",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIVersion:       "v1alpha1",
+		APIGroup:         "example.com",
+		ModuleName:       "github.com/example/operator",
 		CRDs: []CRDTypeData{
 			{
 				Kind:           "PetUploadImage",
@@ -773,15 +887,16 @@ type CRDYAMLSpecData struct {
 
 // CRDYAMLData mimics the data structure for CRD YAML template
 type CRDYAMLData struct {
-	APIGroup   string
-	APIVersion string
-	Kind       string
-	KindLower  string
-	Plural     string
-	Singular   string
-	ShortNames []string
-	Scope      string
-	Spec       *CRDYAMLSpecData
+	GeneratorVersion string
+	APIGroup         string
+	APIVersion       string
+	Kind             string
+	KindLower        string
+	Plural           string
+	Singular         string
+	ShortNames       []string
+	Scope            string
+	Spec             *CRDYAMLSpecData
 }
 
 func TestCRDYAMLTemplateExecution(t *testing.T) {
@@ -791,14 +906,15 @@ func TestCRDYAMLTemplateExecution(t *testing.T) {
 	}
 
 	data := CRDYAMLData{
-		APIGroup:   "petstore.example.com",
-		APIVersion: "v1alpha1",
-		Kind:       "Pet",
-		KindLower:  "pet",
-		Plural:     "pets",
-		Singular:   "pet",
-		ShortNames: []string{"pt", "pet"},
-		Scope:      "Namespaced",
+		GeneratorVersion: "v0.0.1",
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		Kind:             "Pet",
+		KindLower:        "pet",
+		Plural:           "pets",
+		Singular:         "pet",
+		ShortNames:       []string{"pt", "pet"},
+		Scope:            "Namespaced",
 		Spec: &CRDYAMLSpecData{
 			Fields: []CRDYAMLFieldData{
 				{
@@ -839,11 +955,21 @@ type CRDMainData struct {
 }
 
 type MainTemplateData struct {
-	Year       int
-	APIVersion string
-	ModuleName string
-	AppName    string
-	CRDs       []CRDMainData
+	Year             int
+	GeneratorVersion string
+	APIVersion       string
+	APIGroup         string
+	ModuleName       string
+	AppName          string
+	CRDs             []CRDMainData
+	HasAggregate     bool
+	AggregateKind    string
+	HasBundle        bool
+	BundleKind       string
+	// Version info for the generated operator
+	OperatorVersion string
+	CommitHash      string
+	CommitTimestamp string
 }
 
 func TestMainTemplateExecution(t *testing.T) {
@@ -853,15 +979,20 @@ func TestMainTemplateExecution(t *testing.T) {
 	}
 
 	data := MainTemplateData{
-		Year:       2024,
-		APIVersion: "v1alpha1",
-		ModuleName: "github.com/example/petstore-operator",
-		AppName:    "petstore",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIVersion:       "v1alpha1",
+		APIGroup:         "petstore.example.com",
+		ModuleName:       "github.com/example/petstore-operator",
+		AppName:          "petstore",
 		CRDs: []CRDMainData{
 			{Kind: "Pet", IsQuery: false},
 			{Kind: "User", IsQuery: false},
 			{Kind: "PetFindByTags", IsQuery: true},
 		},
+		OperatorVersion: "v0.0.2-0.20260115203556-d5024c8e6620",
+		CommitHash:      "d5024c8e6620",
+		CommitTimestamp: "20260115203556",
 	}
 
 	var buf bytes.Buffer
@@ -886,6 +1017,10 @@ func TestMainTemplateExecution(t *testing.T) {
 	if !strings.Contains(output, "PetFindByTagsReconciler") {
 		t.Error("Output doesn't contain expected PetFindByTagsReconciler setup")
 	}
+	// Verify version info is included (check for generatorVersion variable assignment)
+	if !strings.Contains(output, "generatorVersion") {
+		t.Error("Output doesn't contain expected generatorVersion variable")
+	}
 }
 
 func TestMainTemplateWithSingleCRD(t *testing.T) {
@@ -895,13 +1030,18 @@ func TestMainTemplateWithSingleCRD(t *testing.T) {
 	}
 
 	data := MainTemplateData{
-		Year:       2024,
-		APIVersion: "v1alpha1",
-		ModuleName: "github.com/example/simple-operator",
-		AppName:    "simple",
+		Year:             2024,
+		GeneratorVersion: "v0.0.1",
+		APIVersion:       "v1alpha1",
+		APIGroup:         "simple.example.com",
+		ModuleName:       "github.com/example/simple-operator",
+		AppName:          "simple",
 		CRDs: []CRDMainData{
 			{Kind: "Resource", IsQuery: false},
 		},
+		OperatorVersion: "v0.0.1",
+		CommitHash:      "abc123def456",
+		CommitTimestamp: "20260115120000",
 	}
 
 	var buf bytes.Buffer

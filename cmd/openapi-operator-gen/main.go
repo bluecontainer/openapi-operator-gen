@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,6 +22,16 @@ var (
 	date = "unknown"
 
 	cfg = &config.Config{}
+
+	// Filter flags (comma-separated strings, parsed into slices)
+	includePaths      string
+	excludePaths      string
+	includeTags       string
+	excludeTags       string
+	includeOperations string
+	excludeOperations string
+	updateWithPost    string
+	idFieldMap        string
 )
 
 func main() {
@@ -84,14 +95,85 @@ func init() {
 	generateCmd.Flags().StringVar(&cfg.ModuleName, "module", "github.com/bluecontainer/generated-operator", "Go module name for generated code")
 	generateCmd.Flags().BoolVar(&cfg.GenerateCRDs, "generate-crds", false, "Generate CRD YAML manifests directly (default: use controller-gen)")
 	generateCmd.Flags().StringVar(&cfg.RootKind, "root-kind", "", "Kind name for root '/' endpoint (default: derived from spec filename)")
+	generateCmd.Flags().BoolVar(&cfg.GenerateAggregate, "aggregate", false, "Generate a Status Aggregator CRD for observing multiple resource types")
+	generateCmd.Flags().BoolVar(&cfg.GenerateBundle, "bundle", false, "Generate an Inline Composition Bundle CRD for creating multiple resources")
+	generateCmd.Flags().StringVar(&updateWithPost, "update-with-post", "", "Use POST for updates when PUT is not available. Value: '*' for all, or comma-separated paths (e.g., /store/order,/users/*)")
+
+	// Resource filtering flags
+	generateCmd.Flags().StringVar(&includePaths, "include-paths", "", "Only include paths matching these patterns (comma-separated, glob supported: /users,/pets/*)")
+	generateCmd.Flags().StringVar(&excludePaths, "exclude-paths", "", "Exclude paths matching these patterns (comma-separated, glob supported: /internal/*,/admin/*)")
+	generateCmd.Flags().StringVar(&includeTags, "include-tags", "", "Only include endpoints with these OpenAPI tags (comma-separated: public,v2)")
+	generateCmd.Flags().StringVar(&excludeTags, "exclude-tags", "", "Exclude endpoints with these OpenAPI tags (comma-separated: deprecated,internal)")
+	generateCmd.Flags().StringVar(&includeOperations, "include-operations", "", "Only include operations with these operationIds (comma-separated, glob supported: getPet*,createPet)")
+	generateCmd.Flags().StringVar(&excludeOperations, "exclude-operations", "", "Exclude operations with these operationIds (comma-separated, glob supported: *Deprecated,deletePet)")
+
+	// ID field merging flags
+	generateCmd.Flags().BoolVar(&cfg.NoIDMerge, "no-id-merge", false, "Disable automatic merging of path ID parameters with body 'id' fields")
+	generateCmd.Flags().StringVar(&idFieldMap, "id-field-map", "", "Explicit path param to body field mappings (comma-separated: orderId=id,petId=id)")
 
 	generateCmd.MarkFlagRequired("spec")
 	generateCmd.MarkFlagRequired("group")
 }
 
+// parseCommaSeparated splits a comma-separated string into a slice, trimming whitespace
+func parseCommaSeparated(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// parseIDFieldMap parses a comma-separated list of "key=value" pairs into a map.
+// Example: "orderId=id,petId=id" -> {"orderId": "id", "petId": "id"}
+func parseIDFieldMap(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	result := make(map[string]string)
+	parts := strings.Split(s, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		kv := strings.SplitN(p, "=", 2)
+		if len(kv) == 2 {
+			key := strings.TrimSpace(kv[0])
+			value := strings.TrimSpace(kv[1])
+			if key != "" && value != "" {
+				result[key] = value
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func runGenerate(cmd *cobra.Command, args []string) error {
-	// Set the generator version for embedding in generated go.mod
+	// Set the generator version and commit info for embedding in generated go.mod
 	cfg.GeneratorVersion = version
+	cfg.CommitHash = commit
+	cfg.CommitTimestamp = date
+
+	// Parse filter flags into config slices
+	cfg.IncludePaths = parseCommaSeparated(includePaths)
+	cfg.ExcludePaths = parseCommaSeparated(excludePaths)
+	cfg.IncludeTags = parseCommaSeparated(includeTags)
+	cfg.ExcludeTags = parseCommaSeparated(excludeTags)
+	cfg.IncludeOperations = parseCommaSeparated(includeOperations)
+	cfg.ExcludeOperations = parseCommaSeparated(excludeOperations)
+	cfg.UpdateWithPost = parseCommaSeparated(updateWithPost)
+	cfg.IDFieldMap = parseIDFieldMap(idFieldMap)
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
@@ -103,11 +185,42 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("API Group: %s\n", cfg.APIGroup)
 	fmt.Printf("API Version: %s\n", cfg.APIVersion)
 	fmt.Printf("Mapping mode: %s\n", cfg.MappingMode)
+	if len(cfg.IncludePaths) > 0 {
+		fmt.Printf("Include paths: %s\n", strings.Join(cfg.IncludePaths, ", "))
+	}
+	if len(cfg.ExcludePaths) > 0 {
+		fmt.Printf("Exclude paths: %s\n", strings.Join(cfg.ExcludePaths, ", "))
+	}
+	if len(cfg.IncludeTags) > 0 {
+		fmt.Printf("Include tags: %s\n", strings.Join(cfg.IncludeTags, ", "))
+	}
+	if len(cfg.ExcludeTags) > 0 {
+		fmt.Printf("Exclude tags: %s\n", strings.Join(cfg.ExcludeTags, ", "))
+	}
+	if len(cfg.IncludeOperations) > 0 {
+		fmt.Printf("Include operations: %s\n", strings.Join(cfg.IncludeOperations, ", "))
+	}
+	if len(cfg.ExcludeOperations) > 0 {
+		fmt.Printf("Exclude operations: %s\n", strings.Join(cfg.ExcludeOperations, ", "))
+	}
+	if len(cfg.UpdateWithPost) > 0 {
+		fmt.Printf("Update with POST: %s\n", strings.Join(cfg.UpdateWithPost, ", "))
+	}
+	if cfg.NoIDMerge {
+		fmt.Println("ID field merging: disabled")
+	} else if len(cfg.IDFieldMap) > 0 {
+		mappings := make([]string, 0, len(cfg.IDFieldMap))
+		for k, v := range cfg.IDFieldMap {
+			mappings = append(mappings, k+"="+v)
+		}
+		fmt.Printf("ID field map: %s\n", strings.Join(mappings, ", "))
+	}
 	fmt.Println()
 
 	// Parse OpenAPI spec
 	fmt.Println("Parsing OpenAPI specification...")
-	p := parser.NewParserWithRootKind(cfg.RootKind)
+	filter := config.NewPathFilter(cfg)
+	p := parser.NewParserWithFilter(cfg.RootKind, filter)
 	spec, err := p.Parse(cfg.SpecPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse OpenAPI spec: %w", err)
@@ -155,19 +268,43 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Generate example CR samples (always generated)
+	// Generate Status Aggregator CRD (optional) - do this before samples so we can include aggregate sample
+	var aggregate *mapper.AggregateDefinition
+	if cfg.GenerateAggregate {
+		fmt.Println("Generating Status Aggregator CRD...")
+		aggregate = m.CreateAggregateDefinition(crds)
+		if err := typesGen.GenerateAggregateTypes(aggregate); err != nil {
+			return fmt.Errorf("failed to generate aggregate types: %w", err)
+		}
+		fmt.Println("  Generated api/<version>/aggregate_types.go")
+		fmt.Println()
+	}
+
+	// Generate Bundle CRD (optional) - do this before samples so we can include bundle sample
+	var bundle *mapper.BundleDefinition
+	if cfg.GenerateBundle {
+		fmt.Println("Generating Inline Composition Bundle CRD...")
+		bundle = m.CreateBundleDefinition(crds)
+		if err := typesGen.GenerateBundleTypes(bundle); err != nil {
+			return fmt.Errorf("failed to generate bundle types: %w", err)
+		}
+		fmt.Println("  Generated api/<version>/bundle_types.go")
+		fmt.Println()
+	}
+
+	// Generate example CR samples (always generated, includes aggregate/bundle samples if enabled)
 	fmt.Println("Generating example CR samples...")
 	samplesGen := generator.NewSamplesGenerator(cfg)
-	if err := samplesGen.Generate(crds); err != nil {
+	if err := samplesGen.Generate(crds, aggregate, bundle); err != nil {
 		return fmt.Errorf("failed to generate example CRs: %w", err)
 	}
 	fmt.Println("  Generated config/samples/*.yaml")
 	fmt.Println()
 
-	// Generate controllers
+	// Generate controllers (pass aggregate and bundle to include in main.go registration)
 	fmt.Println("Generating controller reconciliation logic...")
 	controllerGen := generator.NewControllerGenerator(cfg)
-	if err := controllerGen.Generate(crds); err != nil {
+	if err := controllerGen.Generate(crds, aggregate, bundle); err != nil {
 		return fmt.Errorf("failed to generate controllers: %w", err)
 	}
 	fmt.Println("  Generated internal/controller/*_controller.go")
@@ -177,6 +314,24 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Println("  Generated Makefile")
 	fmt.Println("  Copied OpenAPI spec file")
 	fmt.Println()
+
+	// Generate aggregate controller if enabled
+	if aggregate != nil {
+		if err := controllerGen.GenerateAggregateController(aggregate); err != nil {
+			return fmt.Errorf("failed to generate aggregate controller: %w", err)
+		}
+		fmt.Println("  Generated internal/controller/statusaggregate_controller.go")
+		fmt.Println()
+	}
+
+	// Generate bundle controller if enabled
+	if bundle != nil {
+		if err := controllerGen.GenerateBundleController(bundle); err != nil {
+			return fmt.Errorf("failed to generate bundle controller: %w", err)
+		}
+		fmt.Printf("  Generated internal/controller/%s_controller.go\n", strings.ToLower(bundle.Kind))
+		fmt.Println()
+	}
 
 	fmt.Println("Code generation complete!")
 	fmt.Println()
