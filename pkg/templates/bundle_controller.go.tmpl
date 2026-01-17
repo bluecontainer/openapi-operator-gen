@@ -15,6 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -25,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -485,7 +490,7 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 
 	// Check if resource exists
 	existing := &{{ $.APIVersion }}.{{ . }}{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: bundle.Namespace}, existing)
+	err := r.Get(ctx, k8stypes.NamespacedName{Name: name, Namespace: bundle.Namespace}, existing)
 
 	now := metav1.Now()
 	if errors.IsNotFound(err) {
@@ -564,7 +569,7 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 
 	// Check if resource exists
 	existing := &{{ $.APIVersion }}.{{ . }}{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: bundle.Namespace}, existing)
+	err := r.Get(ctx, k8stypes.NamespacedName{Name: name, Namespace: bundle.Namespace}, existing)
 
 	now := metav1.Now()
 	if errors.IsNotFound(err) {
@@ -642,7 +647,7 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 
 	// Check if resource exists
 	existing := &{{ $.APIVersion }}.{{ . }}{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: bundle.Namespace}, existing)
+	err := r.Get(ctx, k8stypes.NamespacedName{Name: name, Namespace: bundle.Namespace}, existing)
 
 	now := metav1.Now()
 	if errors.IsNotFound(err) {
@@ -1030,6 +1035,100 @@ func (r *{{ .Kind }}Reconciler) calculateSummary(statuses []{{ .APIVersion }}.Bu
 	return summary
 }
 
+// calculateAggregatedHealth computes Aggregate CRD-compatible health status from bundle resources.
+// This provides consistent health reporting semantics between Bundle and Aggregate CRDs.
+func (r *{{ .Kind }}Reconciler) calculateAggregatedHealth(bundle *{{ .APIVersion }}.{{ .Kind }}) *{{ .APIVersion }}.BundleAggregatedHealth {
+	now := metav1.Now()
+
+	// Convert BundleResourceStatus to AggregatedResourceStatus for consistency
+	aggregatedResources := make([]{{ .APIVersion }}.AggregatedResourceStatus, 0, len(bundle.Status.Resources))
+	for _, res := range bundle.Status.Resources {
+		// Map Bundle states to Aggregate-compatible states
+		state := res.State
+		switch res.State {
+		case "Queried", "Completed":
+			state = "Synced" // Normalize to Aggregate CRD's Synced state
+		case "Creating":
+			state = "Pending"
+		}
+
+		aggregatedResources = append(aggregatedResources, {{ .APIVersion }}.AggregatedResourceStatus{
+			Kind:         res.Kind,
+			Name:         res.Name,
+			Namespace:    bundle.Namespace,
+			State:        state,
+			ExternalID:   res.ExternalID,
+			Message:      res.Message,
+			LastSyncTime: res.LastSyncTime,
+		})
+	}
+
+	// Convert BundleSummary to AggregateSummary
+	aggSummary := bundle.Status.Summary.ToAggregateSummary()
+
+	// Determine aggregated health state using the same strategy as Aggregate CRD
+	strategy := bundle.Spec.AggregationStrategy
+	if strategy == "" {
+		strategy = "AllHealthy"
+	}
+
+	healthState := r.evaluateAggregationStrategy(strategy, aggSummary)
+
+	return &{{ .APIVersion }}.BundleAggregatedHealth{
+		State:               healthState,
+		Summary:             aggSummary,
+		Resources:           aggregatedResources,
+		LastAggregationTime: &now,
+		// ComputedValues will be populated separately if DerivedValues are specified
+	}
+}
+
+// evaluateAggregationStrategy determines the health state using Aggregate CRD semantics
+func (r *{{ .Kind }}Reconciler) evaluateAggregationStrategy(strategy string, summary {{ .APIVersion }}.AggregateSummary) string {
+	if summary.Total == 0 {
+		return "Unknown"
+	}
+
+	switch strategy {
+	case "AllHealthy":
+		// All resources must be synced
+		if summary.Failed > 0 {
+			return "Degraded"
+		}
+		if summary.Pending > 0 {
+			return "Pending"
+		}
+		if summary.Synced == summary.Total {
+			return "Healthy"
+		}
+		return "Pending"
+
+	case "AnyHealthy":
+		// At least one resource must be synced
+		if summary.Synced > 0 {
+			return "Healthy"
+		}
+		if summary.Failed == summary.Total {
+			return "Degraded"
+		}
+		return "Pending"
+
+	case "Quorum":
+		// Majority of resources must be synced
+		quorum := (summary.Total / 2) + 1
+		if summary.Synced >= quorum {
+			return "Healthy"
+		}
+		if summary.Failed > summary.Total-quorum {
+			return "Degraded" // Can't reach quorum
+		}
+		return "Pending"
+
+	default:
+		return "Unknown"
+	}
+}
+
 func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *{{ .APIVersion }}.{{ .Kind }}, state, message string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -1046,6 +1145,14 @@ func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *
 	bundle.Status.OperationState.Message = message
 	if state == "Synced" || state == "Failed" {
 		bundle.Status.OperationState.FinishedAt = &now
+	}
+
+	// Calculate and set Aggregate CRD-compatible health status
+	bundle.Status.AggregatedHealth = r.calculateAggregatedHealth(bundle)
+
+	// Evaluate derived values if configured
+	if len(bundle.Spec.DerivedValues) > 0 {
+		bundle.Status.AggregatedHealth.ComputedValues = r.evaluateDerivedValues(ctx, bundle)
 	}
 
 	// Set conditions
@@ -1105,6 +1212,201 @@ func (r *{{ .Kind }}Reconciler) setConditions(ctx context.Context, bundle *{{ .A
 	meta.SetStatusCondition(&bundle.Status.Conditions, hasFailuresCondition)
 }
 
+// evaluateDerivedValues evaluates CEL expressions from spec.derivedValues.
+// Uses the same CEL evaluation as Aggregate CRD for consistency.
+func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundle *{{ .APIVersion }}.{{ .Kind }}) []{{ .APIVersion }}.ComputedValue {
+	logger := log.FromContext(ctx)
+	var results []{{ .APIVersion }}.ComputedValue
+
+	// Build CEL data from bundle resources
+	celResources, celDataByKind := r.buildCELData(ctx, bundle)
+
+	// Create CEL environment with custom types and aggregate functions
+	envOpts := []cel.EnvOption{
+		cel.Variable("resources", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
+		cel.Variable("summary", cel.MapType(cel.StringType, cel.IntType)),
+		// Kind-specific variables for all kinds (CRUD, Query, Action)
+		{{- range .AllKinds }}
+		cel.Variable("{{ . | lower }}s", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
+		{{- end }}
+		// Custom aggregate functions for numeric lists
+		cel.Function("sum",
+			cel.Overload("sum_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.DoubleType,
+				cel.UnaryBinding(bundleCelSumList),
+			),
+		),
+		cel.Function("max",
+			cel.Overload("max_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.DoubleType,
+				cel.UnaryBinding(bundleCelMaxList),
+			),
+		),
+		cel.Function("min",
+			cel.Overload("min_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.DoubleType,
+				cel.UnaryBinding(bundleCelMinList),
+			),
+		),
+		cel.Function("avg",
+			cel.Overload("avg_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.DoubleType,
+				cel.UnaryBinding(bundleCelAvgList),
+			),
+		),
+	}
+
+	env, err := cel.NewEnv(envOpts...)
+	if err != nil {
+		logger.Error(err, "Failed to create CEL environment")
+		for _, dv := range bundle.Spec.DerivedValues {
+			results = append(results, {{ .APIVersion }}.ComputedValue{
+				Name:  dv.Name,
+				Error: fmt.Sprintf("failed to create CEL environment: %v", err),
+			})
+		}
+		return results
+	}
+
+	// Convert summary to CEL-compatible format (includes skipped for Bundle)
+	celSummary := map[string]int64{
+		"total":   int64(bundle.Status.Summary.Total),
+		"synced":  int64(bundle.Status.Summary.Synced),
+		"failed":  int64(bundle.Status.Summary.Failed),
+		"pending": int64(bundle.Status.Summary.Pending),
+		"skipped": int64(bundle.Status.Summary.Skipped),
+	}
+
+	// Build evaluation variables map with all resources and kind-specific lists
+	evalVars := map[string]interface{}{
+		"resources": celResources,
+		"summary":   celSummary,
+	}
+	// Add kind-specific lists
+	for kindKey, kindData := range celDataByKind {
+		evalVars[kindKey] = kindData
+	}
+
+	// Evaluate each derived value expression
+	for _, dv := range bundle.Spec.DerivedValues {
+		result := {{ .APIVersion }}.ComputedValue{Name: dv.Name}
+
+		// Parse and check the expression
+		ast, issues := env.Compile(dv.Expression)
+		if issues != nil && issues.Err() != nil {
+			result.Error = fmt.Sprintf("compile error: %v", issues.Err())
+			results = append(results, result)
+			continue
+		}
+
+		// Create program
+		prg, err := env.Program(ast)
+		if err != nil {
+			result.Error = fmt.Sprintf("program error: %v", err)
+			results = append(results, result)
+			continue
+		}
+
+		// Evaluate the expression
+		out, _, err := prg.Eval(evalVars)
+		if err != nil {
+			result.Error = fmt.Sprintf("eval error: %v", err)
+			results = append(results, result)
+			continue
+		}
+
+		// Convert result to string
+		result.Value = bundleCelValueToString(out)
+		results = append(results, result)
+
+		logger.V(1).Info("Evaluated CEL expression",
+			"name", dv.Name,
+			"expression", dv.Expression,
+			"result", result.Value)
+	}
+
+	return results
+}
+
+// buildCELData builds CEL-compatible data structures from bundle resources
+func (r *{{ .Kind }}Reconciler) buildCELData(ctx context.Context, bundle *{{ .APIVersion }}.{{ .Kind }}) ([]map[string]interface{}, map[string][]map[string]interface{}) {
+	celResources := make([]map[string]interface{}, 0)
+	celDataByKind := make(map[string][]map[string]interface{})
+
+	// Initialize kind-specific lists
+	{{- range .AllKinds }}
+	celDataByKind["{{ . | lower }}s"] = make([]map[string]interface{}, 0)
+	{{- end }}
+
+	// Convert each bundle resource status to CEL data
+	for _, resStatus := range bundle.Status.Resources {
+		// Find the corresponding spec to get the full data
+		var resSpec *{{ .APIVersion }}.BundleResourceSpec
+		for i := range bundle.Spec.Resources {
+			if bundle.Spec.Resources[i].ID == resStatus.ID {
+				resSpec = &bundle.Spec.Resources[i]
+				break
+			}
+		}
+
+		celData := r.bundleResourceToCELData(resStatus, resSpec, bundle)
+		celResources = append(celResources, celData)
+
+		// Add to kind-specific list
+		kindKey := strings.ToLower(resStatus.Kind) + "s"
+		if _, ok := celDataByKind[kindKey]; ok {
+			celDataByKind[kindKey] = append(celDataByKind[kindKey], celData)
+		}
+	}
+
+	return celResources, celDataByKind
+}
+
+// bundleResourceToCELData converts a bundle resource to a CEL-compatible map
+func (r *{{ .Kind }}Reconciler) bundleResourceToCELData(
+	resStatus {{ .APIVersion }}.BundleResourceStatus,
+	resSpec *{{ .APIVersion }}.BundleResourceSpec,
+	bundle *{{ .APIVersion }}.{{ .Kind }},
+) map[string]interface{} {
+	result := map[string]interface{}{
+		"kind": resStatus.Kind,
+		"metadata": map[string]interface{}{
+			"name":      resStatus.Name,
+			"namespace": bundle.Namespace,
+		},
+		"status": map[string]interface{}{
+			"state":      resStatus.State,
+			"externalID": resStatus.ExternalID,
+			"message":    resStatus.Message,
+			"ready":      resStatus.Ready,
+			"skipped":    resStatus.Skipped,
+		},
+	}
+
+	// Include spec data if available
+	if resSpec != nil {
+		// Parse the raw extension to get spec data
+		var specData map[string]interface{}
+		if resSpec.Spec.Raw != nil {
+			if err := json.Unmarshal(resSpec.Spec.Raw, &specData); err == nil {
+				result["spec"] = specData
+			} else {
+				result["spec"] = map[string]interface{}{}
+			}
+		} else {
+			result["spec"] = map[string]interface{}{}
+		}
+	} else {
+		result["spec"] = map[string]interface{}{}
+	}
+
+	return result
+}
+
 // SetupWithManager sets up the controller with the Manager
 func (r *{{ .Kind }}Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -1120,4 +1422,174 @@ func (r *{{ .Kind }}Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&{{ $.APIVersion }}.{{ . }}{}).
 {{- end }}
 		Complete(r)
+}
+
+// CEL helper functions for Bundle derived value evaluation
+// These match the functions in Aggregate controller for consistency
+
+// bundleCelValueToString converts a CEL value to a string representation
+func bundleCelValueToString(val ref.Val) string {
+	switch v := val.(type) {
+	case types.Int:
+		return fmt.Sprintf("%d", int64(v))
+	case types.Double:
+		return fmt.Sprintf("%g", float64(v))
+	case types.Bool:
+		return fmt.Sprintf("%t", bool(v))
+	case types.String:
+		return string(v)
+	default:
+		// For complex types, use reflection or native value
+		native := val.Value()
+		if native == nil {
+			return "null"
+		}
+		rv := reflect.ValueOf(native)
+		switch rv.Kind() {
+		case reflect.Slice, reflect.Array:
+			return fmt.Sprintf("[%d items]", rv.Len())
+		case reflect.Map:
+			return fmt.Sprintf("{%d entries}", rv.Len())
+		default:
+			return fmt.Sprintf("%v", native)
+		}
+	}
+}
+
+// bundleCelToFloat64 converts a CEL value to float64
+func bundleCelToFloat64(val interface{}) (float64, bool) {
+	switch v := val.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// bundleCelSumList implements sum() for a list of numbers
+func bundleCelSumList(val ref.Val) ref.Val {
+	list, ok := val.(ref.Val)
+	if !ok {
+		return types.NewErr("sum() requires a list argument")
+	}
+
+	iter, ok := list.(traits.Lister)
+	if !ok {
+		return types.NewErr("sum() requires a list argument")
+	}
+
+	var sum float64
+	it := iter.Iterator()
+	for it.HasNext() == types.True {
+		elem := it.Next()
+		if num, ok := bundleCelToFloat64(elem.Value()); ok {
+			sum += num
+		}
+	}
+	return types.Double(sum)
+}
+
+// bundleCelMaxList implements max() for a list of numbers
+func bundleCelMaxList(val ref.Val) ref.Val {
+	list, ok := val.(ref.Val)
+	if !ok {
+		return types.NewErr("max() requires a list argument")
+	}
+
+	iter, ok := list.(traits.Lister)
+	if !ok {
+		return types.NewErr("max() requires a list argument")
+	}
+
+	var max float64
+	first := true
+	it := iter.Iterator()
+	for it.HasNext() == types.True {
+		elem := it.Next()
+		if num, ok := bundleCelToFloat64(elem.Value()); ok {
+			if first || num > max {
+				max = num
+				first = false
+			}
+		}
+	}
+	if first {
+		return types.Double(0) // Empty list returns 0
+	}
+	return types.Double(max)
+}
+
+// bundleCelMinList implements min() for a list of numbers
+func bundleCelMinList(val ref.Val) ref.Val {
+	list, ok := val.(ref.Val)
+	if !ok {
+		return types.NewErr("min() requires a list argument")
+	}
+
+	iter, ok := list.(traits.Lister)
+	if !ok {
+		return types.NewErr("min() requires a list argument")
+	}
+
+	var min float64
+	first := true
+	it := iter.Iterator()
+	for it.HasNext() == types.True {
+		elem := it.Next()
+		if num, ok := bundleCelToFloat64(elem.Value()); ok {
+			if first || num < min {
+				min = num
+				first = false
+			}
+		}
+	}
+	if first {
+		return types.Double(0) // Empty list returns 0
+	}
+	return types.Double(min)
+}
+
+// bundleCelAvgList implements avg() for a list of numbers
+func bundleCelAvgList(val ref.Val) ref.Val {
+	list, ok := val.(ref.Val)
+	if !ok {
+		return types.NewErr("avg() requires a list argument")
+	}
+
+	iter, ok := list.(traits.Lister)
+	if !ok {
+		return types.NewErr("avg() requires a list argument")
+	}
+
+	var sum float64
+	var count int
+	it := iter.Iterator()
+	for it.HasNext() == types.True {
+		elem := it.Next()
+		if num, ok := bundleCelToFloat64(elem.Value()); ok {
+			sum += num
+			count++
+		}
+	}
+	if count == 0 {
+		return types.Double(0) // Empty list returns 0
+	}
+	return types.Double(sum / float64(count))
 }

@@ -69,8 +69,7 @@ var _ = Describe("UserLoginQuery Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserLoginQuerySpec{
-				},
+				Spec: v1alpha1.UserLoginQuerySpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), userloginquery)).To(Succeed())
 
@@ -94,8 +93,7 @@ var _ = Describe("UserLoginQuery Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserLoginQuerySpec{
-				},
+				Spec: v1alpha1.UserLoginQuerySpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), userloginquery)).To(Succeed())
 
@@ -130,8 +128,7 @@ var _ = Describe("UserLoginQuery Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserLoginQuerySpec{
-				},
+				Spec: v1alpha1.UserLoginQuerySpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), userloginquery)).To(Succeed())
 
