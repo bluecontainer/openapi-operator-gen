@@ -1,0 +1,446 @@
+{
+  "summary": {
+    "total": 12,
+    "synced": 8,
+    "failed": 2,
+    "pending": 2,
+    "skipped": 0
+  },
+  "resources": [
+    {
+      "kind": "Order",
+      "metadata": {
+        "name": "order-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 1,
+        "name": "Example Order 1"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "order-ext-001",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "Order",
+      "metadata": {
+        "name": "order-002",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 100,
+        "name": "Example Order 2"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "order-ext-002",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "Order",
+      "metadata": {
+        "name": "order-003",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 200,
+        "name": "Example Order 3"
+      },
+      "status": {
+        "state": "Failed",
+        "externalID": "",
+        "message": "API returned error"
+      }
+    },
+    {
+      "kind": "Order",
+      "metadata": {
+        "name": "order-004",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 300,
+        "name": "Example Order 4"
+      },
+      "status": {
+        "state": "Pending",
+        "externalID": "",
+        "message": "Waiting for API response"
+      }
+    },
+    {
+      "kind": "Pet",
+      "metadata": {
+        "name": "pet-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 2,
+        "name": "Example Pet 1"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "pet-ext-001",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "Pet",
+      "metadata": {
+        "name": "pet-002",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 101,
+        "name": "Example Pet 2"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "pet-ext-002",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "Pet",
+      "metadata": {
+        "name": "pet-003",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 201,
+        "name": "Example Pet 3"
+      },
+      "status": {
+        "state": "Failed",
+        "externalID": "",
+        "message": "API returned error"
+      }
+    },
+    {
+      "kind": "Pet",
+      "metadata": {
+        "name": "pet-004",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 301,
+        "name": "Example Pet 4"
+      },
+      "status": {
+        "state": "Pending",
+        "externalID": "",
+        "message": "Waiting for API response"
+      }
+    },
+    {
+      "kind": "User",
+      "metadata": {
+        "name": "user-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 3,
+        "name": "Example User 1"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "user-ext-001",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "User",
+      "metadata": {
+        "name": "user-002",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 102,
+        "name": "Example User 2"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "user-ext-002",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "User",
+      "metadata": {
+        "name": "user-003",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 202,
+        "name": "Example User 3"
+      },
+      "status": {
+        "state": "Failed",
+        "externalID": "",
+        "message": "API returned error"
+      }
+    },
+    {
+      "kind": "User",
+      "metadata": {
+        "name": "user-004",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": 302,
+        "name": "Example User 4"
+      },
+      "status": {
+        "state": "Pending",
+        "externalID": "",
+        "message": "Waiting for API response"
+      }
+    },
+    {
+      "kind": "PetFindbystatusQuery",
+      "metadata": {
+        "name": "petfindbystatusquery-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "pollingInterval": "5m"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Query executed successfully"
+      }
+    },
+    {
+      "kind": "PetFindbytagsQuery",
+      "metadata": {
+        "name": "petfindbytagsquery-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "pollingInterval": "5m"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Query executed successfully"
+      }
+    },
+    {
+      "kind": "StoreInventoryQuery",
+      "metadata": {
+        "name": "storeinventoryquery-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "pollingInterval": "5m"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Query executed successfully"
+      }
+    },
+    {
+      "kind": "UserLoginQuery",
+      "metadata": {
+        "name": "userloginquery-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "pollingInterval": "5m"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Query executed successfully"
+      }
+    },
+    {
+      "kind": "UserLogoutQuery",
+      "metadata": {
+        "name": "userlogoutquery-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "pollingInterval": "5m"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Query executed successfully"
+      }
+    },
+    {
+      "kind": "PetUploadimageAction",
+      "metadata": {
+        "name": "petuploadimageaction-001",
+        "namespace": "default"
+      },
+      "spec": {},
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Action completed successfully"
+      }
+    },
+    {
+      "kind": "UserCreatewithlistAction",
+      "metadata": {
+        "name": "usercreatewithlistaction-001",
+        "namespace": "default"
+      },
+      "spec": {},
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Action completed successfully"
+      }
+    }
+  ],
+  "kindLists": {
+    "orders": [
+      {
+        "kind": "Order",
+        "metadata": {"name": "order-001", "namespace": "default"},
+        "spec": {"id": 1, "name": "Example Order 1"},
+        "status": {"state": "Synced", "externalID": "order-ext-001"}
+      },
+      {
+        "kind": "Order",
+        "metadata": {"name": "order-002", "namespace": "default"},
+        "spec": {"id": 100, "name": "Example Order 2"},
+        "status": {"state": "Synced", "externalID": "order-ext-002"}
+      }
+    ],
+    "pets": [
+      {
+        "kind": "Pet",
+        "metadata": {"name": "pet-001", "namespace": "default"},
+        "spec": {"id": 2, "name": "Example Pet 1"},
+        "status": {"state": "Synced", "externalID": "pet-ext-001"}
+      },
+      {
+        "kind": "Pet",
+        "metadata": {"name": "pet-002", "namespace": "default"},
+        "spec": {"id": 101, "name": "Example Pet 2"},
+        "status": {"state": "Synced", "externalID": "pet-ext-002"}
+      }
+    ],
+    "users": [
+      {
+        "kind": "User",
+        "metadata": {"name": "user-001", "namespace": "default"},
+        "spec": {"id": 3, "name": "Example User 1"},
+        "status": {"state": "Synced", "externalID": "user-ext-001"}
+      },
+      {
+        "kind": "User",
+        "metadata": {"name": "user-002", "namespace": "default"},
+        "spec": {"id": 102, "name": "Example User 2"},
+        "status": {"state": "Synced", "externalID": "user-ext-002"}
+      }
+    ],
+    "petfindbystatusquerys": [
+      {
+        "kind": "PetFindbystatusQuery",
+        "metadata": {"name": "petfindbystatusquery-001", "namespace": "default"},
+        "spec": {"id": 4, "name": "Example PetFindbystatusQuery 1"},
+        "status": {"state": "Synced", "externalID": "petfindbystatusquery-ext-001"}
+      },
+      {
+        "kind": "PetFindbystatusQuery",
+        "metadata": {"name": "petfindbystatusquery-002", "namespace": "default"},
+        "spec": {"id": 103, "name": "Example PetFindbystatusQuery 2"},
+        "status": {"state": "Synced", "externalID": "petfindbystatusquery-ext-002"}
+      }
+    ],
+    "petfindbytagsquerys": [
+      {
+        "kind": "PetFindbytagsQuery",
+        "metadata": {"name": "petfindbytagsquery-001", "namespace": "default"},
+        "spec": {"id": 5, "name": "Example PetFindbytagsQuery 1"},
+        "status": {"state": "Synced", "externalID": "petfindbytagsquery-ext-001"}
+      },
+      {
+        "kind": "PetFindbytagsQuery",
+        "metadata": {"name": "petfindbytagsquery-002", "namespace": "default"},
+        "spec": {"id": 104, "name": "Example PetFindbytagsQuery 2"},
+        "status": {"state": "Synced", "externalID": "petfindbytagsquery-ext-002"}
+      }
+    ],
+    "storeinventoryquerys": [
+      {
+        "kind": "StoreInventoryQuery",
+        "metadata": {"name": "storeinventoryquery-001", "namespace": "default"},
+        "spec": {"id": 6, "name": "Example StoreInventoryQuery 1"},
+        "status": {"state": "Synced", "externalID": "storeinventoryquery-ext-001"}
+      },
+      {
+        "kind": "StoreInventoryQuery",
+        "metadata": {"name": "storeinventoryquery-002", "namespace": "default"},
+        "spec": {"id": 105, "name": "Example StoreInventoryQuery 2"},
+        "status": {"state": "Synced", "externalID": "storeinventoryquery-ext-002"}
+      }
+    ],
+    "userloginquerys": [
+      {
+        "kind": "UserLoginQuery",
+        "metadata": {"name": "userloginquery-001", "namespace": "default"},
+        "spec": {"id": 7, "name": "Example UserLoginQuery 1"},
+        "status": {"state": "Synced", "externalID": "userloginquery-ext-001"}
+      },
+      {
+        "kind": "UserLoginQuery",
+        "metadata": {"name": "userloginquery-002", "namespace": "default"},
+        "spec": {"id": 106, "name": "Example UserLoginQuery 2"},
+        "status": {"state": "Synced", "externalID": "userloginquery-ext-002"}
+      }
+    ],
+    "userlogoutquerys": [
+      {
+        "kind": "UserLogoutQuery",
+        "metadata": {"name": "userlogoutquery-001", "namespace": "default"},
+        "spec": {"id": 8, "name": "Example UserLogoutQuery 1"},
+        "status": {"state": "Synced", "externalID": "userlogoutquery-ext-001"}
+      },
+      {
+        "kind": "UserLogoutQuery",
+        "metadata": {"name": "userlogoutquery-002", "namespace": "default"},
+        "spec": {"id": 107, "name": "Example UserLogoutQuery 2"},
+        "status": {"state": "Synced", "externalID": "userlogoutquery-ext-002"}
+      }
+    ],
+    "petuploadimageactions": [
+      {
+        "kind": "PetUploadimageAction",
+        "metadata": {"name": "petuploadimageaction-001", "namespace": "default"},
+        "spec": {"id": 9, "name": "Example PetUploadimageAction 1"},
+        "status": {"state": "Synced", "externalID": "petuploadimageaction-ext-001"}
+      },
+      {
+        "kind": "PetUploadimageAction",
+        "metadata": {"name": "petuploadimageaction-002", "namespace": "default"},
+        "spec": {"id": 108, "name": "Example PetUploadimageAction 2"},
+        "status": {"state": "Synced", "externalID": "petuploadimageaction-ext-002"}
+      }
+    ],
+    "usercreatewithlistactions": [
+      {
+        "kind": "UserCreatewithlistAction",
+        "metadata": {"name": "usercreatewithlistaction-001", "namespace": "default"},
+        "spec": {"id": 10, "name": "Example UserCreatewithlistAction 1"},
+        "status": {"state": "Synced", "externalID": "usercreatewithlistaction-ext-001"}
+      },
+      {
+        "kind": "UserCreatewithlistAction",
+        "metadata": {"name": "usercreatewithlistaction-002", "namespace": "default"},
+        "spec": {"id": 109, "name": "Example UserCreatewithlistAction 2"},
+        "status": {"state": "Synced", "externalID": "usercreatewithlistaction-ext-002"}
+      }
+    ]
+  }
+}

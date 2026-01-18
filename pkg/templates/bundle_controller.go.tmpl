@@ -15,10 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
+	celutil "github.com/bluecontainer/openapi-operator-gen/pkg/cel"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -1221,46 +1218,13 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundl
 	// Build CEL data from bundle resources
 	celResources, celDataByKind := r.buildCELData(ctx, bundle)
 
-	// Create CEL environment with custom types and aggregate functions
-	envOpts := []cel.EnvOption{
-		cel.Variable("resources", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
-		cel.Variable("summary", cel.MapType(cel.StringType, cel.IntType)),
-		// Kind-specific variables for all kinds (CRUD, Query, Action)
+	// Create CEL environment using the shared utility
+	kindNames := []string{
 		{{- range .AllKinds }}
-		cel.Variable("{{ . | lower }}s", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
+		"{{ . | lower }}s",
 		{{- end }}
-		// Custom aggregate functions for numeric lists
-		cel.Function("sum",
-			cel.Overload("sum_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(bundleCelSumList),
-			),
-		),
-		cel.Function("max",
-			cel.Overload("max_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(bundleCelMaxList),
-			),
-		),
-		cel.Function("min",
-			cel.Overload("min_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(bundleCelMinList),
-			),
-		),
-		cel.Function("avg",
-			cel.Overload("avg_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(bundleCelAvgList),
-			),
-		),
 	}
-
-	env, err := cel.NewEnv(envOpts...)
+	env, err := celutil.NewEnvironment(kindNames)
 	if err != nil {
 		logger.Error(err, "Failed to create CEL environment")
 		for _, dv := range bundle.Spec.DerivedValues {
@@ -1272,55 +1236,30 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundl
 		return results
 	}
 
-	// Convert summary to CEL-compatible format (includes skipped for Bundle)
-	celSummary := map[string]int64{
-		"total":   int64(bundle.Status.Summary.Total),
-		"synced":  int64(bundle.Status.Summary.Synced),
-		"failed":  int64(bundle.Status.Summary.Failed),
-		"pending": int64(bundle.Status.Summary.Pending),
-		"skipped": int64(bundle.Status.Summary.Skipped),
-	}
-
-	// Build evaluation variables map with all resources and kind-specific lists
-	evalVars := map[string]interface{}{
-		"resources": celResources,
-		"summary":   celSummary,
-	}
-	// Add kind-specific lists
-	for kindKey, kindData := range celDataByKind {
-		evalVars[kindKey] = kindData
-	}
+	// Build evaluation variables using the shared utility (includes skipped for Bundle)
+	celSummary := celutil.BuildSummaryWithSkipped(
+		int64(bundle.Status.Summary.Total),
+		int64(bundle.Status.Summary.Synced),
+		int64(bundle.Status.Summary.Failed),
+		int64(bundle.Status.Summary.Pending),
+		int64(bundle.Status.Summary.Skipped),
+	)
+	evalVars := celutil.BuildVariables(celResources, celSummary, celDataByKind)
 
 	// Evaluate each derived value expression
 	for _, dv := range bundle.Spec.DerivedValues {
 		result := {{ .APIVersion }}.ComputedValue{Name: dv.Name}
 
-		// Parse and check the expression
-		ast, issues := env.Compile(dv.Expression)
-		if issues != nil && issues.Err() != nil {
-			result.Error = fmt.Sprintf("compile error: %v", issues.Err())
+		// Use the shared evaluation function
+		evalResult := celutil.Evaluate(env, dv.Expression, evalVars)
+		if evalResult.Error != nil {
+			result.Error = evalResult.Error.Error()
 			results = append(results, result)
 			continue
 		}
 
-		// Create program
-		prg, err := env.Program(ast)
-		if err != nil {
-			result.Error = fmt.Sprintf("program error: %v", err)
-			results = append(results, result)
-			continue
-		}
-
-		// Evaluate the expression
-		out, _, err := prg.Eval(evalVars)
-		if err != nil {
-			result.Error = fmt.Sprintf("eval error: %v", err)
-			results = append(results, result)
-			continue
-		}
-
-		// Convert result to string
-		result.Value = bundleCelValueToString(out)
+		// Convert result to string using the shared utility
+		result.Value = celutil.ValueToString(evalResult.RawValue)
 		results = append(results, result)
 
 		logger.V(1).Info("Evaluated CEL expression",
@@ -1424,172 +1363,3 @@ func (r *{{ .Kind }}Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// CEL helper functions for Bundle derived value evaluation
-// These match the functions in Aggregate controller for consistency
-
-// bundleCelValueToString converts a CEL value to a string representation
-func bundleCelValueToString(val ref.Val) string {
-	switch v := val.(type) {
-	case types.Int:
-		return fmt.Sprintf("%d", int64(v))
-	case types.Double:
-		return fmt.Sprintf("%g", float64(v))
-	case types.Bool:
-		return fmt.Sprintf("%t", bool(v))
-	case types.String:
-		return string(v)
-	default:
-		// For complex types, use reflection or native value
-		native := val.Value()
-		if native == nil {
-			return "null"
-		}
-		rv := reflect.ValueOf(native)
-		switch rv.Kind() {
-		case reflect.Slice, reflect.Array:
-			return fmt.Sprintf("[%d items]", rv.Len())
-		case reflect.Map:
-			return fmt.Sprintf("{%d entries}", rv.Len())
-		default:
-			return fmt.Sprintf("%v", native)
-		}
-	}
-}
-
-// bundleCelToFloat64 converts a CEL value to float64
-func bundleCelToFloat64(val interface{}) (float64, bool) {
-	switch v := val.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case uint:
-		return float64(v), true
-	case uint32:
-		return float64(v), true
-	case uint64:
-		return float64(v), true
-	case json.Number:
-		if f, err := v.Float64(); err == nil {
-			return f, true
-		}
-	}
-	return 0, false
-}
-
-// bundleCelSumList implements sum() for a list of numbers
-func bundleCelSumList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("sum() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("sum() requires a list argument")
-	}
-
-	var sum float64
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := bundleCelToFloat64(elem.Value()); ok {
-			sum += num
-		}
-	}
-	return types.Double(sum)
-}
-
-// bundleCelMaxList implements max() for a list of numbers
-func bundleCelMaxList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("max() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("max() requires a list argument")
-	}
-
-	var max float64
-	first := true
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := bundleCelToFloat64(elem.Value()); ok {
-			if first || num > max {
-				max = num
-				first = false
-			}
-		}
-	}
-	if first {
-		return types.Double(0) // Empty list returns 0
-	}
-	return types.Double(max)
-}
-
-// bundleCelMinList implements min() for a list of numbers
-func bundleCelMinList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("min() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("min() requires a list argument")
-	}
-
-	var min float64
-	first := true
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := bundleCelToFloat64(elem.Value()); ok {
-			if first || num < min {
-				min = num
-				first = false
-			}
-		}
-	}
-	if first {
-		return types.Double(0) // Empty list returns 0
-	}
-	return types.Double(min)
-}
-
-// bundleCelAvgList implements avg() for a list of numbers
-func bundleCelAvgList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("avg() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("avg() requires a list argument")
-	}
-
-	var sum float64
-	var count int
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := bundleCelToFloat64(elem.Value()); ok {
-			sum += num
-			count++
-		}
-	}
-	if count == 0 {
-		return types.Double(0) // Empty list returns 0
-	}
-	return types.Double(sum / float64(count))
-}

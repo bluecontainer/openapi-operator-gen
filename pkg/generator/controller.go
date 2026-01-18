@@ -1178,6 +1178,302 @@ func (g *ControllerGenerator) GenerateBundleController(bundle *mapper.BundleDefi
 	return nil
 }
 
+// CELTestTemplateData holds data for the CEL test template
+type CELTestTemplateData struct {
+	Year             int
+	GeneratorVersion string
+	AllKinds         []string
+}
+
+// GenerateCELTest generates the CEL expression unit test file
+func (g *ControllerGenerator) GenerateCELTest(allKinds []string) error {
+	controllerDir := filepath.Join(g.config.OutputDir, "internal", "controller")
+	if err := os.MkdirAll(controllerDir, 0755); err != nil {
+		return fmt.Errorf("failed to create controller directory: %w", err)
+	}
+
+	data := CELTestTemplateData{
+		Year:             time.Now().Year(),
+		GeneratorVersion: g.config.GeneratorVersion,
+		AllKinds:         allKinds,
+	}
+
+	fp := filepath.Join(controllerDir, "cel_test.go")
+
+	tmpl, err := template.New("cel_test").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(templates.CELTestTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	file, err := os.Create(fp)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// CELTestDataTemplateData holds data for the CEL test data templates
+type CELTestDataTemplateData struct {
+	AppName       string
+	APIGroup      string
+	APIVersion    string
+	AggregateKind string
+	BundleKind    string
+	ResourceKinds []string
+	QueryKinds    []string
+	ActionKinds   []string
+	AllKinds      []string
+}
+
+// GenerateCELTestData generates the CEL test data JSON file and README
+func (g *ControllerGenerator) GenerateCELTestData(resourceKinds, queryKinds, actionKinds, allKinds []string, aggregateKind, bundleKind string, crds []*mapper.CRDDefinition) error {
+	testdataDir := filepath.Join(g.config.OutputDir, "testdata")
+	if err := os.MkdirAll(testdataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create testdata directory: %w", err)
+	}
+
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+
+	data := CELTestDataTemplateData{
+		AppName:       appName,
+		APIGroup:      g.config.APIGroup,
+		APIVersion:    g.config.APIVersion,
+		AggregateKind: aggregateKind,
+		BundleKind:    bundleKind,
+		ResourceKinds: resourceKinds,
+		QueryKinds:    queryKinds,
+		ActionKinds:   actionKinds,
+		AllKinds:      allKinds,
+	}
+
+	funcMap := template.FuncMap{
+		"lower": strings.ToLower,
+		"add": func(a, b int) int {
+			return a + b
+		},
+	}
+
+	// Generate cel-test-data.json
+	jsonTmpl, err := template.New("cel_testdata").Funcs(funcMap).Parse(templates.CELTestDataTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse CEL test data template: %w", err)
+	}
+
+	jsonFile, err := os.Create(filepath.Join(testdataDir, "cel-test-data.json"))
+	if err != nil {
+		return fmt.Errorf("failed to create cel-test-data.json: %w", err)
+	}
+	defer jsonFile.Close()
+
+	if err := jsonTmpl.Execute(jsonFile, data); err != nil {
+		return fmt.Errorf("failed to execute CEL test data template: %w", err)
+	}
+
+	// Generate README.md
+	readmeTmpl, err := template.New("cel_testdata_readme").Funcs(funcMap).Parse(templates.CELTestDataReadmeTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse CEL test data README template: %w", err)
+	}
+
+	readmeFile, err := os.Create(filepath.Join(testdataDir, "README.md"))
+	if err != nil {
+		return fmt.Errorf("failed to create testdata README.md: %w", err)
+	}
+	defer readmeFile.Close()
+
+	if err := readmeTmpl.Execute(readmeFile, data); err != nil {
+		return fmt.Errorf("failed to execute CEL test data README template: %w", err)
+	}
+
+	// Generate resources.yaml with example child CRs for cel-test --resources
+	if aggregateKind != "" || bundleKind != "" {
+		parentKind := aggregateKind
+		if parentKind == "" {
+			parentKind = bundleKind
+		}
+		if err := g.generateExampleResourcesCRs(testdataDir, crds, parentKind); err != nil {
+			return fmt.Errorf("failed to generate example resources CRs: %w", err)
+		}
+	}
+
+	// Generate aggregate CRs for testing CEL expressions
+	if aggregateKind != "" {
+		// With status data
+		if err := g.generateAggregateWithStatus(testdataDir, aggregateKind, resourceKinds); err != nil {
+			return fmt.Errorf("failed to generate aggregate-with-status.yaml: %w", err)
+		}
+		// Without status data (spec only)
+		if err := g.generateAggregateCRTestdata(testdataDir, aggregateKind, resourceKinds); err != nil {
+			return fmt.Errorf("failed to generate aggregate.yaml: %w", err)
+		}
+	}
+
+	// Generate bundle CRs for testing CEL expressions
+	if bundleKind != "" {
+		// With status data
+		if err := g.generateBundleWithStatus(testdataDir, bundleKind, resourceKinds); err != nil {
+			return fmt.Errorf("failed to generate bundle-with-status.yaml: %w", err)
+		}
+		// Without status data (spec only)
+		if err := g.generateBundleCRTestdata(testdataDir, bundleKind, resourceKinds); err != nil {
+			return fmt.Errorf("failed to generate bundle.yaml: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// resourceFieldData holds field data for example resource CRs
+type resourceFieldData struct {
+	JSONName      string
+	ExampleValue1 string
+	ExampleValue2 string
+}
+
+// resourceData holds data for a single resource kind in resources.yaml
+type resourceData struct {
+	APIGroup   string
+	APIVersion string
+	Kind       string
+	NameLower  string
+	SpecFields []resourceFieldData
+}
+
+// generateExampleResourcesCRs generates example child resource CRs for use with cel-test --resources
+func (g *ControllerGenerator) generateExampleResourcesCRs(testdataDir string, crds []*mapper.CRDDefinition, aggregateKind string) error {
+	// Filter to only CRUD resources (not queries or actions)
+	var resourceCRDs []*mapper.CRDDefinition
+	for _, crd := range crds {
+		if !crd.IsQuery && !crd.IsAction {
+			resourceCRDs = append(resourceCRDs, crd)
+		}
+	}
+
+	if len(resourceCRDs) == 0 {
+		return nil
+	}
+
+	// Build resource data for the template
+	resources := make([]resourceData, 0, len(resourceCRDs))
+	for _, crd := range resourceCRDs {
+		resource := resourceData{
+			APIGroup:   crd.APIGroup,
+			APIVersion: crd.APIVersion,
+			Kind:       crd.Kind,
+			NameLower:  strings.ToLower(crd.Kind),
+			SpecFields: g.convertToResourceExampleFields(crd.Spec),
+		}
+		resources = append(resources, resource)
+	}
+
+	data := struct {
+		GeneratorVersion string
+		AggregateKind    string
+		Resources        []resourceData
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+		AggregateKind:    aggregateKind,
+		Resources:        resources,
+	}
+
+	tmpl, err := template.New("example-resources").Parse(templates.ExampleResourcesCRTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	examplePath := filepath.Join(testdataDir, "resources.yaml")
+	file, err := os.Create(examplePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// convertToResourceExampleFields converts CRD spec fields to example field data with two example values
+func (g *ControllerGenerator) convertToResourceExampleFields(spec *mapper.FieldDefinition) []resourceFieldData {
+	if spec == nil {
+		return nil
+	}
+
+	targetingFields := map[string]bool{
+		"targetNamespace":   true,
+		"targetStatefulSet": true,
+		"targetDeployment":  true,
+		"targetHelmRelease": true,
+		"targetPodOrdinal":  true,
+	}
+
+	result := make([]resourceFieldData, 0, len(spec.Fields))
+
+	for _, f := range spec.Fields {
+		// Skip targeting fields - they're not relevant for resource CRs
+		if targetingFields[f.JSONName] {
+			continue
+		}
+
+		result = append(result, resourceFieldData{
+			JSONName:      f.JSONName,
+			ExampleValue1: g.generateExampleValueWithSeed(f, 1),
+			ExampleValue2: g.generateExampleValueWithSeed(f, 2),
+		})
+	}
+	return result
+}
+
+// generateExampleValueWithSeed generates an example value for a field using a seed for variation
+func (g *ControllerGenerator) generateExampleValueWithSeed(f *mapper.FieldDefinition, seed int) string {
+	// If there's an enum, use different values for different seeds if available
+	if len(f.Enum) > 0 {
+		idx := (seed - 1) % len(f.Enum)
+		return fmt.Sprintf("%q", f.Enum[idx])
+	}
+
+	// Remove pointer prefix
+	goType := strings.TrimPrefix(f.GoType, "*")
+
+	switch goType {
+	case "string":
+		return fmt.Sprintf("%q", fmt.Sprintf("example-%s-%d", f.JSONName, seed))
+	case "int", "int32", "int64":
+		return fmt.Sprintf("%d", seed*100+seed)
+	case "float32", "float64":
+		return fmt.Sprintf("%.1f", float64(seed)*10.5)
+	case "bool":
+		return fmt.Sprintf("%t", seed%2 == 1)
+	case "[]string":
+		return fmt.Sprintf("[%q]", fmt.Sprintf("item%d", seed))
+	case "[]int", "[]int32", "[]int64":
+		return fmt.Sprintf("[%d, %d, %d]", seed, seed+1, seed+2)
+	case "metav1.Time":
+		// Generate a valid RFC 3339 timestamp with seed offset
+		t := time.Now().UTC().AddDate(0, 0, seed)
+		return fmt.Sprintf("%q", t.Format(time.RFC3339))
+	default:
+		if strings.HasPrefix(goType, "[]") {
+			return "[]"
+		}
+		if strings.HasPrefix(goType, "map[") {
+			return "{}"
+		}
+		// For complex types, return empty object
+		return "{}"
+	}
+}
+
 // copySpecFile copies the OpenAPI spec file to the output directory.
 // If the spec is a URL, it downloads the content. If it's a local file, it copies it.
 func (g *ControllerGenerator) copySpecFile() error {
@@ -1233,6 +1529,190 @@ func (g *ControllerGenerator) copySpecFile() error {
 	destPath := filepath.Join(g.config.OutputDir, destFilename)
 	if err := os.WriteFile(destPath, content, 0644); err != nil {
 		return fmt.Errorf("failed to write spec file: %w", err)
+	}
+
+	return nil
+}
+
+// generateAggregateWithStatus generates an example aggregate CR with populated status for CEL testing
+func (g *ControllerGenerator) generateAggregateWithStatus(testdataDir, aggregateKind string, resourceKinds []string) error {
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+
+	// Calculate total resources (6 per kind as generated in resources.yaml)
+	totalResources := len(resourceKinds) * 6
+
+	data := struct {
+		GeneratorVersion string
+		APIGroup         string
+		APIVersion       string
+		AppName          string
+		AggregateKind    string
+		ResourceKinds    []string
+		TotalResources   int
+		Timestamp        string
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		AppName:          appName,
+		AggregateKind:    aggregateKind,
+		ResourceKinds:    resourceKinds,
+		TotalResources:   totalResources,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+	}
+
+	funcMap := template.FuncMap{
+		"lower": strings.ToLower,
+		"add": func(a, b int) int {
+			return a + b
+		},
+	}
+
+	tmpl, err := template.New("aggregate-with-status").Funcs(funcMap).Parse(templates.ExampleAggregateWithStatusTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filePath := filepath.Join(testdataDir, "aggregate-with-status.yaml")
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// generateBundleWithStatus generates an example bundle CR with populated status for CEL testing
+func (g *ControllerGenerator) generateBundleWithStatus(testdataDir, bundleKind string, resourceKinds []string) error {
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+
+	data := struct {
+		GeneratorVersion string
+		APIGroup         string
+		APIVersion       string
+		AppName          string
+		BundleKind       string
+		ResourceKinds    []string
+		Timestamp        string
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		AppName:          appName,
+		BundleKind:       bundleKind,
+		ResourceKinds:    resourceKinds,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+	}
+
+	funcMap := template.FuncMap{
+		"lower": strings.ToLower,
+	}
+
+	tmpl, err := template.New("bundle-with-status").Funcs(funcMap).Parse(templates.ExampleBundleWithStatusTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filePath := filepath.Join(testdataDir, "bundle-with-status.yaml")
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// generateAggregateCRTestdata generates an example aggregate CR without status for testdata
+func (g *ControllerGenerator) generateAggregateCRTestdata(testdataDir, aggregateKind string, resourceKinds []string) error {
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+
+	data := struct {
+		GeneratorVersion string
+		APIGroup         string
+		APIVersion       string
+		AppName          string
+		AggregateKind    string
+		ResourceKinds    []string
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		AppName:          appName,
+		AggregateKind:    aggregateKind,
+		ResourceKinds:    resourceKinds,
+	}
+
+	funcMap := template.FuncMap{
+		"lower": strings.ToLower,
+	}
+
+	tmpl, err := template.New("aggregate-testdata").Funcs(funcMap).Parse(templates.ExampleAggregateCRTestdataTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filePath := filepath.Join(testdataDir, "aggregate.yaml")
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return nil
+}
+
+// generateBundleCRTestdata generates an example bundle CR without status for testdata
+func (g *ControllerGenerator) generateBundleCRTestdata(testdataDir, bundleKind string, resourceKinds []string) error {
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+
+	data := struct {
+		GeneratorVersion string
+		APIGroup         string
+		APIVersion       string
+		AppName          string
+		BundleKind       string
+		ResourceKinds    []string
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		AppName:          appName,
+		BundleKind:       bundleKind,
+		ResourceKinds:    resourceKinds,
+	}
+
+	funcMap := template.FuncMap{
+		"lower": strings.ToLower,
+	}
+
+	tmpl, err := template.New("bundle-testdata").Funcs(funcMap).Parse(templates.ExampleBundleCRTestdataTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	filePath := filepath.Join(testdataDir, "bundle.yaml")
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
 	return nil
