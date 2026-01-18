@@ -333,6 +333,45 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	// Generate CEL test file and test data if aggregate or bundle is enabled (they use CEL expressions)
+	if aggregate != nil || bundle != nil {
+		// Collect kinds for CEL templates
+		var resourceKinds, queryKinds, actionKinds, allKinds []string
+		var aggregateKind, bundleKind string
+
+		if aggregate != nil {
+			resourceKinds = aggregate.ResourceKinds
+			queryKinds = aggregate.QueryKinds
+			actionKinds = aggregate.ActionKinds
+			allKinds = aggregate.AllKinds
+			aggregateKind = aggregate.Kind
+		}
+		if bundle != nil {
+			if len(resourceKinds) == 0 {
+				resourceKinds = bundle.ResourceKinds
+				queryKinds = bundle.QueryKinds
+				actionKinds = bundle.ActionKinds
+				allKinds = bundle.AllKinds
+			}
+			bundleKind = bundle.Kind
+		}
+
+		if err := controllerGen.GenerateCELTest(allKinds); err != nil {
+			return fmt.Errorf("failed to generate CEL tests: %w", err)
+		}
+		fmt.Println("  Generated internal/controller/cel_test.go")
+
+		if err := controllerGen.GenerateCELTestData(resourceKinds, queryKinds, actionKinds, allKinds, aggregateKind, bundleKind, crds); err != nil {
+			return fmt.Errorf("failed to generate CEL test data: %w", err)
+		}
+		fmt.Println("  Generated testdata/cel-test-data.json")
+		fmt.Println("  Generated testdata/README.md")
+		if aggregateKind != "" || bundleKind != "" {
+			fmt.Println("  Generated testdata/resources.yaml")
+		}
+		fmt.Println()
+	}
+
 	fmt.Println("Code generation complete!")
 	fmt.Println()
 	fmt.Println("Next steps:")

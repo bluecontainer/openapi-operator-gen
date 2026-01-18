@@ -15,6 +15,10 @@ all: build
 build: fmt vet
 	go build $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/openapi-operator-gen
 
+## Build the CEL test utility
+build-cel-test: fmt vet
+	go build -o bin/cel-test ./cmd/cel-test
+
 ## Install the binary to GOPATH/bin
 install: build
 	go install $(LDFLAGS) ./cmd/openapi-operator-gen
@@ -65,6 +69,7 @@ deps:
 help:
 	@echo "Available targets:"
 	@echo "  build          - Build the binary"
+	@echo "  build-cel-test - Build the CEL test utility"
 	@echo "  install        - Install to GOPATH/bin"
 	@echo "  test           - Run tests"
 	@echo "  test-coverage  - Run tests with coverage"
