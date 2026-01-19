@@ -961,16 +961,12 @@ func loadResourcesCRs(filename string) (map[string]*ResourceCR, error) {
 // This allows testing expressions without actual status data
 func generateMockDataFromCR(cr *CRDocument) *TestData {
 	testData := &TestData{
-		Summary: map[string]int64{
-			"total":   0,
-			"synced":  0,
-			"failed":  0,
-			"pending": 0,
-			"skipped": 0,
-		},
 		Resources: []map[string]interface{}{},
 		KindLists: map[string][]map[string]interface{}{},
 	}
+
+	// Use shared summary counter for consistent state classification
+	var summaryCounter celutil.SummaryCounter
 
 	// Collect kinds from resourceSelectors and explicit resources
 	kinds := make(map[string]bool)
@@ -1030,21 +1026,16 @@ func generateMockDataFromCR(cr *CRDocument) *TestData {
 				testData.Resources = append(testData.Resources, resource)
 				testData.KindLists[kindKey] = append(testData.KindLists[kindKey], resource)
 
-				// Update summary
-				testData.Summary["total"]++
-				switch stateInfo.state {
-				case "Synced":
-					testData.Summary["synced"]++
-				case "Failed":
-					testData.Summary["failed"]++
-				case "Pending":
-					testData.Summary["pending"]++
-				}
+				// Update summary using shared classification logic
+				summaryCounter.Add(stateInfo.state)
 
 				resourceNum++
 			}
 		}
 	}
+
+	// Set summary from counter
+	testData.Summary = summaryCounter.ToMap()
 
 	return testData
 }
@@ -1629,16 +1620,12 @@ func setupEnvtest() (*rest.Config, func(), error) {
 // fetchResourcesFromCluster fetches resources of specified kinds from the cluster
 func fetchResourcesFromCluster(client dynamic.Interface, kinds []string) (*TestData, error) {
 	testData := &TestData{
-		Summary: map[string]int64{
-			"total":   0,
-			"synced":  0,
-			"failed":  0,
-			"pending": 0,
-			"skipped": 0,
-		},
 		Resources: []map[string]interface{}{},
 		KindLists: map[string][]map[string]interface{}{},
 	}
+
+	// Use shared summary counter for consistent state classification
+	var summaryCounter celutil.SummaryCounter
 
 	ctx := context.Background()
 
@@ -1672,28 +1659,19 @@ func fetchResourcesFromCluster(client dynamic.Interface, kinds []string) (*TestD
 			testData.Resources = append(testData.Resources, resource)
 			testData.KindLists[kindKey] = append(testData.KindLists[kindKey], resource)
 
-			// Update summary based on status
-			testData.Summary["total"]++
+			// Update summary based on status using shared classification logic
+			state := ""
 			if status, ok := resource["status"].(map[string]interface{}); ok {
-				if state, ok := status["state"].(string); ok {
-					switch state {
-					case "Synced":
-						testData.Summary["synced"]++
-					case "Failed":
-						testData.Summary["failed"]++
-					case "Pending":
-						testData.Summary["pending"]++
-					default:
-						testData.Summary["pending"]++ // Count unknown states as pending
-					}
-				} else {
-					testData.Summary["pending"]++ // No state means pending
+				if s, ok := status["state"].(string); ok {
+					state = s
 				}
-			} else {
-				testData.Summary["pending"]++ // No status means pending
 			}
+			summaryCounter.Add(state)
 		}
 	}
+
+	// Set summary from counter
+	testData.Summary = summaryCounter.ToMap()
 
 	return testData, nil
 }

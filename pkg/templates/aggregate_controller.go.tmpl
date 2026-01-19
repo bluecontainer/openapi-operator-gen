@@ -175,10 +175,11 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 		"{{ . | lower }}s": {},
 		{{- end }}
 	}
-	var totalCount, syncedCount, failedCount, pendingCount int
+	// Use shared summary counter for consistent state classification
+	var summaryCounter celutil.SummaryCounter
 
 	// Helper to process a resource and update counters
-	// Handles different state names for CRUD (Synced/Observed), Query (Queried), and Action (Completed) CRDs
+	// Uses shared classification logic for state names (Synced/Observed/Queried/Completed → synced)
 	processResource := func(res {{ .APIVersion }}.AggregatedResourceStatus, celData map[string]interface{}) {
 		allResources = append(allResources, res)
 		if celData != nil {
@@ -187,17 +188,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 			kindKey := strings.ToLower(res.Kind) + "s"
 			celDataByKind[kindKey] = append(celDataByKind[kindKey], celData)
 		}
-		totalCount++
-
-		switch res.State {
-		case "Synced", "Observed", "Queried", "Completed":
-			// CRUD: Synced/Observed, Query: Queried, Action: Completed
-			syncedCount++
-		case "Failed":
-			failedCount++
-		default:
-			pendingCount++
-		}
+		summaryCounter.Add(res.State)
 	}
 
 	// Process explicit resource references first (Option 1: Reference-Based)
@@ -217,8 +208,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 					State:     "NotFound",
 					Message:   "Referenced resource not found",
 				})
-				totalCount++
-				failedCount++
+				summaryCounter.Add("Failed") // NotFound counts as Failed
 				continue
 			}
 			logger.Error(err, "Failed to get resource", "kind", ref.Kind, "name", ref.Name)
@@ -245,7 +235,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 	}
 
 	// Update resource metrics
-	{{ .KindLower }}ResourcesTotal.Add(ctx, int64(totalCount),
+	{{ .KindLower }}ResourcesTotal.Add(ctx, summaryCounter.Total,
 		metric.WithAttributes(
 			attribute.String("aggregate.name", instance.Name),
 			attribute.String("aggregate.namespace", instance.Namespace),
@@ -254,10 +244,10 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 	// Update status summary
 	now := metav1.Now()
 	instance.Status.Summary = {{ .APIVersion }}.AggregateSummary{
-		Total:   totalCount,
-		Synced:  syncedCount,
-		Failed:  failedCount,
-		Pending: pendingCount,
+		Total:   int(summaryCounter.Total),
+		Synced:  int(summaryCounter.Synced),
+		Failed:  int(summaryCounter.Failed),
+		Pending: int(summaryCounter.Pending),
 	}
 	instance.Status.Resources = allResources
 	instance.Status.LastAggregationTime = &now
@@ -273,12 +263,12 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 	state, message := r.evaluateAggregationStrategy(instance)
 
 	// Set conditions based on aggregation result
-	r.setConditions(ctx, instance, state, message, totalCount, syncedCount, failedCount)
+	r.setConditions(ctx, instance, state, message, int(summaryCounter.Total), int(summaryCounter.Synced), int(summaryCounter.Failed))
 
 	logger.Info("Aggregated status",
-		"total", totalCount,
-		"synced", syncedCount,
-		"failed", failedCount,
+		"total", summaryCounter.Total,
+		"synced", summaryCounter.Synced,
+		"failed", summaryCounter.Failed,
 		"state", state)
 
 	r.updateStatus(ctx, instance, state, message)

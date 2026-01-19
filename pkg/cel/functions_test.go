@@ -9,10 +9,10 @@ import (
 
 func TestToFloat64(t *testing.T) {
 	tests := []struct {
-		name    string
-		val     any
-		want    float64
-		wantOk  bool
+		name   string
+		val    any
+		want   float64
+		wantOk bool
 	}{
 		{
 			name:   "float64",

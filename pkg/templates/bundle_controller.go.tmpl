@@ -1011,25 +1011,20 @@ func isValidResourceID(s string) bool {
 	return true
 }
 
-// calculateSummary computes resource counts from statuses
+// calculateSummary computes resource counts from statuses using shared classification logic
 func (r *{{ .Kind }}Reconciler) calculateSummary(statuses []{{ .APIVersion }}.BundleResourceStatus) {{ .APIVersion }}.BundleSummary {
-	var summary {{ .APIVersion }}.BundleSummary
-	summary.Total = len(statuses)
-
+	var counter celutil.SummaryCounter
 	for _, s := range statuses {
-		switch s.State {
-		case "Synced", "Queried", "Completed":
-			summary.Synced++
-		case "Failed":
-			summary.Failed++
-		case "Skipped":
-			summary.Skipped++
-		default:
-			summary.Pending++
-		}
+		counter.Add(s.State)
 	}
 
-	return summary
+	return {{ .APIVersion }}.BundleSummary{
+		Total:   int(counter.Total),
+		Synced:  int(counter.Synced),
+		Failed:  int(counter.Failed),
+		Pending: int(counter.Pending),
+		Skipped: int(counter.Skipped),
+	}
 }
 
 // calculateAggregatedHealth computes Aggregate CRD-compatible health status from bundle resources.
