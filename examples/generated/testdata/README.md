@@ -2,6 +2,9 @@
 
 This directory contains test data for validating CEL expressions used in Aggregate and Bundle CRDs.
 
+> **Note:** For complete cel-test CLI documentation including all commands, flags, and advanced usage,
+> see the [cel-test README](https://github.com/bluecontainer/openapi-operator-gen/blob/main/cmd/cel-test/README.md).
+
 ## Test Data File
 
 - `cel-test-data.json` - Sample data representing a petstore deployment with example resources
@@ -163,6 +166,7 @@ spec:
 | `map(r, expr)` | Transform list | `resources.map(r, r.metadata.name)` |
 | `exists(r, cond)` | Any match | `resources.exists(r, r.status.state == 'Failed')` |
 | `all(r, cond)` | All match | `resources.all(r, r.status.state == 'Synced')` |
+| `has(field)` | Check field exists | `has(r.spec.quantity) ? r.spec.quantity : 0` |
 
 ## Data Structure
 
@@ -199,3 +203,59 @@ The test data follows this structure:
   }
 }
 ```
+
+## Additional Features
+
+### Mock Data for Testing
+
+Generate mock data without needing actual resources:
+
+```bash
+./bin/cel-test expressions --cr aggregate.yaml --mock
+```
+
+### Fetching Live Data from Kubernetes
+
+Fetch resources directly from a cluster:
+
+```bash
+# Fetch and save as JSON for testing
+./bin/cel-test fetch --kinds Order,Pet,User \
+  --api-group petstore.example.com \
+  --output cel-test-data.json
+
+# Or evaluate expressions directly against live data
+./bin/cel-test eval "resources.size()" \
+  --kinds Order,Pet,User \
+  --api-group petstore.example.com
+```
+
+## Troubleshooting
+
+### Empty spec data
+
+When using `--cr` with status data, spec fields are empty by default. Use `--resources` to provide actual resource specs:
+
+```bash
+./bin/cel-test eval "orders[0].spec.quantity" --cr aggregate.yaml --resources resources.yaml
+```
+
+### Expression errors with optional fields
+
+Use `has()` to check for optional fields before accessing them:
+
+```bash
+# Instead of: r.spec.quantity (may error if field missing)
+# Use: has(r.spec.quantity) ? r.spec.quantity : 0
+```
+
+### Division by zero
+
+Always guard division operations:
+
+```bash
+# Safe division
+./bin/cel-test eval "summary.total > 0 ? summary.synced * 100 / summary.total : 0"
+```
+
+For more troubleshooting tips, see the [cel-test README](https://github.com/bluecontainer/openapi-operator-gen/blob/main/cmd/cel-test/README.md#troubleshooting).
