@@ -600,6 +600,39 @@ Auto-discover workload from a Helm release:
 | `--scheme` | URL scheme (http/https) | `http` |
 | `--strategy` | Endpoint selection strategy | `round-robin` |
 | `--health-path` | Health check path | `/health` |
+| `--watch-labels` | Only watch CRs matching these labels | All labels |
+| `--watch-namespaces` | Only watch CRs in these namespaces | All namespaces |
+| `--namespace-scoped` | Only watch CRs in operator's own namespace | `false` |
+
+### CR Filtering
+
+Filter which CRs the operator watches using labels, namespaces, or both.
+
+#### Namespace-Scoped Mode
+
+Restrict the operator to only watch CRs in its own namespace:
+
+```bash
+./bin/manager --namespace-scoped
+```
+
+#### Watch Specific Namespaces
+
+```bash
+./bin/manager --watch-namespaces "ns1,ns2"
+```
+
+#### Watch by Labels (Sharding)
+
+Run multiple operator instances that each handle a subset of CRs:
+
+```bash
+# Instance 1
+./bin/manager --watch-labels "shard=1"
+
+# Instance 2
+./bin/manager --watch-labels "shard=2"
+```
 
 ### Endpoint Selection Strategies
 
@@ -812,6 +845,9 @@ helm package ./chart/{{ .AppName }}
 | `HELM_RELEASE` | `--helm-release` |
 | `WORKLOAD_NAMESPACE` | `--namespace` |
 | `SERVICE_NAME` | `--service` |
+| `WATCH_LABELS` | `--watch-labels` |
+| `WATCH_NAMESPACES` | `--watch-namespaces` |
+| `NAMESPACE_SCOPED` | `--namespace-scoped` (set to `true`) |
 
 ## Observability
 

@@ -1789,6 +1789,68 @@ All endpoint flags are optional. If no global endpoint is configured, each CR mu
 | `--workload-kind` | Workload type (`statefulset`, `deployment`, or `auto`) | `auto` |
 | `--metrics-bind-address` | Metrics endpoint address | `:8080` |
 | `--health-probe-bind-address` | Health probe address | `:8081` |
+| `--watch-labels` | Only watch CRs matching these labels (format: `key1=value1,key2=value2`) | All labels |
+| `--watch-namespaces` | Only watch CRs in these namespaces (format: `ns1,ns2,ns3`) | All namespaces |
+| `--namespace-scoped` | Only watch CRs in the operator's own namespace (auto-detected) | `false` |
+
+### CR Filtering
+
+Generated operators can filter which CRs they watch using labels, namespaces, or both. This enables running multiple operator instances on a single cluster with non-overlapping CR sets.
+
+#### Namespace-Scoped Mode
+
+The simplest way to restrict an operator to its own namespace:
+
+```bash
+./bin/manager --namespace-scoped
+```
+
+This auto-detects the operator's namespace from the service account and configures the cache to only watch CRs in that namespace. Useful for namespace-isolated deployments.
+
+#### Watch Specific Namespaces
+
+Watch CRs in specific namespaces only:
+
+```bash
+./bin/manager --watch-namespaces "prod-ns,staging-ns"
+```
+
+Or via environment variable:
+```bash
+WATCH_NAMESPACES="prod-ns,staging-ns" ./bin/manager
+```
+
+#### Watch by Labels (Sharding)
+
+Run multiple operator instances that each handle a subset of CRs:
+
+```bash
+# Instance 1: handles CRs with shard=1
+./bin/manager --watch-labels "shard=1"
+
+# Instance 2: handles CRs with shard=2
+./bin/manager --watch-labels "shard=2"
+```
+
+CRs must include the appropriate label:
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+  labels:
+    shard: "1"  # Handled by instance 1
+spec:
+  name: Fluffy
+```
+
+#### Combining Filters
+
+Namespace and label filters can be combined:
+
+```bash
+./bin/manager --watch-namespaces "production" --watch-labels "tier=backend"
+```
 
 ## Endpoint Selection Strategies
 
@@ -2298,6 +2360,9 @@ All flags can be set via environment variables:
 | `HELM_RELEASE` | `--helm-release` |
 | `WORKLOAD_NAMESPACE` | `--namespace` |
 | `SERVICE_NAME` | `--service` |
+| `WATCH_LABELS` | `--watch-labels` |
+| `WATCH_NAMESPACES` | `--watch-namespaces` |
+| `NAMESPACE_SCOPED` | `--namespace-scoped` (set to `true`) |
 
 ## Observability (OpenTelemetry)
 
