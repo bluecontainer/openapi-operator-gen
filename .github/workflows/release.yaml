@@ -35,16 +35,24 @@ jobs:
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT:0:7} -X main.date=${DATE}"
 
+          # Build openapi-operator-gen
           GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/openapi-operator-gen-linux-amd64 ./cmd/openapi-operator-gen
           GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o bin/openapi-operator-gen-linux-arm64 ./cmd/openapi-operator-gen
           GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/openapi-operator-gen-darwin-amd64 ./cmd/openapi-operator-gen
           GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o bin/openapi-operator-gen-darwin-arm64 ./cmd/openapi-operator-gen
           GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/openapi-operator-gen-windows-amd64.exe ./cmd/openapi-operator-gen
 
+          # Build cel-test
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/cel-test-linux-amd64 ./cmd/cel-test
+          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o bin/cel-test-linux-arm64 ./cmd/cel-test
+          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/cel-test-darwin-amd64 ./cmd/cel-test
+          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o bin/cel-test-darwin-arm64 ./cmd/cel-test
+          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/cel-test-windows-amd64.exe ./cmd/cel-test
+
       - name: Create checksums
         run: |
           cd bin
-          sha256sum openapi-operator-gen-* > checksums.txt
+          sha256sum openapi-operator-gen-* cel-test-* > checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -55,5 +63,10 @@ jobs:
             bin/openapi-operator-gen-darwin-amd64
             bin/openapi-operator-gen-darwin-arm64
             bin/openapi-operator-gen-windows-amd64.exe
+            bin/cel-test-linux-amd64
+            bin/cel-test-linux-arm64
+            bin/cel-test-darwin-amd64
+            bin/cel-test-darwin-arm64
+            bin/cel-test-windows-amd64.exe
             bin/checksums.txt
           generate_release_notes: true
