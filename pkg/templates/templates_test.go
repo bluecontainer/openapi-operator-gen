@@ -83,6 +83,15 @@ func TestMainTemplateLoaded(t *testing.T) {
 	}
 }
 
+func TestExampleResourcesCRTemplateLoaded(t *testing.T) {
+	if ExampleResourcesCRTemplate == "" {
+		t.Error("ExampleResourcesCRTemplate is empty - embed may have failed")
+	}
+	if !strings.Contains(ExampleResourcesCRTemplate, "cel-test --resources") {
+		t.Error("ExampleResourcesCRTemplate doesn't contain expected 'cel-test --resources' reference")
+	}
+}
+
 // =============================================================================
 // Template Parsing Tests - Verify templates are valid Go templates
 // =============================================================================

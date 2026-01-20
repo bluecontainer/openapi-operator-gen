@@ -1096,7 +1096,7 @@ spec:
 
 ### CEL Derived Values
 
-Compute custom values from aggregated resources using [CEL (Common Expression Language)](https://github.com/google/cel-spec) expressions. Results are stored in `.status.computedValues`.
+Compute custom values from aggregated resources using [CEL (Common Expression Language)](https://cel.dev/) expressions. Results are stored in `.status.computedValues`.
 
 ```yaml
 apiVersion: petstore.example.com/v1alpha1

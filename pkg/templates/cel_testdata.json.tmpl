@@ -1,0 +1,140 @@
+{
+  "summary": {
+    "total": 12,
+    "synced": 8,
+    "failed": 2,
+    "pending": 2,
+    "skipped": 0
+  },
+  "resources": [
+{{- $resourceKinds := .ResourceKinds }}
+{{- $queryKinds := .QueryKinds }}
+{{- $actionKinds := .ActionKinds }}
+{{- $first := true }}
+{{- range $idx, $kind := .ResourceKinds }}
+    {{- if not $first }},{{ end }}
+    {{- $first = false }}
+    {
+      "kind": "{{ $kind }}",
+      "metadata": {
+        "name": "{{ $kind | lower }}-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": {{ add $idx 1 }},
+        "name": "Example {{ $kind }} 1"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "{{ $kind | lower }}-ext-001",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "{{ $kind }}",
+      "metadata": {
+        "name": "{{ $kind | lower }}-002",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": {{ add $idx 100 }},
+        "name": "Example {{ $kind }} 2"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "{{ $kind | lower }}-ext-002",
+        "message": "Successfully synced with API"
+      }
+    },
+    {
+      "kind": "{{ $kind }}",
+      "metadata": {
+        "name": "{{ $kind | lower }}-003",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": {{ add $idx 200 }},
+        "name": "Example {{ $kind }} 3"
+      },
+      "status": {
+        "state": "Failed",
+        "externalID": "",
+        "message": "API returned error"
+      }
+    },
+    {
+      "kind": "{{ $kind }}",
+      "metadata": {
+        "name": "{{ $kind | lower }}-004",
+        "namespace": "default"
+      },
+      "spec": {
+        "id": {{ add $idx 300 }},
+        "name": "Example {{ $kind }} 4"
+      },
+      "status": {
+        "state": "Pending",
+        "externalID": "",
+        "message": "Waiting for API response"
+      }
+    }
+{{- end }}
+{{- range $idx, $kind := .QueryKinds }}
+    {{- if or (not $first) (gt (len $resourceKinds) 0) }},{{ end }}
+    {{- $first = false }}
+    {
+      "kind": "{{ $kind }}",
+      "metadata": {
+        "name": "{{ $kind | lower }}-001",
+        "namespace": "default"
+      },
+      "spec": {
+        "pollingInterval": "5m"
+      },
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Query executed successfully"
+      }
+    }
+{{- end }}
+{{- range $idx, $kind := .ActionKinds }}
+    {{- if or (not $first) (gt (len $resourceKinds) 0) (gt (len $queryKinds) 0) }},{{ end }}
+    {{- $first = false }}
+    {
+      "kind": "{{ $kind }}",
+      "metadata": {
+        "name": "{{ $kind | lower }}-001",
+        "namespace": "default"
+      },
+      "spec": {},
+      "status": {
+        "state": "Synced",
+        "externalID": "",
+        "message": "Action completed successfully"
+      }
+    }
+{{- end }}
+  ],
+  "kindLists": {
+{{- $first = true }}
+{{- range $idx, $kind := .AllKinds }}
+    {{- if not $first }},{{ end }}
+    {{- $first = false }}
+    "{{ $kind | lower }}s": [
+      {
+        "kind": "{{ $kind }}",
+        "metadata": {"name": "{{ $kind | lower }}-001", "namespace": "default"},
+        "spec": {"id": {{ add $idx 1 }}, "name": "Example {{ $kind }} 1"},
+        "status": {"state": "Synced", "externalID": "{{ $kind | lower }}-ext-001"}
+      },
+      {
+        "kind": "{{ $kind }}",
+        "metadata": {"name": "{{ $kind | lower }}-002", "namespace": "default"},
+        "spec": {"id": {{ add $idx 100 }}, "name": "Example {{ $kind }} 2"},
+        "status": {"state": "Synced", "externalID": "{{ $kind | lower }}-ext-002"}
+      }
+    ]
+{{- end }}
+  }
+}

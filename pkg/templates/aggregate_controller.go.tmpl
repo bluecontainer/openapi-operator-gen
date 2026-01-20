@@ -11,15 +11,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"regexp"
-	"strings"
 	"time"
 
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/aggregate"
+	celutil "github.com/bluecontainer/openapi-operator-gen/pkg/cel"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -179,37 +175,25 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 		"{{ . | lower }}s": {},
 		{{- end }}
 	}
-	var totalCount, syncedCount, failedCount, pendingCount int
+	// Use shared summary counter for consistent state classification
+	var summaryCounter celutil.SummaryCounter
 
 	// Helper to process a resource and update counters
-	// Handles different state names for CRUD (Synced/Observed), Query (Queried), and Action (Completed) CRDs
+	// Uses shared classification logic for state names (Synced/Observed/Queried/Completed → synced)
 	processResource := func(res {{ .APIVersion }}.AggregatedResourceStatus, celData map[string]interface{}) {
 		allResources = append(allResources, res)
 		if celData != nil {
 			allCELData = append(allCELData, celData)
 			// Add to kind-specific list (lowercase plural)
-			kindKey := strings.ToLower(res.Kind) + "s"
+			kindKey := aggregate.KindToVariableName(res.Kind)
 			celDataByKind[kindKey] = append(celDataByKind[kindKey], celData)
 		}
-		totalCount++
-
-		switch res.State {
-		case "Synced", "Observed", "Queried", "Completed":
-			// CRUD: Synced/Observed, Query: Queried, Action: Completed
-			syncedCount++
-		case "Failed":
-			failedCount++
-		default:
-			pendingCount++
-		}
+		summaryCounter.Add(res.State)
 	}
 
 	// Process explicit resource references first (Option 1: Reference-Based)
 	for _, ref := range instance.Spec.Resources {
-		namespace := ref.Namespace
-		if namespace == "" {
-			namespace = instance.Namespace // Default to aggregate's namespace
-		}
+		namespace := aggregate.DefaultNamespace(ref.Namespace, instance.Namespace)
 		res, celData, err := r.getResourceByReference(ctx, namespace, ref)
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -221,8 +205,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 					State:     "NotFound",
 					Message:   "Referenced resource not found",
 				})
-				totalCount++
-				failedCount++
+				summaryCounter.Add("Failed") // NotFound counts as Failed
 				continue
 			}
 			logger.Error(err, "Failed to get resource", "kind", ref.Kind, "name", ref.Name)
@@ -249,7 +232,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 	}
 
 	// Update resource metrics
-	{{ .KindLower }}ResourcesTotal.Add(ctx, int64(totalCount),
+	{{ .KindLower }}ResourcesTotal.Add(ctx, summaryCounter.Total,
 		metric.WithAttributes(
 			attribute.String("aggregate.name", instance.Name),
 			attribute.String("aggregate.namespace", instance.Namespace),
@@ -258,10 +241,10 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 	// Update status summary
 	now := metav1.Now()
 	instance.Status.Summary = {{ .APIVersion }}.AggregateSummary{
-		Total:   totalCount,
-		Synced:  syncedCount,
-		Failed:  failedCount,
-		Pending: pendingCount,
+		Total:   int(summaryCounter.Total),
+		Synced:  int(summaryCounter.Synced),
+		Failed:  int(summaryCounter.Failed),
+		Pending: int(summaryCounter.Pending),
 	}
 	instance.Status.Resources = allResources
 	instance.Status.LastAggregationTime = &now
@@ -277,12 +260,12 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 	state, message := r.evaluateAggregationStrategy(instance)
 
 	// Set conditions based on aggregation result
-	r.setConditions(ctx, instance, state, message, totalCount, syncedCount, failedCount)
+	r.setConditions(ctx, instance, state, message, int(summaryCounter.Total), int(summaryCounter.Synced), int(summaryCounter.Failed))
 
 	logger.Info("Aggregated status",
-		"total", totalCount,
-		"synced", syncedCount,
-		"failed", failedCount,
+		"total", summaryCounter.Total,
+		"synced", summaryCounter.Synced,
+		"failed", summaryCounter.Failed,
 		"state", state)
 
 	r.updateStatus(ctx, instance, state, message)
@@ -519,46 +502,13 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, insta
 	logger := log.FromContext(ctx)
 	var results []{{ .APIVersion }}.ComputedValue
 
-	// Create CEL environment with custom types and aggregate functions
-	envOpts := []cel.EnvOption{
-		cel.Variable("resources", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
-		cel.Variable("summary", cel.MapType(cel.StringType, cel.IntType)),
-		// Kind-specific variables for all kinds (CRUD, Query, Action)
+	// Create CEL environment using the shared utility
+	kindNames := []string{
 		{{- range .AllKinds }}
-		cel.Variable("{{ . | lower }}s", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
+		"{{ . | lower }}s",
 		{{- end }}
-		// Custom aggregate functions for numeric lists
-		cel.Function("sum",
-			cel.Overload("sum_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(celSumList),
-			),
-		),
-		cel.Function("max",
-			cel.Overload("max_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(celMaxList),
-			),
-		),
-		cel.Function("min",
-			cel.Overload("min_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(celMinList),
-			),
-		),
-		cel.Function("avg",
-			cel.Overload("avg_list",
-				[]*cel.Type{cel.ListType(cel.DynType)},
-				cel.DoubleType,
-				cel.UnaryBinding(celAvgList),
-			),
-		),
 	}
-
-	env, err := cel.NewEnv(envOpts...)
+	env, err := celutil.NewEnvironment(kindNames)
 	if err != nil {
 		logger.Error(err, "Failed to create CEL environment")
 		for _, dv := range instance.Spec.DerivedValues {
@@ -570,54 +520,29 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, insta
 		return results
 	}
 
-	// Convert summary to CEL-compatible format
-	celSummary := map[string]int64{
-		"total":   int64(instance.Status.Summary.Total),
-		"synced":  int64(instance.Status.Summary.Synced),
-		"failed":  int64(instance.Status.Summary.Failed),
-		"pending": int64(instance.Status.Summary.Pending),
-	}
-
-	// Build evaluation variables map with all resources and kind-specific lists
-	evalVars := map[string]interface{}{
-		"resources": celResources,
-		"summary":   celSummary,
-	}
-	// Add kind-specific lists
-	for kindKey, kindData := range celDataByKind {
-		evalVars[kindKey] = kindData
-	}
+	// Build evaluation variables using the shared utility
+	celSummary := celutil.BuildSummary(
+		int64(instance.Status.Summary.Total),
+		int64(instance.Status.Summary.Synced),
+		int64(instance.Status.Summary.Failed),
+		int64(instance.Status.Summary.Pending),
+	)
+	evalVars := celutil.BuildVariables(celResources, celSummary, celDataByKind)
 
 	// Evaluate each derived value expression
 	for _, dv := range instance.Spec.DerivedValues {
 		result := {{ .APIVersion }}.ComputedValue{Name: dv.Name}
 
-		// Parse and check the expression
-		ast, issues := env.Compile(dv.Expression)
-		if issues != nil && issues.Err() != nil {
-			result.Error = fmt.Sprintf("compile error: %v", issues.Err())
+		// Use the shared evaluation function
+		evalResult := celutil.Evaluate(env, dv.Expression, evalVars)
+		if evalResult.Error != nil {
+			result.Error = evalResult.Error.Error()
 			results = append(results, result)
 			continue
 		}
 
-		// Create program
-		prg, err := env.Program(ast)
-		if err != nil {
-			result.Error = fmt.Sprintf("program error: %v", err)
-			results = append(results, result)
-			continue
-		}
-
-		// Evaluate the expression
-		out, _, err := prg.Eval(evalVars)
-		if err != nil {
-			result.Error = fmt.Sprintf("eval error: %v", err)
-			results = append(results, result)
-			continue
-		}
-
-		// Convert result to string
-		result.Value = celValueToString(out)
+		// Convert result to string using the shared utility
+		result.Value = celutil.ValueToString(evalResult.RawValue)
 		results = append(results, result)
 
 		logger.V(1).Info("Evaluated CEL expression",
@@ -627,173 +552,6 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, insta
 	}
 
 	return results
-}
-
-// celValueToString converts a CEL value to a string representation
-func celValueToString(val ref.Val) string {
-	switch v := val.(type) {
-	case types.Int:
-		return fmt.Sprintf("%d", int64(v))
-	case types.Double:
-		return fmt.Sprintf("%g", float64(v))
-	case types.Bool:
-		return fmt.Sprintf("%t", bool(v))
-	case types.String:
-		return string(v)
-	default:
-		// For complex types, use reflection or native value
-		native := val.Value()
-		if native == nil {
-			return "null"
-		}
-		rv := reflect.ValueOf(native)
-		switch rv.Kind() {
-		case reflect.Slice, reflect.Array:
-			return fmt.Sprintf("[%d items]", rv.Len())
-		case reflect.Map:
-			return fmt.Sprintf("{%d entries}", rv.Len())
-		default:
-			return fmt.Sprintf("%v", native)
-		}
-	}
-}
-
-// celToFloat64 converts a CEL value to float64
-func celToFloat64(val interface{}) (float64, bool) {
-	switch v := val.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case uint:
-		return float64(v), true
-	case uint32:
-		return float64(v), true
-	case uint64:
-		return float64(v), true
-	case json.Number:
-		if f, err := v.Float64(); err == nil {
-			return f, true
-		}
-	}
-	return 0, false
-}
-
-// celSumList implements sum() for a list of numbers
-func celSumList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("sum() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("sum() requires a list argument")
-	}
-
-	var sum float64
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := celToFloat64(elem.Value()); ok {
-			sum += num
-		}
-	}
-	return types.Double(sum)
-}
-
-// celMaxList implements max() for a list of numbers
-func celMaxList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("max() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("max() requires a list argument")
-	}
-
-	var max float64
-	first := true
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := celToFloat64(elem.Value()); ok {
-			if first || num > max {
-				max = num
-				first = false
-			}
-		}
-	}
-	if first {
-		return types.Double(0) // Empty list returns 0
-	}
-	return types.Double(max)
-}
-
-// celMinList implements min() for a list of numbers
-func celMinList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("min() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("min() requires a list argument")
-	}
-
-	var min float64
-	first := true
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := celToFloat64(elem.Value()); ok {
-			if first || num < min {
-				min = num
-				first = false
-			}
-		}
-	}
-	if first {
-		return types.Double(0) // Empty list returns 0
-	}
-	return types.Double(min)
-}
-
-// celAvgList implements avg() for a list of numbers
-func celAvgList(val ref.Val) ref.Val {
-	list, ok := val.(ref.Val)
-	if !ok {
-		return types.NewErr("avg() requires a list argument")
-	}
-
-	iter, ok := list.(traits.Lister)
-	if !ok {
-		return types.NewErr("avg() requires a list argument")
-	}
-
-	var sum float64
-	var count int
-	it := iter.Iterator()
-	for it.HasNext() == types.True {
-		elem := it.Next()
-		if num, ok := celToFloat64(elem.Value()); ok {
-			sum += num
-			count++
-		}
-	}
-	if count == 0 {
-		return types.Double(0) // Empty list returns 0
-	}
-	return types.Double(sum / float64(count))
 }
 
 // resourceToCELData converts a typed resource to a CEL-compatible map

@@ -163,3 +163,48 @@ var BundleControllerTemplate string
 //
 //go:embed example_bundle_cr.yaml.tmpl
 var ExampleBundleCRTemplate string
+
+// CELTestTemplate is the template for generating CEL expression unit tests
+//
+//go:embed cel_test.go.tmpl
+var CELTestTemplate string
+
+// CELTestDataTemplate is the template for generating CEL test data JSON file
+//
+//go:embed cel_testdata.json.tmpl
+var CELTestDataTemplate string
+
+// CELTestDataReadmeTemplate is the template for generating CEL test data README
+//
+//go:embed cel_testdata_readme.md.tmpl
+var CELTestDataReadmeTemplate string
+
+// ExampleResourcesCRTemplate is the template for generating example child resource CRs
+// for use with cel-test --resources flag when testing aggregate/bundle expressions
+//
+//go:embed example_resources_cr.yaml.tmpl
+var ExampleResourcesCRTemplate string
+
+// ExampleAggregateWithStatusTemplate is the template for generating an example aggregate CR
+// with populated status data for testing CEL expressions
+//
+//go:embed example_aggregate_with_status.yaml.tmpl
+var ExampleAggregateWithStatusTemplate string
+
+// ExampleBundleWithStatusTemplate is the template for generating an example bundle CR
+// with populated status data for testing CEL expressions
+//
+//go:embed example_bundle_with_status.yaml.tmpl
+var ExampleBundleWithStatusTemplate string
+
+// ExampleAggregateCRTestdataTemplate is the template for generating an example aggregate CR
+// without status data for the testdata directory
+//
+//go:embed example_aggregate_cr_testdata.yaml.tmpl
+var ExampleAggregateCRTestdataTemplate string
+
+// ExampleBundleCRTestdataTemplate is the template for generating an example bundle CR
+// without status data for the testdata directory
+//
+//go:embed example_bundle_cr_testdata.yaml.tmpl
+var ExampleBundleCRTestdataTemplate string
