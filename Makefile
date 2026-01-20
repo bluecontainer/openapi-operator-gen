@@ -7,7 +7,7 @@ COMMIT?=$(shell git rev-parse HEAD 2>/dev/null || echo "none")
 DATE?=$(shell date -u -d @$$(git log -1 --date=unix --format=%cd 2>/dev/null) +%Y%m%d%H%M%S 2>/dev/null || echo "unknown")
 LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
 
-.PHONY: all build clean test fmt vet lint install
+.PHONY: all build clean test fmt vet lint install release next-version
 
 all: build
 
@@ -65,6 +65,27 @@ deps:
 	go mod download
 	go mod tidy
 
+## Calculate next patch version from latest tag
+LATEST_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+NEXT_VERSION := $(shell echo $(LATEST_TAG) | awk -F. '{print $$1"."$$2"."$$3+1}')
+RELEASE_VERSION ?= $(NEXT_VERSION)
+
+## Display version information
+next-version:
+	@echo "Latest tag:   $(LATEST_TAG)"
+	@echo "Next version: $(NEXT_VERSION)"
+
+## Create a new release (auto-increments patch version by default)
+## Usage: make release                    # Auto-increment patch (v0.1.0 -> v0.1.1)
+##        make release RELEASE_VERSION=v1.0.0  # Explicit version
+release:
+	@echo "Latest tag: $(LATEST_TAG)"
+	@echo "Release version: $(RELEASE_VERSION)"
+	@read -p "Create release $(RELEASE_VERSION)? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	git tag -a $(RELEASE_VERSION) -m "Release $(RELEASE_VERSION)"
+	git push origin $(RELEASE_VERSION)
+	@echo "Tag $(RELEASE_VERSION) pushed. GitHub Actions will create the release."
+
 ## Show help
 help:
 	@echo "Available targets:"
@@ -78,3 +99,5 @@ help:
 	@echo "  clean          - Clean build artifacts"
 	@echo "  example        - Run with example petstore spec"
 	@echo "  deps           - Download and tidy dependencies"
+	@echo "  next-version   - Display latest tag and next version"
+	@echo "  release        - Create a GitHub release (auto-increments patch, or set RELEASE_VERSION=vX.Y.Z)"
