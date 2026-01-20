@@ -12,9 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 
+	"github.com/bluecontainer/openapi-operator-gen/pkg/aggregate"
 	celutil "github.com/bluecontainer/openapi-operator-gen/pkg/cel"
 
 	"go.opentelemetry.io/otel"
@@ -185,7 +185,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 		if celData != nil {
 			allCELData = append(allCELData, celData)
 			// Add to kind-specific list (lowercase plural)
-			kindKey := strings.ToLower(res.Kind) + "s"
+			kindKey := aggregate.KindToVariableName(res.Kind)
 			celDataByKind[kindKey] = append(celDataByKind[kindKey], celData)
 		}
 		summaryCounter.Add(res.State)
@@ -193,10 +193,7 @@ func (r *{{ .Kind }}Reconciler) aggregateStatus(ctx context.Context, instance *{
 
 	// Process explicit resource references first (Option 1: Reference-Based)
 	for _, ref := range instance.Spec.Resources {
-		namespace := ref.Namespace
-		if namespace == "" {
-			namespace = instance.Namespace // Default to aggregate's namespace
-		}
+		namespace := aggregate.DefaultNamespace(ref.Namespace, instance.Namespace)
 		res, celData, err := r.getResourceByReference(ctx, namespace, ref)
 		if err != nil {
 			if errors.IsNotFound(err) {

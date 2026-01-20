@@ -28,11 +28,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bluecontainer/openapi-operator-gen/pkg/aggregate"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/bundle"
 	celutil "github.com/bluecontainer/openapi-operator-gen/pkg/cel"
 	"github.com/google/cel-go/cel"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -147,6 +150,15 @@ type CRStatus struct {
 	Resources []map[string]interface{} `yaml:"resources" json:"resources"`
 }
 
+// CreatedResource tracks a resource created by cel-test
+type CreatedResource struct {
+	ID        string
+	Kind      string
+	Name      string
+	Namespace string
+	Status    map[string]interface{}
+}
+
 var (
 	dataFile      string
 	crFile        string
@@ -173,6 +185,15 @@ var (
 	// Envtest environment (kept alive for the session)
 	testEnv    *envtest.Environment
 	restConfig *rest.Config
+
+	// CR from Kubernetes
+	crName string // Format: Kind/Name (e.g., PetstoreAggregate/my-aggregate)
+
+	// Interactive session state
+	interactiveSelectors []map[string]interface{} // Resource selectors added via :select
+	interactiveResources []map[string]interface{} // Explicit resources added via :resource
+	interactiveClient    dynamic.Interface        // Kubernetes client for interactive session
+	interactiveCleanup   func()                   // Cleanup function for interactive session
 )
 
 func main() {
@@ -198,6 +219,7 @@ Examples:
   cel-test eval "summary.synced * 100 / summary.total"
   cel-test eval "orders.size()" --kinds orders,pets --data testdata.json
   cel-test eval "sum(orders.map(r, r.spec.quantity))" --data testdata.json
+  cel-test eval "summary.total" --cr-name PetstoreAggregate/my-agg --api-group petstore.example.com -n default
   cel-test interactive`,
 	}
 
@@ -209,6 +231,7 @@ Examples:
 	}
 	evalCmd.Flags().StringVarP(&dataFile, "data", "d", "", "JSON file with test data")
 	evalCmd.Flags().StringVarP(&crFile, "cr", "c", "", "Aggregate/Bundle CR YAML file (uses status for test data)")
+	evalCmd.Flags().StringVar(&crName, "cr-name", "", "Fetch CR from Kubernetes by Kind/Name (e.g., PetstoreAggregate/my-aggregate)")
 	evalCmd.Flags().StringVarP(&resourcesFile, "resources", "r", "", "YAML file with referenced child CRs (provides spec data)")
 	evalCmd.Flags().BoolVarP(&mockData, "mock", "m", false, "Generate mock status data from CR resourceSelectors")
 	evalCmd.Flags().StringSliceVarP(&kindVars, "kinds", "k", []string{}, "Kind variable names (e.g., orders,pets,users)")
@@ -216,7 +239,7 @@ Examples:
 	// Kubernetes flags for eval
 	evalCmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (defaults to ~/.kube/config)")
 	evalCmd.Flags().StringVarP(&kubeNamespace, "namespace", "n", "", "Kubernetes namespace to fetch from")
-	evalCmd.Flags().StringVar(&apiGroup, "api-group", "", "API group for fetching resources from Kubernetes")
+	evalCmd.Flags().StringVar(&apiGroup, "api-group", "", "API group for fetching resources from Kubernetes (required with --cr-name)")
 	evalCmd.Flags().StringVar(&apiVersion, "api-version", "v1alpha1", "API version for fetching resources from Kubernetes")
 	evalCmd.Flags().BoolVar(&useEnvtest, "envtest", false, "Use envtest instead of real cluster")
 	evalCmd.Flags().StringSliceVar(&crdPaths, "crd-paths", []string{}, "Paths to CRD YAML files (required with --envtest)")
@@ -235,6 +258,7 @@ Use arrow keys to navigate history:
 	}
 	interactiveCmd.Flags().StringVarP(&dataFile, "data", "d", "", "JSON file with test data")
 	interactiveCmd.Flags().StringVarP(&crFile, "cr", "c", "", "Aggregate/Bundle CR YAML file (uses status for test data)")
+	interactiveCmd.Flags().StringVar(&crName, "cr-name", "", "Fetch CR from Kubernetes by Kind/Name (e.g., PetstoreAggregate/my-aggregate)")
 	interactiveCmd.Flags().StringVarP(&resourcesFile, "resources", "r", "", "YAML file with referenced child CRs (provides spec data)")
 	interactiveCmd.Flags().BoolVarP(&mockData, "mock", "m", false, "Generate mock status data from CR resourceSelectors")
 	interactiveCmd.Flags().StringSliceVarP(&kindVars, "kinds", "k", []string{}, "Kind variable names (e.g., orders,pets,users)")
@@ -242,7 +266,7 @@ Use arrow keys to navigate history:
 	// Kubernetes flags for interactive
 	interactiveCmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (defaults to ~/.kube/config)")
 	interactiveCmd.Flags().StringVarP(&kubeNamespace, "namespace", "n", "", "Kubernetes namespace to fetch from")
-	interactiveCmd.Flags().StringVar(&apiGroup, "api-group", "", "API group for fetching resources from Kubernetes")
+	interactiveCmd.Flags().StringVar(&apiGroup, "api-group", "", "API group for fetching resources from Kubernetes (required with --cr-name)")
 	interactiveCmd.Flags().StringVar(&apiVersion, "api-version", "v1alpha1", "API version for fetching resources from Kubernetes")
 	interactiveCmd.Flags().BoolVar(&useEnvtest, "envtest", false, "Use envtest instead of real cluster")
 	interactiveCmd.Flags().StringSliceVar(&crdPaths, "crd-paths", []string{}, "Paths to CRD YAML files (required with --envtest)")
@@ -263,7 +287,8 @@ If a --data file is provided, it evaluates each expression against that data.
 If --cr is provided with status data, uses that for evaluation.`,
 		RunE: runExpressions,
 	}
-	expressionsCmd.Flags().StringVarP(&crFile, "cr", "c", "", "Aggregate/Bundle CR YAML file (required)")
+	expressionsCmd.Flags().StringVarP(&crFile, "cr", "c", "", "Aggregate/Bundle CR YAML file")
+	expressionsCmd.Flags().StringVar(&crName, "cr-name", "", "Fetch CR from Kubernetes by Kind/Name (e.g., PetstoreAggregate/my-aggregate)")
 	expressionsCmd.Flags().StringVarP(&dataFile, "data", "d", "", "JSON file with test data for evaluation")
 	expressionsCmd.Flags().StringVarP(&resourcesFile, "resources", "r", "", "YAML file with referenced child CRs (provides spec data)")
 	expressionsCmd.Flags().BoolVarP(&mockData, "mock", "m", false, "Generate mock status data from CR resourceSelectors")
@@ -271,11 +296,10 @@ If --cr is provided with status data, uses that for evaluation.`,
 	// Kubernetes flags for expressions
 	expressionsCmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (defaults to ~/.kube/config)")
 	expressionsCmd.Flags().StringVarP(&kubeNamespace, "namespace", "n", "", "Kubernetes namespace to fetch from")
-	expressionsCmd.Flags().StringVar(&apiGroup, "api-group", "", "API group for fetching resources from Kubernetes")
+	expressionsCmd.Flags().StringVar(&apiGroup, "api-group", "", "API group for fetching resources from Kubernetes (required with --cr-name)")
 	expressionsCmd.Flags().StringVar(&apiVersion, "api-version", "v1alpha1", "API version for fetching resources from Kubernetes")
 	expressionsCmd.Flags().BoolVar(&useEnvtest, "envtest", false, "Use envtest instead of real cluster")
 	expressionsCmd.Flags().StringSliceVar(&crdPaths, "crd-paths", []string{}, "Paths to CRD YAML files (required with --envtest)")
-	expressionsCmd.MarkFlagRequired("cr")
 
 	// Fetch command - retrieves resources from Kubernetes cluster
 	fetchCmd := &cobra.Command{
@@ -311,6 +335,7 @@ Examples:
 	fetchCmd.Flags().BoolVar(&useEnvtest, "envtest", false, "Use envtest instead of real cluster")
 	fetchCmd.Flags().StringSliceVar(&crdPaths, "crd-paths", []string{}, "Paths to CRD YAML files (required with --envtest)")
 	fetchCmd.Flags().StringVarP(&crFile, "cr", "c", "", "Aggregate/Bundle CR YAML file to get kinds from")
+	fetchCmd.Flags().StringVar(&crName, "cr-name", "", "Fetch CR from Kubernetes by Kind/Name to get kinds from (e.g., PetstoreAggregate/my-aggregate)")
 	fetchCmd.Flags().StringVarP(&evalExpr, "eval", "e", "", "CEL expression to evaluate after fetching")
 	fetchCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to save fetched data as JSON (for use with --data)")
 	fetchCmd.Flags().StringVar(&outputYAML, "output-yaml", "", "Output file to save fetched resources as YAML (for use with --resources)")
@@ -401,20 +426,25 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 		// Add to history before processing
 		history.Add(input)
 
-		switch strings.ToLower(input) {
-		case "exit", "quit", "q":
+		// Handle commands (start with : or are simple keywords)
+		lowerInput := strings.ToLower(input)
+		switch {
+		case lowerInput == "exit" || lowerInput == "quit" || lowerInput == "q":
+			if interactiveCleanup != nil {
+				interactiveCleanup()
+			}
 			fmt.Println("Goodbye!")
 			return nil
-		case "help", "h", "?":
-			printHelp(testData)
+		case lowerInput == "help" || lowerInput == "h" || lowerInput == "?":
+			printInteractiveHelp(testData)
 			continue
-		case "data":
+		case lowerInput == "data":
 			printData(testData)
 			continue
-		case "history":
+		case lowerInput == "history":
 			printHistory(history)
 			continue
-		case "reload":
+		case lowerInput == "reload":
 			testData, err = loadTestData()
 			if err != nil {
 				fmt.Printf("Error reloading data: %v\n", err)
@@ -423,8 +453,53 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 				fmt.Println("Data reloaded.")
 			}
 			continue
-		case "expressions", "expr":
+		case lowerInput == "expressions" || lowerInput == "expr":
 			printExpressions(env, testData)
+			continue
+		case strings.HasPrefix(input, ":use "):
+			// :use Kind/Name - Select an Aggregate/Bundle CR from Kubernetes
+			testData, env, err = handleUseCommand(input[5:], testData)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			}
+			continue
+		case strings.HasPrefix(input, ":select "):
+			// :select kind=X [labels=k=v,...] [pattern=regex] - Add a resource selector
+			handleSelectCommand(input[8:])
+			continue
+		case strings.HasPrefix(input, ":resource "):
+			// :resource kind=X name=Y [namespace=Z] - Add an explicit resource reference
+			handleResourceCommand(input[10:])
+			continue
+		case lowerInput == ":fetch":
+			// :fetch - Fetch resources based on current selectors
+			testData, env, err = handleFetchCommand(testData)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			}
+			continue
+		case lowerInput == ":clear":
+			// :clear - Clear current selectors
+			handleClearCommand()
+			continue
+		case lowerInput == ":selectors" || lowerInput == ":show":
+			// :selectors - Show current selectors and resources
+			printSelectors()
+			continue
+		case lowerInput == ":cr":
+			// :cr - Show current CR info
+			printCRInfo()
+			continue
+		case strings.HasPrefix(input, ":create"):
+			// :create - Create child resources from Bundle CR
+			dryRun := strings.Contains(input, "--dry-run")
+			testData, env, err = handleCreateCommand(testData, dryRun)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			}
+			continue
+		case strings.HasPrefix(input, ":"):
+			fmt.Printf("Unknown command: %s (type 'help' for available commands)\n", input)
 			continue
 		}
 
@@ -1140,21 +1215,50 @@ func loadTestData() (*TestData, error) {
 		}
 	}
 
-	// Load from CR file if specified (takes precedence over data file for status)
-	if crFile != "" {
-		cr, err := loadCRFile(crFile)
+	// Load from CR file or Kubernetes if specified
+	if crFile != "" || crName != "" {
+		cr, cleanup, err := loadCRFromClusterOrFile()
 		if err != nil {
-			return nil, fmt.Errorf("failed to load CR file: %w", err)
+			return nil, fmt.Errorf("failed to load CR: %w", err)
 		}
-		loadedCR = cr
-		derivedValues = cr.Spec.DerivedValues
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if cr != nil {
+			loadedCR = cr
+			derivedValues = cr.Spec.DerivedValues
 
-		// If --mock flag is set, generate mock data from CR spec
-		if mockData {
-			testData = generateMockDataFromCR(cr)
-		} else if len(cr.Status.Resources) > 0 || cr.Status.Summary != nil {
-			// If CR has status data, use it (with optional resource specs from --resources)
-			testData = convertCRStatusToTestData(cr, resourceCRs)
+			// If --mock flag is set, generate mock data from CR spec
+			if mockData {
+				testData = generateMockDataFromCR(cr)
+			} else if apiGroup != "" {
+				// If --api-group is provided, fetch live resources based on CR's spec
+				// This uses the CR's resources and resourceSelectors to select which resources to fetch
+				client, kubeCleanup, err := getKubernetesClient()
+				if err != nil {
+					return nil, fmt.Errorf("failed to get Kubernetes client: %w", err)
+				}
+				if kubeCleanup != nil {
+					defer kubeCleanup()
+				}
+
+				kubeData, err := fetchResourcesFromCR(client, cr)
+				if err != nil {
+					return nil, fmt.Errorf("failed to fetch resources from Kubernetes: %w", err)
+				}
+
+				// Print summary of fetched resources
+				fmt.Printf("Fetched %d resources from Kubernetes based on CR selectors:\n", len(kubeData.Resources))
+				for kind, resources := range kubeData.KindLists {
+					fmt.Printf("  %s: %d\n", kind, len(resources))
+				}
+				fmt.Println()
+
+				testData = kubeData
+			} else if len(cr.Status.Resources) > 0 || cr.Status.Summary != nil {
+				// Fall back to CR's cached status data if no --api-group
+				testData = convertCRStatusToTestData(cr, resourceCRs)
+			}
 		}
 	}
 
@@ -1169,8 +1273,8 @@ func loadTestData() (*TestData, error) {
 		}
 	}
 
-	// Fetch from Kubernetes if --api-group is provided (and we have kinds to fetch)
-	if apiGroup != "" && (len(kindVars) > 0 || loadedCR != nil) {
+	// Fetch from Kubernetes if --api-group is provided with explicit --kinds (no CR)
+	if apiGroup != "" && loadedCR == nil && len(kindVars) > 0 {
 		kubeData, cleanup, err := loadTestDataFromKubernetes()
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch from Kubernetes: %w", err)
@@ -1178,7 +1282,6 @@ func loadTestData() (*TestData, error) {
 		if cleanup != nil {
 			defer cleanup()
 		}
-		// Merge Kubernetes data with any existing data
 		if kubeData != nil {
 			testData = kubeData
 		}
@@ -1266,10 +1369,17 @@ func loadTestDataFromKubernetes() (*TestData, func(), error) {
 
 // runExpressions lists and evaluates derived value expressions from a CR
 func runExpressions(cmd *cobra.Command, args []string) error {
-	// Load the CR file
-	cr, err := loadCRFile(crFile)
+	// Load the CR from file or Kubernetes
+	if crFile == "" && crName == "" {
+		return fmt.Errorf("either --cr or --cr-name is required")
+	}
+
+	cr, cleanup, err := loadCRFromClusterOrFile()
 	if err != nil {
-		return fmt.Errorf("failed to load CR file: %w", err)
+		return fmt.Errorf("failed to load CR: %w", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 
 	if len(cr.Spec.DerivedValues) == 0 {
@@ -1427,30 +1537,36 @@ func printExpressions(env *cel.Env, testData *TestData) {
 func runFetch(cmd *cobra.Command, args []string) error {
 	// Determine which kinds to fetch
 	kinds := kindVars
-	if len(kinds) == 0 && crFile != "" {
-		// Extract kinds from CR if provided
-		cr, err := loadCRFile(crFile)
+
+	// Extract kinds from CR if provided (from file or Kubernetes)
+	if len(kinds) == 0 && (crFile != "" || crName != "") {
+		cr, crCleanup, err := loadCRFromClusterOrFile()
 		if err != nil {
-			return fmt.Errorf("failed to load CR file: %w", err)
+			return fmt.Errorf("failed to load CR: %w", err)
 		}
-		kindSet := make(map[string]bool)
-		for _, selector := range cr.Spec.ResourceSelectors {
-			if kind, ok := selector["kind"].(string); ok {
-				kindSet[kind] = true
+		if crCleanup != nil {
+			defer crCleanup()
+		}
+		if cr != nil {
+			kindSet := make(map[string]bool)
+			for _, selector := range cr.Spec.ResourceSelectors {
+				if kind, ok := selector["kind"].(string); ok {
+					kindSet[kind] = true
+				}
 			}
-		}
-		for _, res := range cr.Spec.Resources {
-			if kind, ok := res["kind"].(string); ok {
-				kindSet[kind] = true
+			for _, res := range cr.Spec.Resources {
+				if kind, ok := res["kind"].(string); ok {
+					kindSet[kind] = true
+				}
 			}
-		}
-		for kind := range kindSet {
-			kinds = append(kinds, kind)
+			for kind := range kindSet {
+				kinds = append(kinds, kind)
+			}
 		}
 	}
 
 	if len(kinds) == 0 {
-		return fmt.Errorf("no kinds specified: use --kinds flag or --cr with resourceSelectors")
+		return fmt.Errorf("no kinds specified: use --kinds flag, --cr, or --cr-name with resourceSelectors")
 	}
 
 	// Get Kubernetes client
@@ -1617,6 +1733,118 @@ func setupEnvtest() (*rest.Config, func(), error) {
 	return cfg, cleanup, nil
 }
 
+// parseCRName parses a CR name in the format "Kind/Name" and returns the kind and name
+func parseCRName(crNameStr string) (kind, name string, err error) {
+	parts := strings.SplitN(crNameStr, "/", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid --cr-name format: expected 'Kind/Name' (e.g., PetstoreAggregate/my-aggregate), got %q", crNameStr)
+	}
+	kind = parts[0]
+	name = parts[1]
+	if kind == "" || name == "" {
+		return "", "", fmt.Errorf("invalid --cr-name format: both kind and name are required, got %q", crNameStr)
+	}
+	return kind, name, nil
+}
+
+// fetchCRFromCluster fetches a CR from Kubernetes by kind and name
+func fetchCRFromCluster(client dynamic.Interface, kind, name, namespace string) (*CRDocument, error) {
+	if apiGroup == "" {
+		return nil, fmt.Errorf("--api-group is required when using --cr-name")
+	}
+
+	// Build GVR for the CR
+	// The resource name is the lowercase plural of the kind
+	resourceName := strings.ToLower(kind) + "s"
+	gvr := schema.GroupVersionResource{
+		Group:    apiGroup,
+		Version:  apiVersion,
+		Resource: resourceName,
+	}
+
+	ctx := context.Background()
+
+	var obj *unstructured.Unstructured
+	var err error
+
+	if namespace != "" {
+		obj, err = client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	} else {
+		// Try namespaced first with "default", then cluster-scoped
+		obj, err = client.Resource(gvr).Namespace("default").Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			// Try cluster-scoped
+			obj, err = client.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		}
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %s/%s: %w", kind, name, err)
+	}
+
+	// Convert unstructured to CRDocument
+	cr, err := unstructuredToCRDocument(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert CR to document: %w", err)
+	}
+
+	return cr, nil
+}
+
+// unstructuredToCRDocument converts an unstructured Kubernetes object to a CRDocument
+func unstructuredToCRDocument(obj *unstructured.Unstructured) (*CRDocument, error) {
+	// Marshal to JSON and unmarshal to CRDocument
+	jsonData, err := obj.MarshalJSON()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal unstructured object: %w", err)
+	}
+
+	var doc CRDocument
+	if err := json.Unmarshal(jsonData, &doc); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal to CRDocument: %w", err)
+	}
+
+	return &doc, nil
+}
+
+// loadCRFromClusterOrFile loads a CR either from Kubernetes (if --cr-name is set) or from a file (if --cr is set)
+func loadCRFromClusterOrFile() (*CRDocument, func(), error) {
+	// If --cr-name is provided, fetch from Kubernetes
+	if crName != "" {
+		kind, name, err := parseCRName(crName)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		client, cleanup, err := getKubernetesClient()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get Kubernetes client: %w", err)
+		}
+
+		cr, err := fetchCRFromCluster(client, kind, name, kubeNamespace)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil, nil, err
+		}
+
+		fmt.Printf("Fetched %s/%s from Kubernetes\n", kind, name)
+		return cr, cleanup, nil
+	}
+
+	// Otherwise, load from file
+	if crFile != "" {
+		cr, err := loadCRFile(crFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		return cr, nil, nil
+	}
+
+	return nil, nil, nil
+}
+
 // fetchResourcesFromCluster fetches resources of specified kinds from the cluster
 func fetchResourcesFromCluster(client dynamic.Interface, kinds []string) (*TestData, error) {
 	testData := &TestData{
@@ -1667,6 +1895,116 @@ func fetchResourcesFromCluster(client dynamic.Interface, kinds []string) (*TestD
 				}
 			}
 			summaryCounter.Add(state)
+		}
+	}
+
+	// Set summary from counter
+	testData.Summary = summaryCounter.ToMap()
+
+	return testData, nil
+}
+
+// fetchResourcesFromCR fetches resources based on the CR's spec.resources and spec.resourceSelectors
+// This mimics what the actual controller does when aggregating resources
+func fetchResourcesFromCR(client dynamic.Interface, cr *CRDocument) (*TestData, error) {
+	testData := &TestData{
+		Resources: []map[string]interface{}{},
+		KindLists: map[string][]map[string]interface{}{},
+	}
+
+	var summaryCounter celutil.SummaryCounter
+	ctx := context.Background()
+
+	// Create a dynamic fetcher using the shared package
+	fetcher := aggregate.NewDynamicFetcher(client, apiGroup, apiVersion)
+
+	// Get CR's namespace as default
+	crNamespace := ""
+	if meta, ok := cr.Metadata["namespace"].(string); ok {
+		crNamespace = meta
+	}
+
+	// Helper to add a resource to testData
+	addResource := func(item *unstructured.Unstructured, kind string) {
+		resource := convertUnstructuredToResource(item, kind)
+		testData.Resources = append(testData.Resources, resource)
+
+		kindKey := aggregate.KindToVariableName(kind)
+		if testData.KindLists[kindKey] == nil {
+			testData.KindLists[kindKey] = []map[string]interface{}{}
+		}
+		testData.KindLists[kindKey] = append(testData.KindLists[kindKey], resource)
+
+		// Update summary
+		state := ""
+		if status, ok := resource["status"].(map[string]interface{}); ok {
+			if s, ok := status["state"].(string); ok {
+				state = s
+			}
+		}
+		summaryCounter.Add(state)
+	}
+
+	// Track which resources we've already added (to avoid duplicates)
+	seen := make(map[string]bool)
+
+	// 1. Process explicit resource references (spec.resources)
+	for _, refMap := range cr.Spec.Resources {
+		ref := aggregate.ParseResourceReference(refMap)
+		if !ref.IsValid() {
+			continue
+		}
+
+		namespace := aggregate.DefaultNamespace(ref.Namespace, crNamespace)
+		fmt.Printf("Fetching %s/%s from namespace %s...\n", ref.Kind, ref.Name, namespace)
+
+		item, err := fetcher.GetResource(ctx, ref, crNamespace)
+		if err != nil {
+			fmt.Printf("Warning: failed to get %s/%s in namespace %s: %v\n", ref.Kind, ref.Name, namespace, err)
+			continue
+		}
+
+		key := aggregate.ResourceKey(ref.Kind, namespace, ref.Name)
+		if !seen[key] {
+			seen[key] = true
+			addResource(item, ref.Kind)
+		}
+	}
+
+	// 2. Process resource selectors (spec.resourceSelectors)
+	for _, selMap := range cr.Spec.ResourceSelectors {
+		sel := aggregate.ParseResourceSelector(selMap)
+		if !sel.IsValid() {
+			continue
+		}
+
+		compiled, err := aggregate.CompileSelector(sel)
+		if err != nil {
+			fmt.Printf("Warning: %v\n", err)
+			continue
+		}
+
+		// Determine namespace for listing
+		namespace := kubeNamespace
+		if namespace == "" {
+			namespace = aggregate.DefaultNamespace("", crNamespace)
+		}
+
+		list, err := fetcher.ListResources(ctx, compiled, namespace)
+		if err != nil {
+			fmt.Printf("Warning: failed to list %s: %v\n", sel.Kind, err)
+			continue
+		}
+
+		// Filter by name pattern and add to results
+		filtered := fetcher.FilterByNamePattern(list, compiled)
+		for i := range filtered {
+			item := &filtered[i]
+			key := aggregate.ResourceKey(sel.Kind, item.GetNamespace(), item.GetName())
+			if !seen[key] {
+				seen[key] = true
+				addResource(item, sel.Kind)
+			}
 		}
 	}
 
@@ -1746,4 +2084,681 @@ func resourcesToYAML(resources []map[string]interface{}) (string, error) {
 	}
 
 	return builder.String(), nil
+}
+
+// ==================== Interactive Command Handlers ====================
+
+// printInteractiveHelp prints extended help for interactive mode including new commands
+func printInteractiveHelp(testData *TestData) {
+	fmt.Println("\nAvailable Variables:")
+	fmt.Println("  resources  - List of all resource objects")
+	fmt.Println("  summary    - Map with counts: total, synced, failed, pending, skipped")
+
+	if len(testData.KindLists) > 0 {
+		fmt.Println("\nKind-specific Lists:")
+		for kindName := range testData.KindLists {
+			fmt.Printf("  %s - List of %s resources\n", kindName, kindName)
+		}
+	}
+
+	fmt.Println("\nAggregate Functions:")
+	fmt.Println("  sum(list)  - Sum of numeric values in the list")
+	fmt.Println("  max(list)  - Maximum value in the list")
+	fmt.Println("  min(list)  - Minimum value in the list")
+	fmt.Println("  avg(list)  - Average of values in the list")
+
+	fmt.Println("\nExample Expressions:")
+	fmt.Println("  summary.total")
+	fmt.Println("  summary.synced * 100 / summary.total")
+	fmt.Println("  resources.size()")
+	fmt.Println("  resources.filter(r, r.status.state == 'Synced').size()")
+	if _, ok := testData.KindLists["orders"]; ok {
+		fmt.Println("  orders.size()")
+		fmt.Println("  sum(orders.map(r, r.spec.quantity))")
+	}
+
+	fmt.Println("\nKeyboard Shortcuts:")
+	fmt.Println("  Up/Down    - Navigate command history")
+	fmt.Println("  Left/Right - Move cursor")
+	fmt.Println("  Ctrl+A     - Move to beginning of line")
+	fmt.Println("  Ctrl+E     - Move to end of line")
+	fmt.Println("  Ctrl+U     - Clear line before cursor")
+	fmt.Println("  Ctrl+K     - Clear line after cursor")
+	fmt.Println("  Ctrl+W     - Delete word before cursor")
+	fmt.Println("  Ctrl+L     - Clear screen")
+	fmt.Println("  Ctrl+C     - Cancel current input")
+	fmt.Println("  Ctrl+D     - Exit")
+
+	fmt.Println("\nBasic Commands:")
+	fmt.Println("  help, h, ?     - Show this help")
+	fmt.Println("  data           - Show current test data")
+	fmt.Println("  expressions    - Show and evaluate derived value expressions from CR")
+	fmt.Println("  history        - Show command history")
+	fmt.Println("  reload         - Reload test data from file")
+	fmt.Println("  exit, quit     - Exit interactive mode")
+
+	fmt.Println("\nKubernetes Commands:")
+	fmt.Println("  :use Kind/Name         - Select an Aggregate/Bundle CR from Kubernetes")
+	fmt.Println("                           Example: :use PetstoreAggregate/my-aggregate")
+	fmt.Println("  :select kind=X [labels=k=v,...] [pattern=regex]")
+	fmt.Println("                         - Add a resource selector (like resourceSelectors)")
+	fmt.Println("                           Example: :select kind=Order")
+	fmt.Println("                           Example: :select kind=Pet labels=env=prod")
+	fmt.Println("                           Example: :select kind=Order pattern=^test-")
+	fmt.Println("  :resource kind=X name=Y [namespace=Z]")
+	fmt.Println("                         - Add an explicit resource reference")
+	fmt.Println("                           Example: :resource kind=Order name=my-order")
+	fmt.Println("  :fetch                 - Fetch resources from Kubernetes based on selectors")
+	fmt.Println("  :clear                 - Clear all selectors and resource references")
+	fmt.Println("  :selectors             - Show current selectors and references")
+	fmt.Println("  :cr                    - Show loaded CR info")
+
+	fmt.Println("\nBundle Commands:")
+	fmt.Println("  :create                - Create child resources from Bundle CR")
+	fmt.Println("  :create --dry-run      - Show what would be created without creating")
+	fmt.Println()
+}
+
+// handleUseCommand handles the :use Kind/Name command to select a CR from Kubernetes
+func handleUseCommand(args string, testData *TestData) (*TestData, *cel.Env, error) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return testData, nil, fmt.Errorf("usage: :use Kind/Name (e.g., :use PetstoreAggregate/my-aggregate)")
+	}
+
+	kind, name, err := parseCRName(args)
+	if err != nil {
+		return testData, nil, err
+	}
+
+	// Ensure we have an API group
+	if apiGroup == "" {
+		return testData, nil, fmt.Errorf("--api-group is required when using :use command")
+	}
+
+	// Get or reuse Kubernetes client
+	if interactiveClient == nil {
+		client, cleanup, err := getKubernetesClient()
+		if err != nil {
+			return testData, nil, fmt.Errorf("failed to get Kubernetes client: %w", err)
+		}
+		interactiveClient = client
+		interactiveCleanup = cleanup
+	}
+
+	// Fetch the CR
+	cr, err := fetchCRFromCluster(interactiveClient, kind, name, kubeNamespace)
+	if err != nil {
+		return testData, nil, err
+	}
+
+	// Update global state
+	loadedCR = cr
+	derivedValues = cr.Spec.DerivedValues
+
+	// Copy selectors from CR
+	interactiveSelectors = cr.Spec.ResourceSelectors
+	interactiveResources = cr.Spec.Resources
+
+	fmt.Printf("Loaded %s/%s\n", kind, name)
+	fmt.Printf("  DerivedValues: %d\n", len(cr.Spec.DerivedValues))
+	fmt.Printf("  ResourceSelectors: %d\n", len(cr.Spec.ResourceSelectors))
+	fmt.Printf("  Resources: %d\n", len(cr.Spec.Resources))
+
+	// Ask if user wants to fetch resources now
+	fmt.Println("\nUse :fetch to load resources based on CR selectors, or add more with :select/:resource")
+
+	// If CR has status data, use that for now
+	if len(cr.Status.Resources) > 0 || cr.Status.Summary != nil {
+		testData = convertCRStatusToTestData(cr, nil)
+		env, err := createCELEnv(testData)
+		if err != nil {
+			return testData, nil, fmt.Errorf("failed to create CEL environment: %w", err)
+		}
+		return testData, env, nil
+	}
+
+	return testData, nil, nil
+}
+
+// handleSelectCommand handles the :select command to add a resource selector
+// Format: :select kind=X [labels=k1=v1,k2=v2] [pattern=regex]
+func handleSelectCommand(args string) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		fmt.Println("Usage: :select kind=X [labels=k1=v1,k2=v2] [pattern=regex]")
+		fmt.Println("Example: :select kind=Order")
+		fmt.Println("Example: :select kind=Pet labels=env=prod,tier=backend")
+		fmt.Println("Example: :select kind=Order pattern=^test-")
+		return
+	}
+
+	selector := make(map[string]interface{})
+	parts := strings.Fields(args)
+
+	for _, part := range parts {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			fmt.Printf("Invalid format: %s (expected key=value)\n", part)
+			return
+		}
+		key, value := kv[0], kv[1]
+
+		switch key {
+		case "kind":
+			selector["kind"] = value
+		case "labels":
+			// Parse labels as k1=v1,k2=v2
+			labelMap := make(map[string]interface{})
+			labelPairs := strings.Split(value, ",")
+			for _, lp := range labelPairs {
+				lkv := strings.SplitN(lp, "=", 2)
+				if len(lkv) == 2 {
+					labelMap[lkv[0]] = lkv[1]
+				}
+			}
+			if len(labelMap) > 0 {
+				selector["matchLabels"] = labelMap
+			}
+		case "pattern":
+			selector["namePattern"] = value
+		default:
+			fmt.Printf("Unknown key: %s (use kind, labels, or pattern)\n", key)
+			return
+		}
+	}
+
+	// Parse and validate using shared package
+	sel := aggregate.ParseResourceSelector(selector)
+	if !sel.IsValid() {
+		fmt.Println("Error: 'kind' is required")
+		return
+	}
+
+	// Validate regex pattern if specified
+	if sel.NamePattern != "" {
+		_, err := aggregate.CompileSelector(sel)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+	}
+
+	interactiveSelectors = append(interactiveSelectors, selector)
+	fmt.Printf("Added selector: %v\n", selector)
+	fmt.Printf("Total selectors: %d\n", len(interactiveSelectors))
+}
+
+// handleResourceCommand handles the :resource command to add an explicit resource reference
+// Format: :resource kind=X name=Y [namespace=Z]
+func handleResourceCommand(args string) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		fmt.Println("Usage: :resource kind=X name=Y [namespace=Z]")
+		fmt.Println("Example: :resource kind=Order name=my-order")
+		fmt.Println("Example: :resource kind=Pet name=fluffy namespace=pets")
+		return
+	}
+
+	resource := make(map[string]interface{})
+	parts := strings.Fields(args)
+
+	for _, part := range parts {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			fmt.Printf("Invalid format: %s (expected key=value)\n", part)
+			return
+		}
+		key, value := kv[0], kv[1]
+
+		switch key {
+		case "kind":
+			resource["kind"] = value
+		case "name":
+			resource["name"] = value
+		case "namespace":
+			resource["namespace"] = value
+		default:
+			fmt.Printf("Unknown key: %s (use kind, name, or namespace)\n", key)
+			return
+		}
+	}
+
+	if _, ok := resource["kind"]; !ok {
+		fmt.Println("Error: 'kind' is required")
+		return
+	}
+	if _, ok := resource["name"]; !ok {
+		fmt.Println("Error: 'name' is required")
+		return
+	}
+
+	interactiveResources = append(interactiveResources, resource)
+	fmt.Printf("Added resource: %v\n", resource)
+	fmt.Printf("Total explicit resources: %d\n", len(interactiveResources))
+}
+
+// handleFetchCommand handles the :fetch command to fetch resources from Kubernetes
+func handleFetchCommand(testData *TestData) (*TestData, *cel.Env, error) {
+	if len(interactiveSelectors) == 0 && len(interactiveResources) == 0 {
+		return testData, nil, fmt.Errorf("no selectors defined. Use :select or :resource to add selectors, or :use to load a CR")
+	}
+
+	if apiGroup == "" {
+		return testData, nil, fmt.Errorf("--api-group is required for fetching resources")
+	}
+
+	// Get or reuse Kubernetes client
+	if interactiveClient == nil {
+		client, cleanup, err := getKubernetesClient()
+		if err != nil {
+			return testData, nil, fmt.Errorf("failed to get Kubernetes client: %w", err)
+		}
+		interactiveClient = client
+		interactiveCleanup = cleanup
+	}
+
+	// Build a temporary CRDocument to use fetchResourcesFromCR
+	tempCR := &CRDocument{
+		Metadata: map[string]interface{}{
+			"namespace": kubeNamespace,
+		},
+		Spec: CRSpec{
+			ResourceSelectors: interactiveSelectors,
+			Resources:         interactiveResources,
+		},
+	}
+
+	// If we have a loaded CR, use its namespace as default
+	if loadedCR != nil && tempCR.Metadata["namespace"] == "" {
+		if ns, ok := loadedCR.Metadata["namespace"].(string); ok {
+			tempCR.Metadata["namespace"] = ns
+		}
+	}
+
+	// Fetch resources
+	newTestData, err := fetchResourcesFromCR(interactiveClient, tempCR)
+	if err != nil {
+		return testData, nil, err
+	}
+
+	fmt.Printf("Fetched %d resources:\n", len(newTestData.Resources))
+	for kind, resources := range newTestData.KindLists {
+		fmt.Printf("  %s: %d\n", kind, len(resources))
+	}
+	fmt.Printf("Summary: total=%d, synced=%d, failed=%d, pending=%d\n",
+		newTestData.Summary["total"],
+		newTestData.Summary["synced"],
+		newTestData.Summary["failed"],
+		newTestData.Summary["pending"])
+
+	// Create new CEL environment with the fetched data
+	env, err := createCELEnv(newTestData)
+	if err != nil {
+		return newTestData, nil, fmt.Errorf("failed to create CEL environment: %w", err)
+	}
+
+	return newTestData, env, nil
+}
+
+// handleClearCommand handles the :clear command to clear all selectors
+func handleClearCommand() {
+	interactiveSelectors = nil
+	interactiveResources = nil
+	fmt.Println("Cleared all selectors and resource references")
+}
+
+// printSelectors prints current selectors and resource references
+func printSelectors() {
+	fmt.Println("\nCurrent Resource Selection:")
+
+	if len(interactiveSelectors) == 0 && len(interactiveResources) == 0 {
+		fmt.Println("  (none defined)")
+		fmt.Println("\nUse :select or :resource to add selectors, or :use to load a CR")
+	} else {
+		if len(interactiveSelectors) > 0 {
+			fmt.Printf("\nResource Selectors (%d):\n", len(interactiveSelectors))
+			for i, sel := range interactiveSelectors {
+				kind, _ := sel["kind"].(string)
+				fmt.Printf("  %d. kind=%s", i+1, kind)
+				if labels, ok := sel["matchLabels"].(map[string]interface{}); ok && len(labels) > 0 {
+					labelStrs := []string{}
+					for k, v := range labels {
+						labelStrs = append(labelStrs, fmt.Sprintf("%s=%v", k, v))
+					}
+					fmt.Printf(" labels=%s", strings.Join(labelStrs, ","))
+				}
+				if pattern, ok := sel["namePattern"].(string); ok && pattern != "" {
+					fmt.Printf(" pattern=%s", pattern)
+				}
+				fmt.Println()
+			}
+		}
+
+		if len(interactiveResources) > 0 {
+			fmt.Printf("\nExplicit Resources (%d):\n", len(interactiveResources))
+			for i, res := range interactiveResources {
+				kind, _ := res["kind"].(string)
+				name, _ := res["name"].(string)
+				namespace, _ := res["namespace"].(string)
+				if namespace == "" {
+					namespace = "(default)"
+				}
+				fmt.Printf("  %d. %s/%s in %s\n", i+1, kind, name, namespace)
+			}
+		}
+	}
+	fmt.Println()
+}
+
+// printCRInfo prints information about the currently loaded CR
+func printCRInfo() {
+	if loadedCR == nil {
+		fmt.Println("\nNo CR loaded")
+		fmt.Println("Use :use Kind/Name or --cr/--cr-name to load a CR")
+		return
+	}
+
+	fmt.Printf("\nLoaded CR:\n")
+	fmt.Printf("  Kind: %s\n", loadedCR.Kind)
+	fmt.Printf("  Name: %v\n", loadedCR.Metadata["name"])
+	fmt.Printf("  Namespace: %v\n", loadedCR.Metadata["namespace"])
+	fmt.Printf("  APIVersion: %s\n", loadedCR.APIVersion)
+
+	if len(derivedValues) > 0 {
+		fmt.Printf("\nDerived Values (%d):\n", len(derivedValues))
+		for i, dv := range derivedValues {
+			fmt.Printf("  %d. %s: %s\n", i+1, dv.Name, dv.Expression)
+		}
+	}
+
+	if len(loadedCR.Spec.ResourceSelectors) > 0 {
+		fmt.Printf("\nCR ResourceSelectors (%d):\n", len(loadedCR.Spec.ResourceSelectors))
+		for i, sel := range loadedCR.Spec.ResourceSelectors {
+			kind, _ := sel["kind"].(string)
+			fmt.Printf("  %d. kind=%s\n", i+1, kind)
+		}
+	}
+
+	if len(loadedCR.Spec.Resources) > 0 {
+		fmt.Printf("\nCR Resources (%d):\n", len(loadedCR.Spec.Resources))
+		for i, res := range loadedCR.Spec.Resources {
+			kind, _ := res["kind"].(string)
+			name, _ := res["name"].(string)
+			fmt.Printf("  %d. %s/%s\n", i+1, kind, name)
+		}
+	}
+
+	// Show Bundle-specific info
+	if isBundleCR(loadedCR) {
+		fmt.Println("\nThis is a Bundle CR. Use :create to create child resources.")
+	}
+
+	fmt.Println()
+}
+
+// ==================== Bundle Resource Creation ====================
+
+// isBundleCR detects if the loaded CR is a Bundle (has spec.resources with id and embedded spec)
+// rather than an Aggregate (has spec.resources with kind/name references or spec.resourceSelectors)
+func isBundleCR(cr *CRDocument) bool {
+	if cr == nil || len(cr.Spec.Resources) == 0 {
+		return false
+	}
+
+	// Bundle CRs have resources with "id" and embedded "spec"
+	for _, res := range cr.Spec.Resources {
+		if _, hasID := res["id"]; hasID {
+			if _, hasSpec := res["spec"]; hasSpec {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseBundleResources parses Bundle resource specifications from a CR
+func parseBundleResources(cr *CRDocument) ([]bundle.ResourceSpec, error) {
+	if cr == nil {
+		return nil, fmt.Errorf("no CR loaded")
+	}
+
+	var resources []bundle.ResourceSpec
+	for i, res := range cr.Spec.Resources {
+		br := bundle.ResourceSpec{}
+
+		// Parse ID (required)
+		if id, ok := res["id"].(string); ok {
+			br.ID = id
+		} else {
+			return nil, fmt.Errorf("resource %d: 'id' is required", i)
+		}
+
+		// Parse Kind (required)
+		if kind, ok := res["kind"].(string); ok {
+			br.Kind = kind
+		} else {
+			return nil, fmt.Errorf("resource %d (%s): 'kind' is required", i, br.ID)
+		}
+
+		// Parse Spec (required)
+		if spec, ok := res["spec"].(map[string]interface{}); ok {
+			br.Spec = spec
+		} else {
+			return nil, fmt.Errorf("resource %d (%s): 'spec' is required", i, br.ID)
+		}
+
+		// Parse DependsOn (optional)
+		if dependsOn, ok := res["dependsOn"].([]interface{}); ok {
+			for _, dep := range dependsOn {
+				if depStr, ok := dep.(string); ok {
+					br.DependsOn = append(br.DependsOn, depStr)
+				}
+			}
+		}
+
+		// Parse SkipWhen (optional)
+		if skipWhen, ok := res["skipWhen"].([]interface{}); ok {
+			for _, sw := range skipWhen {
+				if swStr, ok := sw.(string); ok {
+					br.SkipWhen = append(br.SkipWhen, swStr)
+				}
+			}
+		}
+
+		// Parse ReadyWhen (optional)
+		if readyWhen, ok := res["readyWhen"].([]interface{}); ok {
+			for _, rw := range readyWhen {
+				if rwStr, ok := rw.(string); ok {
+					br.ReadyWhen = append(br.ReadyWhen, rwStr)
+				}
+			}
+		}
+
+		resources = append(resources, br)
+	}
+
+	return resources, nil
+}
+
+// Note: buildExecutionOrder, extractDependenciesFromSpec, findResourceReferences, and isValidResourceID
+// are now provided by the bundle package. Use bundle.BuildExecutionOrderSimple() instead.
+
+// handleCreateCommand handles the :create command to create Bundle child resources
+func handleCreateCommand(testData *TestData, dryRun bool) (*TestData, *cel.Env, error) {
+	if loadedCR == nil {
+		return testData, nil, fmt.Errorf("no CR loaded. Use :use Kind/Name or --cr to load a Bundle CR first")
+	}
+
+	if !isBundleCR(loadedCR) {
+		return testData, nil, fmt.Errorf("loaded CR is not a Bundle (no spec.resources with id and embedded spec)")
+	}
+
+	if apiGroup == "" {
+		return testData, nil, fmt.Errorf("--api-group is required for creating resources")
+	}
+
+	// Parse bundle resources
+	resources, err := parseBundleResources(loadedCR)
+	if err != nil {
+		return testData, nil, fmt.Errorf("failed to parse bundle resources: %w", err)
+	}
+
+	if len(resources) == 0 {
+		return testData, nil, fmt.Errorf("no resources defined in bundle")
+	}
+
+	// Build execution order
+	order, err := bundle.BuildExecutionOrderSimple(resources)
+	if err != nil {
+		return testData, nil, fmt.Errorf("failed to build execution order: %w", err)
+	}
+
+	// Build resource map for quick lookup
+	resourceMap := make(map[string]bundle.ResourceSpec)
+	for _, res := range resources {
+		resourceMap[res.ID] = res
+	}
+
+	// Get bundle name and namespace
+	bundleName := ""
+	if name, ok := loadedCR.Metadata["name"].(string); ok {
+		bundleName = name
+	} else {
+		bundleName = "bundle"
+	}
+
+	bundleNamespace := "default"
+	if ns, ok := loadedCR.Metadata["namespace"].(string); ok && ns != "" {
+		bundleNamespace = ns
+	}
+	if kubeNamespace != "" {
+		bundleNamespace = kubeNamespace
+	}
+
+	if dryRun {
+		fmt.Println("\n=== Dry Run: Would create the following resources ===")
+		for i, id := range order {
+			res := resourceMap[id]
+			childName := fmt.Sprintf("%s-%s", bundleName, id)
+			fmt.Printf("%d. %s/%s/%s\n", i+1, res.Kind, bundleNamespace, childName)
+			if len(res.DependsOn) > 0 {
+				fmt.Printf("   DependsOn: %v\n", res.DependsOn)
+			}
+			specJSON, _ := json.MarshalIndent(res.Spec, "   ", "  ")
+			fmt.Printf("   Spec: %s\n", string(specJSON))
+		}
+		fmt.Printf("\nTotal: %d resources would be created\n", len(order))
+		return testData, nil, nil
+	}
+
+	// Get or reuse Kubernetes client
+	if interactiveClient == nil {
+		client, cleanup, err := getKubernetesClient()
+		if err != nil {
+			return testData, nil, fmt.Errorf("failed to get Kubernetes client: %w", err)
+		}
+		interactiveClient = client
+		interactiveCleanup = cleanup
+	}
+
+	// Create resources in order
+	created := make([]CreatedResource, 0, len(order))
+	createdStatus := make(map[string]map[string]interface{}) // Track status for expression resolution
+
+	fmt.Println("\n=== Creating Bundle Resources ===")
+	for _, id := range order {
+		res := resourceMap[id]
+		childName := fmt.Sprintf("%s-%s", bundleName, id)
+
+		fmt.Printf("Creating %s/%s/%s...", res.Kind, bundleNamespace, childName)
+
+		// Resolve any ${resources.<id>.status.<field>} expressions in spec
+		resolvedSpec, resolveErr := bundle.ResolveExpressions(res.Spec, createdStatus)
+		if resolveErr != nil {
+			// Use original spec if resolution fails
+			resolvedSpec = res.Spec
+		}
+
+		// Create the resource
+		err := createChildResource(interactiveClient, res.Kind, childName, bundleNamespace, resolvedSpec)
+		if err != nil {
+			fmt.Printf(" FAILED: %v\n", err)
+			// Continue with other resources
+			continue
+		}
+
+		fmt.Println(" created")
+
+		// Track created resource
+		cr := CreatedResource{
+			ID:        id,
+			Kind:      res.Kind,
+			Name:      childName,
+			Namespace: bundleNamespace,
+			Status:    map[string]interface{}{"state": "Pending"},
+		}
+		created = append(created, cr)
+		createdStatus[id] = map[string]interface{}{
+			"status": cr.Status,
+		}
+	}
+
+	fmt.Printf("\nCreated %d/%d resources\n", len(created), len(order))
+
+	// Update test data with created resources
+	if len(created) > 0 {
+		fmt.Println("\nUse :fetch to reload resources with their current status")
+	}
+
+	return testData, nil, nil
+}
+
+// createChildResource creates a single child resource in Kubernetes
+func createChildResource(client dynamic.Interface, kind, name, namespace string, spec map[string]interface{}) error {
+	ctx := context.Background()
+
+	// Build the unstructured resource
+	resource := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": fmt.Sprintf("%s/%s", apiGroup, apiVersion),
+			"kind":       kind,
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": spec,
+		},
+	}
+
+	// Get the GVR
+	gvr := schema.GroupVersionResource{
+		Group:    apiGroup,
+		Version:  apiVersion,
+		Resource: aggregate.KindToResourceName(kind),
+	}
+
+	// Check if resource already exists
+	existing, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		// Resource exists, update it
+		resource.SetResourceVersion(existing.GetResourceVersion())
+		_, err = client.Resource(gvr).Namespace(namespace).Update(ctx, resource, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update: %w", err)
+		}
+		return nil
+	}
+
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to check existing resource: %w", err)
+	}
+
+	// Create new resource
+	_, err = client.Resource(gvr).Namespace(namespace).Create(ctx, resource, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create: %w", err)
+	}
+
+	return nil
 }

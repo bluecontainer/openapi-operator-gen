@@ -116,7 +116,8 @@ func TestOrderReconciler_E2E(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	// Create fake client with the object
@@ -202,7 +203,8 @@ func TestOrderReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -285,7 +287,8 @@ func TestOrderReconciler_CreateResource(t *testing.T) {
 			Name:      "new-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -348,7 +351,8 @@ func TestOrderReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -411,7 +415,8 @@ func TestOrderReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -474,7 +479,8 @@ func TestOrderReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -543,7 +549,8 @@ func TestOrderReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -598,7 +605,8 @@ func TestOrderReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -654,7 +662,8 @@ func TestOrderReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -771,7 +780,8 @@ func TestOrderReconciler_URLAndResponseConsistency(t *testing.T) {
 			Name:      "test-order",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.OrderSpec{},
+		Spec: v1alpha1.OrderSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -866,3 +876,4 @@ func TestOrderReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
