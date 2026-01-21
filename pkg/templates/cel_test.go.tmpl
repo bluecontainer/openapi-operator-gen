@@ -35,7 +35,7 @@ func TestCELEnvironment(t *testing.T) {
 		cel.Variable("summary", cel.MapType(cel.StringType, cel.IntType)),
 		// Kind-specific variables
 		{{- range .AllKinds }}
-		cel.Variable("{{ . | lower }}s", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
+		cel.Variable("{{ . | pluralize }}", cel.ListType(cel.MapType(cel.StringType, cel.DynType))),
 		{{- end }}
 		// Custom aggregate functions
 		cel.Function("sum",

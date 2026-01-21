@@ -26,5 +26,6 @@ cover.out
 .DS_Store
 Thumbs.db
 
+**/k3s-output/
 # Generated examples (optional - uncomment to ignore)
 # examples/generated/

@@ -121,7 +121,7 @@
 {{- range $idx, $kind := .AllKinds }}
     {{- if not $first }},{{ end }}
     {{- $first = false }}
-    "{{ $kind | lower }}s": [
+    "{{ $kind | pluralize }}": [
       {
         "kind": "{{ $kind }}",
         "metadata": {"name": "{{ $kind | lower }}-001", "namespace": "default"},

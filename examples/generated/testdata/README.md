@@ -92,7 +92,7 @@ For testing multiple expressions interactively:
 ```bash
 ./bin/cel-test interactive \
   --data path/to/testdata/cel-test-data.json \
-  --kinds orders,pets,users,petfindbystatusquerys,petfindbytagsquerys,storeinventoryquerys,userloginquerys,userlogoutquerys,petuploadimageactions,usercreatewithlistactions
+  --kinds orders,pets,users,petfindbystatusqueries,petfindbytagsqueries,storeinventoryqueries,userloginqueries,userlogoutqueries,petuploadimageactions,usercreatewithlistactions
 ```
 
 Then enter expressions at the prompt:
@@ -145,11 +145,11 @@ spec:
 | `orders` | `list<map>` | Order resources only |
 | `pets` | `list<map>` | Pet resources only |
 | `users` | `list<map>` | User resources only |
-| `petfindbystatusquerys` | `list<map>` | PetFindbystatusQuery resources only |
-| `petfindbytagsquerys` | `list<map>` | PetFindbytagsQuery resources only |
-| `storeinventoryquerys` | `list<map>` | StoreInventoryQuery resources only |
-| `userloginquerys` | `list<map>` | UserLoginQuery resources only |
-| `userlogoutquerys` | `list<map>` | UserLogoutQuery resources only |
+| `petfindbystatusqueries` | `list<map>` | PetFindbystatusQuery resources only |
+| `petfindbytagsqueries` | `list<map>` | PetFindbytagsQuery resources only |
+| `storeinventoryqueries` | `list<map>` | StoreInventoryQuery resources only |
+| `userloginqueries` | `list<map>` | UserLoginQuery resources only |
+| `userlogoutqueries` | `list<map>` | UserLogoutQuery resources only |
 | `petuploadimageactions` | `list<map>` | PetUploadimageAction resources only |
 | `usercreatewithlistactions` | `list<map>` | UserCreatewithlistAction resources only |
 
@@ -193,11 +193,11 @@ The test data follows this structure:
     "orders": [...]
     ,"pets": [...]
     ,"users": [...]
-    ,"petfindbystatusquerys": [...]
-    ,"petfindbytagsquerys": [...]
-    ,"storeinventoryquerys": [...]
-    ,"userloginquerys": [...]
-    ,"userlogoutquerys": [...]
+    ,"petfindbystatusqueries": [...]
+    ,"petfindbytagsqueries": [...]
+    ,"storeinventoryqueries": [...]
+    ,"userloginqueries": [...]
+    ,"userlogoutqueries": [...]
     ,"petuploadimageactions": [...]
     ,"usercreatewithlistactions": [...]
   }

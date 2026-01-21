@@ -161,16 +161,32 @@ func ResourceKey(kind, namespace, name string) string {
 }
 
 // KindToVariableName converts a Kind name to a CEL variable name (lowercase plural).
-// Example: "Order" -> "orders", "Pet" -> "pets"
+// Example: "Order" -> "orders", "Pet" -> "pets", "StoreInventoryQuery" -> "storeinventoryqueries"
+// Uses the same pluralization rules as KindToResourceName for consistency.
 func KindToVariableName(kind string) string {
-	return strings.ToLower(kind) + "s"
+	return KindToResourceName(kind)
 }
 
 // KindToResourceName converts a Kind name to a Kubernetes resource name (lowercase plural).
-// Example: "Order" -> "orders", "Pet" -> "pets"
-// Note: This is a simple pluralization. For irregular plurals, use a proper pluralizer.
+// Example: "Order" -> "orders", "Pet" -> "pets", "StoreInventoryQuery" -> "storeinventoryqueries"
 func KindToResourceName(kind string) string {
-	return strings.ToLower(kind) + "s"
+	lower := strings.ToLower(kind)
+	// Handle common irregular pluralizations
+	if strings.HasSuffix(lower, "query") {
+		return lower[:len(lower)-1] + "ies" // query -> queries
+	}
+	if strings.HasSuffix(lower, "y") && len(lower) > 1 {
+		// Check if preceded by a consonant (not a vowel)
+		prev := lower[len(lower)-2]
+		if prev != 'a' && prev != 'e' && prev != 'i' && prev != 'o' && prev != 'u' {
+			return lower[:len(lower)-1] + "ies" // e.g., policy -> policies
+		}
+	}
+	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") ||
+		strings.HasSuffix(lower, "ch") || strings.HasSuffix(lower, "sh") {
+		return lower + "es" // e.g., class -> classes, box -> boxes
+	}
+	return lower + "s"
 }
 
 // DynamicFetcher provides methods for fetching resources using a dynamic client.

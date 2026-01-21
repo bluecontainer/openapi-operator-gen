@@ -145,10 +145,26 @@ func ObjectToMap(obj any) (map[string]any, error) {
 	return result, nil
 }
 
-// KindToVariableName converts a Kind name to its CEL variable name.
-// For example: "Order" -> "orders", "Pet" -> "pets", "PetFindbystatusQuery" -> "petfindbystatusquerys"
+// KindToVariableName converts a Kind name to its CEL variable name (properly pluralized).
+// For example: "Order" -> "orders", "Pet" -> "pets", "PetFindbystatusQuery" -> "petfindbystatusqueries"
 func KindToVariableName(kind string) string {
-	return strings.ToLower(kind) + "s"
+	lower := strings.ToLower(kind)
+	// Handle common irregular pluralizations
+	if strings.HasSuffix(lower, "query") {
+		return lower[:len(lower)-1] + "ies" // query -> queries
+	}
+	if strings.HasSuffix(lower, "y") && len(lower) > 1 {
+		// Check if preceded by a consonant (not a vowel)
+		prev := lower[len(lower)-2]
+		if prev != 'a' && prev != 'e' && prev != 'i' && prev != 'o' && prev != 'u' {
+			return lower[:len(lower)-1] + "ies" // e.g., policy -> policies
+		}
+	}
+	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") ||
+		strings.HasSuffix(lower, "ch") || strings.HasSuffix(lower, "sh") {
+		return lower + "es" // e.g., class -> classes, box -> boxes
+	}
+	return lower + "s"
 }
 
 // ComputedValue represents a derived value computed from a CEL expression.

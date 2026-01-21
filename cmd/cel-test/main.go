@@ -1184,7 +1184,7 @@ func convertCRStatusToTestData(cr *CRDocument, resourceCRs map[string]*ResourceC
 
 		// Build kind-specific lists
 		if kindStr != "" {
-			kindKey := strings.ToLower(kindStr) + "s"
+			kindKey := aggregate.KindToVariableName(kindStr)
 			testData.KindLists[kindKey] = append(testData.KindLists[kindKey], resource)
 		}
 	}
@@ -1755,7 +1755,7 @@ func fetchCRFromCluster(client dynamic.Interface, kind, name, namespace string) 
 
 	// Build GVR for the CR
 	// The resource name is the lowercase plural of the kind
-	resourceName := strings.ToLower(kind) + "s"
+	resourceName := aggregate.KindToResourceName(kind)
 	gvr := schema.GroupVersionResource{
 		Group:    apiGroup,
 		Version:  apiVersion,
@@ -1862,7 +1862,7 @@ func fetchResourcesFromCluster(client dynamic.Interface, kinds []string) (*TestD
 		gvr := schema.GroupVersionResource{
 			Group:    apiGroup,
 			Version:  apiVersion,
-			Resource: strings.ToLower(kind) + "s", // Pluralize (simple approach)
+			Resource: aggregate.KindToResourceName(kind),
 		}
 
 		var list *unstructured.UnstructuredList
@@ -1879,7 +1879,7 @@ func fetchResourcesFromCluster(client dynamic.Interface, kinds []string) (*TestD
 			continue
 		}
 
-		kindKey := strings.ToLower(kind) + "s"
+		kindKey := aggregate.KindToVariableName(kind)
 		testData.KindLists[kindKey] = []map[string]interface{}{}
 
 		for _, item := range list.Items {

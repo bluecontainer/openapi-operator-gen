@@ -512,7 +512,8 @@ func TestKindToVariableName(t *testing.T) {
 		{"Order", "orders"},
 		{"Pet", "pets"},
 		{"User", "users"},
-		{"PetFindbystatusQuery", "petfindbystatusquerys"},
+		{"PetFindbystatusQuery", "petfindbystatusqueries"},
+		{"StoreInventoryQuery", "storeinventoryqueries"},
 	}
 
 	for _, tt := range tests {
@@ -532,6 +533,22 @@ func TestKindToResourceName(t *testing.T) {
 		{"Order", "orders"},
 		{"Pet", "pets"},
 		{"User", "users"},
+		// Query types (y -> ies)
+		{"StoreInventoryQuery", "storeinventoryqueries"},
+		{"PetFindbystatusQuery", "petfindbystatusqueries"},
+		{"PetFindbytagsQuery", "petfindbytagsqueries"},
+		{"UserLoginQuery", "userloginqueries"},
+		// Policy types (y -> ies when preceded by consonant)
+		{"Policy", "policies"},
+		{"NetworkPolicy", "networkpolicies"},
+		// Words ending in vowel+y (just add s)
+		{"Key", "keys"},
+		{"Day", "days"},
+		// Words ending in s, x, ch, sh (add es)
+		{"Class", "classes"},
+		{"Box", "boxes"},
+		{"Match", "matches"},
+		{"Mesh", "meshes"},
 	}
 
 	for _, tt := range tests {

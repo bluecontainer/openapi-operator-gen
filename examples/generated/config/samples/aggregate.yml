@@ -1,0 +1,17 @@
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: specific-resources
+spec:
+  # Explicitly reference resources by name
+  resources:
+    - kind: StoreInventoryQuery
+      name: storeinventoryquery-sample
+      # namespace: other-ns  # Optional: defaults to aggregate's namespace
+    - kind: PetFindbystatusQuery
+      name: petfindbystatusquery-sample
+      # namespace: other-ns  # Optional: defaults to aggregate's namespace
+  aggregationStrategy: AllHealthy
+  derivedValues:
+    - name: approvedCount
+      expression: "sum(storeinventoryqueries.map(r, r.status.results.data.approved))"

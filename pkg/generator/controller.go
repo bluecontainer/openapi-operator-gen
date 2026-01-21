@@ -14,10 +14,17 @@ import (
 	"time"
 
 	"github.com/bluecontainer/openapi-operator-gen/internal/config"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/aggregate"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/mapper"
 	"github.com/bluecontainer/openapi-operator-gen/pkg/templates"
 	"github.com/iancoleman/strcase"
 )
+
+// pluralize converts a Kind name to its lowercase plural form for Kubernetes resource names.
+// This is used as a template function to generate proper plural forms (e.g., query -> queries).
+func pluralize(kind string) string {
+	return aggregate.KindToResourceName(kind)
+}
 
 // ControllerGenerator generates controller reconciliation logic
 type ControllerGenerator struct {
@@ -1098,7 +1105,8 @@ func (g *ControllerGenerator) GenerateAggregateController(aggregate *mapper.Aggr
 	fp := filepath.Join(controllerDir, filename)
 
 	tmpl, err := template.New("aggregate_controller").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
+		"lower":     strings.ToLower,
+		"pluralize": pluralize,
 	}).Parse(templates.AggregateControllerTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
@@ -1159,7 +1167,8 @@ func (g *ControllerGenerator) GenerateBundleController(bundle *mapper.BundleDefi
 	fp := filepath.Join(controllerDir, filename)
 
 	tmpl, err := template.New("bundle_controller").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
+		"lower":     strings.ToLower,
+		"pluralize": pluralize,
 	}).Parse(templates.BundleControllerTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
@@ -1201,7 +1210,8 @@ func (g *ControllerGenerator) GenerateCELTest(allKinds []string) error {
 	fp := filepath.Join(controllerDir, "cel_test.go")
 
 	tmpl, err := template.New("cel_test").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
+		"lower":     strings.ToLower,
+		"pluralize": pluralize,
 	}).Parse(templates.CELTestTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
@@ -1255,7 +1265,8 @@ func (g *ControllerGenerator) GenerateCELTestData(resourceKinds, queryKinds, act
 	}
 
 	funcMap := template.FuncMap{
-		"lower": strings.ToLower,
+		"lower":     strings.ToLower,
+		"pluralize": pluralize,
 		"add": func(a, b int) int {
 			return a + b
 		},

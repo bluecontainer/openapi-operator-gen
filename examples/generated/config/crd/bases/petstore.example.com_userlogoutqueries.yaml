@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: UserLogoutQuery is the Schema for the userlogoutquerys API (Query
+        description: UserLogoutQuery is the Schema for the userlogoutqueries API (Query
           Operation)
         properties:
           apiVersion:

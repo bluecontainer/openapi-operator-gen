@@ -344,7 +344,7 @@
         "status": {"state": "Synced", "externalID": "user-ext-002"}
       }
     ],
-    "petfindbystatusquerys": [
+    "petfindbystatusqueries": [
       {
         "kind": "PetFindbystatusQuery",
         "metadata": {"name": "petfindbystatusquery-001", "namespace": "default"},
@@ -358,7 +358,7 @@
         "status": {"state": "Synced", "externalID": "petfindbystatusquery-ext-002"}
       }
     ],
-    "petfindbytagsquerys": [
+    "petfindbytagsqueries": [
       {
         "kind": "PetFindbytagsQuery",
         "metadata": {"name": "petfindbytagsquery-001", "namespace": "default"},
@@ -372,7 +372,7 @@
         "status": {"state": "Synced", "externalID": "petfindbytagsquery-ext-002"}
       }
     ],
-    "storeinventoryquerys": [
+    "storeinventoryqueries": [
       {
         "kind": "StoreInventoryQuery",
         "metadata": {"name": "storeinventoryquery-001", "namespace": "default"},
@@ -386,7 +386,7 @@
         "status": {"state": "Synced", "externalID": "storeinventoryquery-ext-002"}
       }
     ],
-    "userloginquerys": [
+    "userloginqueries": [
       {
         "kind": "UserLoginQuery",
         "metadata": {"name": "userloginquery-001", "namespace": "default"},
@@ -400,7 +400,7 @@
         "status": {"state": "Synced", "externalID": "userloginquery-ext-002"}
       }
     ],
-    "userlogoutquerys": [
+    "userlogoutqueries": [
       {
         "kind": "UserLogoutQuery",
         "metadata": {"name": "userlogoutquery-001", "namespace": "default"},

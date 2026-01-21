@@ -9,6 +9,28 @@ import (
 	"github.com/iancoleman/strcase"
 )
 
+// pluralize converts a Kind name to its plural form for Kubernetes resource names.
+// Example: "Order" -> "orders", "Pet" -> "pets", "StoreInventoryQuery" -> "storeinventoryqueries"
+func pluralize(kind string) string {
+	lower := strings.ToLower(kind)
+	// Handle common irregular pluralizations
+	if strings.HasSuffix(lower, "query") {
+		return lower[:len(lower)-1] + "ies" // query -> queries
+	}
+	if strings.HasSuffix(lower, "y") && len(lower) > 1 {
+		// Check if preceded by a consonant (not a vowel)
+		prev := lower[len(lower)-2]
+		if prev != 'a' && prev != 'e' && prev != 'i' && prev != 'o' && prev != 'u' {
+			return lower[:len(lower)-1] + "ies" // e.g., policy -> policies
+		}
+	}
+	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") ||
+		strings.HasSuffix(lower, "ch") || strings.HasSuffix(lower, "sh") {
+		return lower + "es" // e.g., class -> classes, box -> boxes
+	}
+	return lower + "s"
+}
+
 // CRDDefinition represents a Kubernetes CRD to be generated
 type CRDDefinition struct {
 	APIGroup     string
@@ -183,7 +205,7 @@ func (m *Mapper) mapQueryEndpoints(queryEndpoints []*parser.QueryEndpoint, known
 			APIGroup:        m.config.APIGroup,
 			APIVersion:      m.config.APIVersion,
 			Kind:            qe.Name,
-			Plural:          strings.ToLower(qe.Name) + "s",
+			Plural:          pluralize(qe.Name),
 			ShortNames:      []string{}, // Query CRDs don't get short names to avoid conflicts
 			Scope:           "Namespaced",
 			Description:     qe.Summary,
@@ -234,7 +256,7 @@ func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, kn
 			APIGroup:       m.config.APIGroup,
 			APIVersion:     m.config.APIVersion,
 			Kind:           ae.Name,
-			Plural:         strings.ToLower(ae.Name) + "s",
+			Plural:         pluralize(ae.Name),
 			ShortNames:     []string{}, // Action CRDs don't get short names to avoid conflicts
 			Scope:          "Namespaced",
 			Description:    ae.Summary,
@@ -489,25 +511,14 @@ func (m *Mapper) mapResponseSchema(crd *CRDDefinition, qe *parser.QueryEndpoint,
 	schema := qe.ResponseSchema
 	crd.ResponseIsArray = qe.ResponseIsArray
 
-	// Check if response references a known resource type (e.g., Pet)
-	if qe.ResponseSchemaRef != "" {
-		// Convert schema ref to PascalCase Kind (e.g., "Pet" -> "Pet")
-		refKind := m.singularize(m.toPascalCase(qe.ResponseSchemaRef))
-
-		if knownKinds[refKind] {
-			// Use the existing resource type
-			crd.UsesSharedType = true
-			crd.ResultItemType = refKind
-			crd.ResultFields = nil // Don't generate fields, use shared type
-
-			if qe.ResponseIsArray {
-				crd.ResponseType = "[]" + refKind
-			} else {
-				crd.ResponseType = "*" + refKind
-			}
-			return
-		}
-	}
+	// NOTE: We intentionally do NOT reuse existing resource types (like PetSpec) for query results.
+	// The Spec types include controller-specific fields (TargetPodOrdinal, TargetHelmRelease,
+	// MergeOnUpdate, OnDelete, etc.) that don't exist in the API response. If we reused PetSpec,
+	// the CRD schema would expect these fields but the API response wouldn't have them, causing
+	// validation errors like "unknown field" and "expected map, got string".
+	//
+	// Instead, we always generate a dedicated result type from the response schema, which only
+	// contains the actual API response fields.
 
 	// Check if response is an array
 	if schema.Type == "array" && schema.Items != nil {
@@ -1446,7 +1457,7 @@ func (m *Mapper) CreateAggregateDefinition(crds []*CRDDefinition) *AggregateDefi
 		APIGroup:      m.config.APIGroup,
 		APIVersion:    m.config.APIVersion,
 		Kind:          aggregateKind,
-		Plural:        strings.ToLower(aggregateKind) + "s",
+		Plural:        pluralize(aggregateKind),
 		ResourceKinds: resourceKinds,
 		QueryKinds:    queryKinds,
 		ActionKinds:   actionKinds,
@@ -1499,7 +1510,7 @@ func (m *Mapper) CreateBundleDefinition(crds []*CRDDefinition) *BundleDefinition
 		APIGroup:      m.config.APIGroup,
 		APIVersion:    m.config.APIVersion,
 		Kind:          bundleKind,
-		Plural:        strings.ToLower(bundleKind) + "s",
+		Plural:        pluralize(bundleKind),
 		ResourceKinds: resourceKinds,
 		QueryKinds:    queryKinds,
 		ActionKinds:   actionKinds,

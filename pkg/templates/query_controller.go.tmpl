@@ -661,6 +661,9 @@ func (r *{{ .Kind }}Reconciler) executeQuery(ctx context.Context, instance *{{ .
 		instance.Status.Results = &endpointResp
 		instance.Status.LastQueryTime = &now
 		instance.Status.Responses = nil
+		parseErrMsg := fmt.Sprintf("failed to parse results: %v", parseErr)
+		logger.Error(parseErr, "Failed to parse query results")
+		r.updateStatus(ctx, instance, "Failed", parseErrMsg, 0)
 		return fmt.Errorf("failed to parse results: %w", parseErr)
 	}
 	endpointResp.Data = data

@@ -97,7 +97,7 @@ type {{ .Kind }}Reconciler struct {
 // +kubebuilder:rbac:groups={{ .APIGroup }},resources={{ .Plural }}/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups={{ .APIGroup }},resources={{ .Plural }}/finalizers,verbs=update
 {{- range .AllKinds }}
-// +kubebuilder:rbac:groups={{ $.APIGroup }},resources={{ . | lower }}s,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups={{ $.APIGroup }},resources={{ . | pluralize }},verbs=get;list;watch;create;update;patch;delete
 {{- end }}
 
 // Reconcile is part of the main kubernetes reconciliation loop
@@ -1118,7 +1118,7 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundl
 	// Create CEL environment using the shared utility
 	kindNames := []string{
 		{{- range .AllKinds }}
-		"{{ . | lower }}s",
+		"{{ . | pluralize }}",
 		{{- end }}
 	}
 	env, err := celutil.NewEnvironment(kindNames)
@@ -1175,7 +1175,7 @@ func (r *{{ .Kind }}Reconciler) buildCELData(ctx context.Context, bundle *{{ .AP
 
 	// Initialize kind-specific lists
 	{{- range .AllKinds }}
-	celDataByKind["{{ . | lower }}s"] = make([]map[string]interface{}, 0)
+	celDataByKind["{{ . | pluralize }}"] = make([]map[string]interface{}, 0)
 	{{- end }}
 
 	// Convert each bundle resource status to CEL data

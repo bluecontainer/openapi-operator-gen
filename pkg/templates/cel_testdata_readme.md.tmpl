@@ -64,10 +64,10 @@ make build-cel-test
 
 ```bash
 {{- range .ResourceKinds }}
-# Count {{ . | lower }}s
-./bin/cel-test eval "{{ . | lower }}s.size()" \
+# Count {{ . | pluralize }}
+./bin/cel-test eval "{{ . | pluralize }}.size()" \
   --data path/to/testdata/cel-test-data.json \
-  --kinds {{ . | lower }}s
+  --kinds {{ . | pluralize }}
 {{- end }}
 
 # Sum values from a numeric field
@@ -86,7 +86,7 @@ For testing multiple expressions interactively:
 ```bash
 ./bin/cel-test interactive \
   --data path/to/testdata/cel-test-data.json \
-  --kinds {{ range $i, $k := .AllKinds }}{{ if $i }},{{ end }}{{ $k | lower }}s{{ end }}
+  --kinds {{ range $i, $k := .AllKinds }}{{ if $i }},{{ end }}{{ $k | pluralize }}{{ end }}
 ```
 
 Then enter expressions at the prompt:
@@ -131,7 +131,7 @@ spec:
 | `resources` | `list<map>` | All resources in the aggregate/bundle |
 | `summary` | `map<string,int>` | Counts: total, synced, failed, pending, skipped |
 {{- range .AllKinds }}
-| `{{ . | lower }}s` | `list<map>` | {{ . }} resources only |
+| `{{ . | pluralize }}` | `list<map>` | {{ . }} resources only |
 {{- end }}
 
 ## Available Functions
@@ -172,7 +172,7 @@ The test data follows this structure:
   ],
   "kindLists": {
 {{- range $i, $k := .AllKinds }}
-    {{ if $i }},{{ end }}"{{ $k | lower }}s": [...]
+    {{ if $i }},{{ end }}"{{ $k | pluralize }}": [...]
 {{- end }}
   }
 }

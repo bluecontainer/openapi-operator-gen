@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: StoreInventoryQuery is the Schema for the storeinventoryquerys
+        description: StoreInventoryQuery is the Schema for the storeinventoryqueries
           API (Query Operation)
         properties:
           apiVersion:

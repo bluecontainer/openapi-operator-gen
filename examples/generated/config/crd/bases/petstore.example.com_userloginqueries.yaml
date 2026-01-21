@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: UserLoginQuery is the Schema for the userloginquerys API (Query
+        description: UserLoginQuery is the Schema for the userloginqueries API (Query
           Operation)
         properties:
           apiVersion:

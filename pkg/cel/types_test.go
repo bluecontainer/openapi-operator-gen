@@ -481,13 +481,19 @@ func TestKindToVariableName(t *testing.T) {
 		{"Order", "orders"},
 		{"Pet", "pets"},
 		{"User", "users"},
-		{"PetFindbystatusQuery", "petfindbystatusquerys"},
+		{"PetFindbystatusQuery", "petfindbystatusqueries"}, // Query -> queries
+		{"StoreInventoryQuery", "storeinventoryqueries"},   // Query -> queries
 		{"OrderAction", "orderactions"},
 		{"A", "as"},
 		{"", "s"},
 		{"UPPERCASE", "uppercases"},
 		{"lowercase", "lowercases"},
 		{"MixedCase", "mixedcases"},
+		// Test proper pluralization rules
+		{"Policy", "policies"}, // y -> ies (consonant + y)
+		{"Key", "keys"},        // y -> s (vowel + y)
+		{"Class", "classes"},   // s -> es
+		{"Box", "boxes"},       // x -> es
 	}
 
 	for _, tt := range tests {
