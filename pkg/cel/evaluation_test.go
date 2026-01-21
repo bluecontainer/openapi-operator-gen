@@ -474,6 +474,282 @@ func TestBuildSummary_ZeroValues(t *testing.T) {
 	}
 }
 
+func TestResourceKey(t *testing.T) {
+	tests := []struct {
+		kind string
+		name string
+		want string
+	}{
+		{"Pet", "fluffy", "pet_fluffy"},
+		{"Order", "sample", "order_sample"},
+		{"StoreInventoryQuery", "test", "storeinventoryquery_test"},
+		{"UPPERCASE", "name", "uppercase_name"},
+		{"mixedCase", "item", "mixedcase_item"},
+		// Names with hyphens should have them replaced with underscores
+		{"Order", "order-001", "order_order_001"},
+		{"Pet", "my-pet-name", "pet_my_pet_name"},
+		{"StoreInventoryQuery", "store-query-1", "storeinventoryquery_store_query_1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.kind+"-"+tt.name, func(t *testing.T) {
+			got := ResourceKey(tt.kind, tt.name)
+			if got != tt.want {
+				t.Errorf("ResourceKey(%q, %q) = %q, want %q", tt.kind, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResourceKeyFromData(t *testing.T) {
+	tests := []struct {
+		name string
+		data map[string]any
+		want string
+	}{
+		{
+			name: "valid data",
+			data: map[string]any{
+				"kind":     "Pet",
+				"metadata": map[string]any{"name": "fluffy"},
+			},
+			want: "pet_fluffy",
+		},
+		{
+			name: "missing kind",
+			data: map[string]any{
+				"metadata": map[string]any{"name": "fluffy"},
+			},
+			want: "",
+		},
+		{
+			name: "missing metadata",
+			data: map[string]any{
+				"kind": "Pet",
+			},
+			want: "",
+		},
+		{
+			name: "missing name in metadata",
+			data: map[string]any{
+				"kind":     "Pet",
+				"metadata": map[string]any{},
+			},
+			want: "",
+		},
+		{
+			name: "empty kind",
+			data: map[string]any{
+				"kind":     "",
+				"metadata": map[string]any{"name": "fluffy"},
+			},
+			want: "",
+		},
+		{
+			name: "empty name",
+			data: map[string]any{
+				"kind":     "Pet",
+				"metadata": map[string]any{"name": ""},
+			},
+			want: "",
+		},
+		{
+			name: "kind is not string",
+			data: map[string]any{
+				"kind":     123,
+				"metadata": map[string]any{"name": "fluffy"},
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResourceKeyFromData(tt.data)
+			if got != tt.want {
+				t.Errorf("ResourceKeyFromData() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectResourceKeys(t *testing.T) {
+	resources := []map[string]any{
+		{
+			"kind":     "Pet",
+			"metadata": map[string]any{"name": "fluffy"},
+		},
+		{
+			"kind":     "Pet",
+			"metadata": map[string]any{"name": "buddy"},
+		},
+		{
+			"kind":     "Order",
+			"metadata": map[string]any{"name": "sample"},
+		},
+		{
+			"kind":     "Pet",
+			"metadata": map[string]any{"name": "fluffy"}, // Duplicate should be ignored
+		},
+		{
+			"kind": "Invalid", // Missing metadata should be ignored
+		},
+	}
+
+	keys := CollectResourceKeys(resources)
+
+	// Should have 3 unique keys
+	if len(keys) != 3 {
+		t.Errorf("CollectResourceKeys() returned %d keys, want 3", len(keys))
+	}
+
+	// Check that expected keys are present
+	keySet := make(map[string]bool)
+	for _, k := range keys {
+		keySet[k] = true
+	}
+
+	expectedKeys := []string{"pet_fluffy", "pet_buddy", "order_sample"}
+	for _, expected := range expectedKeys {
+		if !keySet[expected] {
+			t.Errorf("CollectResourceKeys() missing expected key %q", expected)
+		}
+	}
+}
+
+func TestCollectResourceKeys_Empty(t *testing.T) {
+	keys := CollectResourceKeys(nil)
+	if len(keys) != 0 {
+		t.Errorf("CollectResourceKeys(nil) returned %d keys, want 0", len(keys))
+	}
+
+	keys = CollectResourceKeys([]map[string]any{})
+	if len(keys) != 0 {
+		t.Errorf("CollectResourceKeys([]) returned %d keys, want 0", len(keys))
+	}
+}
+
+func TestBuildVariablesWithResources(t *testing.T) {
+	resources := []map[string]any{
+		{
+			"kind":     "Pet",
+			"metadata": map[string]any{"name": "fluffy", "namespace": "default"},
+			"status":   map[string]any{"state": "Synced"},
+		},
+		{
+			"kind":     "Order",
+			"metadata": map[string]any{"name": "sample", "namespace": "default"},
+			"status":   map[string]any{"state": "Failed"},
+		},
+	}
+
+	summary := map[string]int64{"total": 2, "synced": 1, "failed": 1, "pending": 0}
+
+	kindLists := map[string][]map[string]any{
+		"pets":   {resources[0]},
+		"orders": {resources[1]},
+	}
+
+	vars := BuildVariablesWithResources(resources, summary, kindLists)
+
+	// Verify standard variables are present
+	if _, ok := vars["resources"]; !ok {
+		t.Error("vars missing 'resources'")
+	}
+	if _, ok := vars["summary"]; !ok {
+		t.Error("vars missing 'summary'")
+	}
+	if _, ok := vars["pets"]; !ok {
+		t.Error("vars missing 'pets'")
+	}
+	if _, ok := vars["orders"]; !ok {
+		t.Error("vars missing 'orders'")
+	}
+
+	// Verify resource-specific variables are present
+	petFluffy, ok := vars["pet_fluffy"].(map[string]any)
+	if !ok {
+		t.Error("vars missing 'pet_fluffy' or wrong type")
+	} else {
+		if petFluffy["kind"] != "Pet" {
+			t.Errorf("pet_fluffy.kind = %v, want 'Pet'", petFluffy["kind"])
+		}
+	}
+
+	orderSample, ok := vars["order_sample"].(map[string]any)
+	if !ok {
+		t.Error("vars missing 'order_sample' or wrong type")
+	} else {
+		if orderSample["kind"] != "Order" {
+			t.Errorf("order_sample.kind = %v, want 'Order'", orderSample["kind"])
+		}
+	}
+}
+
+func TestNewEnvironmentWithResources(t *testing.T) {
+	kindNames := []string{"pets", "orders"}
+	resourceKeys := []string{"pet_fluffy", "order_sample"}
+
+	env, err := NewEnvironmentWithResources(kindNames, resourceKeys)
+	if err != nil {
+		t.Fatalf("NewEnvironmentWithResources() error = %v", err)
+	}
+
+	// Test that the environment can compile expressions using resource-specific variables
+	tests := []struct {
+		name       string
+		expression string
+		vars       map[string]any
+		want       any
+	}{
+		{
+			name:       "access pet_fluffy status",
+			expression: `pet_fluffy.status.state`,
+			want:       "Synced",
+		},
+		{
+			name:       "access order_sample status",
+			expression: `order_sample.status.state`,
+			want:       "Failed",
+		},
+		{
+			name:       "compare resource-specific values",
+			expression: `pet_fluffy.status.state == "Synced"`,
+			want:       true,
+		},
+	}
+
+	baseVars := map[string]any{
+		"resources": []map[string]any{},
+		"summary":   map[string]int64{"total": 2, "synced": 1, "failed": 1},
+		"pets":      []map[string]any{},
+		"orders":    []map[string]any{},
+		"pet_fluffy": map[string]any{
+			"kind":     "Pet",
+			"metadata": map[string]any{"name": "fluffy"},
+			"status":   map[string]any{"state": "Synced"},
+		},
+		"order_sample": map[string]any{
+			"kind":     "Order",
+			"metadata": map[string]any{"name": "sample"},
+			"status":   map[string]any{"state": "Failed"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Evaluate(env, tt.expression, baseVars)
+			if result.Error != nil {
+				t.Errorf("Evaluate() error = %v", result.Error)
+				return
+			}
+			if result.Value != tt.want {
+				t.Errorf("Evaluate() = %v, want %v", result.Value, tt.want)
+			}
+		})
+	}
+}
+
 func TestEvaluate_ComplexExpressions(t *testing.T) {
 	env, err := NewEnvironment([]string{"orders", "pets"})
 	if err != nil {

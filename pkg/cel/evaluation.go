@@ -103,6 +103,66 @@ func BuildVariables(
 	return vars
 }
 
+// BuildVariablesWithResources constructs a CEL variable map including resource-specific variables.
+// In addition to the standard variables (resources, summary, kind lists), this adds individual
+// resource variables using the {kind}-{name} naming convention.
+// Each resource must have metadata.name and kind fields to be included as a resource-specific variable.
+func BuildVariablesWithResources(
+	resources []map[string]any,
+	summary map[string]int64,
+	kindLists map[string][]map[string]any,
+) map[string]any {
+	vars := BuildVariables(resources, summary, kindLists)
+
+	// Add resource-specific variables using {kind}-{name} convention
+	for _, res := range resources {
+		key := ResourceKeyFromData(res)
+		if key != "" {
+			vars[key] = res
+		}
+	}
+
+	return vars
+}
+
+// ResourceKeyFromData extracts the resource key from a CEL data map.
+// Returns empty string if kind or metadata.name is missing.
+func ResourceKeyFromData(data map[string]any) string {
+	kind, ok := data["kind"].(string)
+	if !ok || kind == "" {
+		return ""
+	}
+
+	metadata, ok := data["metadata"].(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	name, ok := metadata["name"].(string)
+	if !ok || name == "" {
+		return ""
+	}
+
+	return ResourceKey(kind, name)
+}
+
+// CollectResourceKeys collects all resource keys from a list of CEL data maps.
+// Returns a slice of unique keys using the {kind}-{name} convention.
+func CollectResourceKeys(resources []map[string]any) []string {
+	var keys []string
+	seen := make(map[string]bool)
+
+	for _, res := range resources {
+		key := ResourceKeyFromData(res)
+		if key != "" && !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
+		}
+	}
+
+	return keys
+}
+
 // BuildSummary creates a summary map from individual counts.
 func BuildSummary(total, synced, failed, pending int64) map[string]int64 {
 	return map[string]int64{

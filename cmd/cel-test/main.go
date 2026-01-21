@@ -1435,13 +1435,16 @@ func createCELEnv(testData *TestData) (*cel.Env, error) {
 		kindNames = append(kindNames, kindName)
 	}
 
-	// Use the shared CEL environment factory
-	return celutil.NewEnvironment(kindNames)
+	// Collect resource-specific keys using {kind}_{name} convention
+	resourceKeys := celutil.CollectResourceKeys(testData.Resources)
+
+	// Use the shared CEL environment factory with resource-specific variables
+	return celutil.NewEnvironmentWithResources(kindNames, resourceKeys)
 }
 
 func evaluateExpression(env *cel.Env, expression string, testData *TestData) (interface{}, error) {
-	// Build evaluation variables using the shared helper
-	vars := celutil.BuildVariables(testData.Resources, testData.Summary, testData.KindLists)
+	// Build evaluation variables using the shared helper (includes resource-specific variables)
+	vars := celutil.BuildVariablesWithResources(testData.Resources, testData.Summary, testData.KindLists)
 
 	// Use the shared evaluation function
 	result := celutil.Evaluate(env, expression, vars)
@@ -1464,6 +1467,15 @@ func printHelp(testData *TestData) {
 		}
 	}
 
+	// Show resource-specific variables
+	resourceKeys := celutil.CollectResourceKeys(testData.Resources)
+	if len(resourceKeys) > 0 {
+		fmt.Println("\nResource-specific Variables (direct access via {kind}_{name}):")
+		for _, key := range resourceKeys {
+			fmt.Printf("  %s\n", key)
+		}
+	}
+
 	fmt.Println("\nAggregate Functions:")
 	fmt.Println("  sum(list)  - Sum of numeric values in the list")
 	fmt.Println("  max(list)  - Maximum value in the list")
@@ -1479,6 +1491,10 @@ func printHelp(testData *TestData) {
 		fmt.Println("  orders.size()")
 		fmt.Println("  sum(orders.map(r, r.spec.quantity))")
 		fmt.Println("  max(orders.map(r, has(r.spec.quantity) ? r.spec.quantity : 0))")
+	}
+	// Add example for resource-specific variable if available
+	if len(resourceKeys) > 0 {
+		fmt.Printf("  %s.status.state  (direct access to specific resource)\n", resourceKeys[0])
 	}
 
 	fmt.Println("\nKeyboard Shortcuts:")

@@ -1121,7 +1121,9 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundl
 		"{{ . | pluralize }}",
 		{{- end }}
 	}
-	env, err := celutil.NewEnvironment(kindNames)
+	// Collect resource-specific keys using {kind}-{name} convention
+	resourceKeys := celutil.CollectResourceKeys(celResources)
+	env, err := celutil.NewEnvironmentWithResources(kindNames, resourceKeys)
 	if err != nil {
 		logger.Error(err, "Failed to create CEL environment")
 		for _, dv := range bundle.Spec.DerivedValues {
@@ -1133,7 +1135,7 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundl
 		return results
 	}
 
-	// Build evaluation variables using the shared utility (includes skipped for Bundle)
+	// Build evaluation variables using the shared utility (includes skipped for Bundle and resource-specific variables)
 	celSummary := celutil.BuildSummaryWithSkipped(
 		int64(bundle.Status.Summary.Total),
 		int64(bundle.Status.Summary.Synced),
@@ -1141,7 +1143,7 @@ func (r *{{ .Kind }}Reconciler) evaluateDerivedValues(ctx context.Context, bundl
 		int64(bundle.Status.Summary.Pending),
 		int64(bundle.Status.Summary.Skipped),
 	)
-	evalVars := celutil.BuildVariables(celResources, celSummary, celDataByKind)
+	evalVars := celutil.BuildVariablesWithResources(celResources, celSummary, celDataByKind)
 
 	// Evaluate each derived value expression
 	for _, dv := range bundle.Spec.DerivedValues {
