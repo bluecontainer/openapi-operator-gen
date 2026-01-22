@@ -7,6 +7,13 @@ import (
 	"text/template"
 )
 
+// controllerFuncMap provides the template functions needed by the controller template
+var controllerFuncMap = template.FuncMap{
+	"sub": func(a, b int) int {
+		return a - b
+	},
+}
+
 // =============================================================================
 // Template Loading Tests - Verify templates are embedded correctly
 // =============================================================================
@@ -111,7 +118,7 @@ func TestGroupVersionInfoTemplateParseable(t *testing.T) {
 }
 
 func TestControllerTemplateParseable(t *testing.T) {
-	_, err := template.New("controller").Parse(ControllerTemplate)
+	_, err := template.New("controller").Funcs(controllerFuncMap).Parse(ControllerTemplate)
 	if err != nil {
 		t.Errorf("Failed to parse ControllerTemplate: %v", err)
 	}
@@ -475,7 +482,7 @@ type ControllerTemplateData struct {
 }
 
 func TestControllerTemplateExecution(t *testing.T) {
-	tmpl, err := template.New("controller").Parse(ControllerTemplate)
+	tmpl, err := template.New("controller").Funcs(controllerFuncMap).Parse(ControllerTemplate)
 	if err != nil {
 		t.Fatalf("Failed to parse ControllerTemplate: %v", err)
 	}
@@ -518,7 +525,7 @@ func TestControllerTemplateExecution(t *testing.T) {
 }
 
 func TestControllerTemplateWithUpdateWithPost(t *testing.T) {
-	tmpl, err := template.New("controller").Parse(ControllerTemplate)
+	tmpl, err := template.New("controller").Funcs(controllerFuncMap).Parse(ControllerTemplate)
 	if err != nil {
 		t.Fatalf("Failed to parse ControllerTemplate: %v", err)
 	}

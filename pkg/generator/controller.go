@@ -429,7 +429,13 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		tmplContent = templates.ControllerTemplate
 	}
 
-	tmpl, err := template.New("controller").Parse(tmplContent)
+	funcMap := template.FuncMap{
+		"sub": func(a, b int) int {
+			return a - b
+		},
+	}
+
+	tmpl, err := template.New("controller").Funcs(funcMap).Parse(tmplContent)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}

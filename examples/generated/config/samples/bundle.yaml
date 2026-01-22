@@ -1,0 +1,18 @@
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: simple-bundle
+  namespace: default
+spec:
+  # Target settings (inherited by child resources)
+  # targetHelmRelease: my-release
+  # targetNamespace: backend
+  resources:
+    - id: order-0
+      kind: Order
+      spec:
+        name: "bundle-created-order"
+    - id: pet-1
+      kind: Pet
+      spec:
+        name: "bundle-created-pet"
