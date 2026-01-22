@@ -67,6 +67,9 @@ type CRDTypeData struct {
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
+
+	// CEL validation rules for conditional field requirements
+	CELValidationRules []mapper.CELValidationRule
 }
 
 // SpecData holds spec field data
@@ -140,6 +143,8 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			HasPatch:  crd.HasPatch,
 			// ExternalIDRef handling
 			NeedsExternalIDRef: crd.NeedsExternalIDRef,
+			// CEL validation rules
+			CELValidationRules: crd.CELValidationRules,
 		}
 
 		if crd.Spec != nil {

@@ -91,6 +91,11 @@ type CRDDefinition struct {
 	// 1. Build URLs using the merged field's value
 	// 2. Optionally rename the field in the JSON body when sending to the API
 	IDFieldMappings []IDFieldMapping
+
+	// CELValidationRules contains CEL validation rules for conditional field requirements.
+	// These rules make OpenAPI-required fields optional when referencing existing resources
+	// via path parameters or externalIDRef.
+	CELValidationRules []CELValidationRule
 }
 
 // QueryParamField represents a query parameter as a spec field
@@ -130,6 +135,10 @@ type FieldDefinition struct {
 	// The controller uses this to substitute the field value into the URL path.
 	// e.g., for orderId -> id merge, the "id" field will have PathParamName = "orderId"
 	PathParamName string
+	// OpenAPIRequired indicates if this field is required in the OpenAPI spec for resource creation.
+	// This is used to generate CEL validation rules that make the field conditionally required
+	// (required when creating a new resource, optional when referencing an existing one).
+	OpenAPIRequired bool
 }
 
 // IDFieldMapping represents a mapping from a path parameter to a body field.
@@ -137,6 +146,96 @@ type FieldDefinition struct {
 type IDFieldMapping struct {
 	PathParam string // The path parameter name (e.g., "orderId")
 	BodyField string // The body field name (e.g., "id")
+}
+
+// CELValidationRule represents a CEL validation rule for conditional field requirements.
+// This is used to make OpenAPI-required fields optional when referencing existing resources.
+type CELValidationRule struct {
+	Rule    string // The CEL expression (e.g., "has(self.petId) || has(self.name)")
+	Message string // The validation error message
+}
+
+// generateCELValidationRules creates CEL validation rules for conditional field requirements.
+// For each OpenAPI-required field, it generates a rule that makes the field optional when:
+// - A path parameter field is set (e.g., petId for /pet/{petId})
+// - OR externalIDRef is set (for resources without path params)
+// This allows users to reference existing resources without providing all creation fields.
+func generateCELValidationRules(crd *CRDDefinition) {
+	if crd.Spec == nil || len(crd.Spec.Fields) == 0 {
+		return
+	}
+
+	// Skip Query and Action CRDs - they don't need conditional validation
+	if crd.IsQuery || crd.IsAction {
+		return
+	}
+
+	// Find path parameter fields (fields that can identify an existing resource)
+	var pathParamFields []string
+	for _, field := range crd.Spec.Fields {
+		if field.PathParamName != "" {
+			// This field is merged with a path param, so it can identify existing resources
+			pathParamFields = append(pathParamFields, field.JSONName)
+		}
+	}
+
+	// Check if we have any path params or need externalIDRef
+	hasPathParams := len(pathParamFields) > 0
+	needsExternalIDRef := crd.NeedsExternalIDRef
+
+	// If there's no way to reference existing resources, no CEL rules needed
+	if !hasPathParams && !needsExternalIDRef {
+		return
+	}
+
+	// Build the condition prefix for referencing existing resources
+	// e.g., "has(self.petId)" or "has(self.externalIDRef)"
+	var conditions []string
+	for _, pathParam := range pathParamFields {
+		conditions = append(conditions, "has(self."+pathParam+")")
+	}
+	if needsExternalIDRef && crd.HasPost {
+		// Only add externalIDRef condition if POST is available (optional externalIDRef case)
+		conditions = append(conditions, "has(self.externalIDRef)")
+	}
+
+	// If no conditions to check, no rules needed
+	if len(conditions) == 0 {
+		return
+	}
+
+	conditionPrefix := strings.Join(conditions, " || ")
+
+	// Generate CEL rules for each OpenAPI-required field
+	for _, field := range crd.Spec.Fields {
+		if !field.OpenAPIRequired {
+			continue
+		}
+
+		// Skip the path param fields themselves - they're the condition, not the target
+		isPathParam := false
+		for _, pp := range pathParamFields {
+			if field.JSONName == pp {
+				isPathParam = true
+				break
+			}
+		}
+		if isPathParam {
+			continue
+		}
+
+		// Generate the rule: "condition || has(self.fieldName)"
+		rule := conditionPrefix + " || has(self." + field.JSONName + ")"
+		message := field.JSONName + " is required when creating a new resource"
+
+		crd.CELValidationRules = append(crd.CELValidationRules, CELValidationRule{
+			Rule:    rule,
+			Message: message,
+		})
+
+		// Mark the field as no longer strictly required since CEL handles it
+		field.Required = false
+	}
 }
 
 // ValidationRules contains kubebuilder validation markers
@@ -185,6 +284,11 @@ func (m *Mapper) MapResources(spec *parser.ParsedSpec) ([]*CRDDefinition, error)
 	// Also map action endpoints to CRDs
 	actionCRDs := m.mapActionEndpoints(spec.ActionEndpoints, knownKinds)
 	crds = append(crds, actionCRDs...)
+
+	// Generate CEL validation rules for conditional field requirements
+	for _, crd := range crds {
+		generateCELValidationRules(crd)
+	}
 
 	return crds, nil
 }
@@ -378,10 +482,11 @@ func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
 		for _, propName := range propNames {
 			propSchema := ae.RequestSchema.Properties[propName]
 			propField := m.schemaToFieldDefinition(propName, propSchema, false)
-			// Check if property is required
+			// Check if property is required in OpenAPI spec
 			for _, req := range ae.RequestSchema.Required {
 				if req == propName {
 					propField.Required = true
+					propField.OpenAPIRequired = true // Mark as OpenAPI-required for CEL validation
 					break
 				}
 			}
@@ -600,10 +705,11 @@ func (m *Mapper) schemaToResultFields(schema *parser.Schema) []*FieldDefinition 
 		propSchema := schema.Properties[propName]
 		field := m.schemaToFieldDefinition(propName, propSchema, false)
 
-		// Check if property is required
+		// Check if property is required in OpenAPI spec
 		for _, req := range schema.Required {
 			if req == propName {
 				field.Required = true
+				field.OpenAPIRequired = true // Mark as OpenAPI-required for CEL validation
 				break
 			}
 		}
@@ -1168,10 +1274,11 @@ func (m *Mapper) schemaToFieldDefinition(name string, schema *parser.Schema, isR
 		Description: schema.Description,
 	}
 
-	// Set required if in parent's required list
+	// Set required if in parent's required list (from OpenAPI spec)
 	for _, req := range schema.Required {
 		if req == name {
 			field.Required = true
+			field.OpenAPIRequired = true // Mark as OpenAPI-required for CEL validation
 			break
 		}
 	}
@@ -1213,10 +1320,11 @@ func (m *Mapper) schemaToFieldDefinition(name string, schema *parser.Schema, isR
 		for _, propName := range propNames {
 			propSchema := schema.Properties[propName]
 			propField := m.schemaToFieldDefinition(propName, propSchema, false)
-			// Check if property is required
+			// Check if property is required in OpenAPI spec
 			for _, req := range schema.Required {
 				if req == propName {
 					propField.Required = true
+					propField.OpenAPIRequired = true // Mark as OpenAPI-required for CEL validation
 					break
 				}
 			}

@@ -213,6 +213,15 @@ type CRDTypeData struct {
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool
+
+	// CEL validation rules for conditional field requirements
+	CELValidationRules []CELValidationRule
+}
+
+// CELValidationRule for testing
+type CELValidationRule struct {
+	Rule    string
+	Message string
 }
 
 // NestedTypeData mimics nested type data

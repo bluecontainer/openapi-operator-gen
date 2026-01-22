@@ -152,10 +152,12 @@ spec:
                   TargetStatefulSet specifies a StatefulSet name to route requests to.
                   When set, overrides the operator's global endpoint configuration for this CR.
                 type: string
-            required:
-            - name
-            - photoUrls
             type: object
+            x-kubernetes-validations:
+            - message: name is required when creating a new resource
+              rule: has(self.id) || has(self.name)
+            - message: photoUrls is required when creating a new resource
+              rule: has(self.id) || has(self.photoUrls)
           status:
             description: PetStatus defines the observed state of Pet
             properties:

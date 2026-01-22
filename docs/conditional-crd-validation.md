@@ -1,5 +1,7 @@
 # Conditional CRD Field Validation
 
+> **Status**: ✅ Implemented in openapi-operator-gen
+
 This document analyzes approaches for conditionally requiring CRD fields based on whether a resource is being created new or referencing an existing external resource.
 
 ## Problem Statement
@@ -199,6 +201,52 @@ spec:
                       name:
                         type: string
 ```
+
+## Implementation in openapi-operator-gen
+
+The generator now automatically creates CEL validation rules for Resource CRDs (not Query or Action CRDs) when:
+
+1. The resource has fields marked as `required` in the OpenAPI spec
+2. The resource has a way to reference existing resources (path parameters or externalIDRef)
+
+### How It Works
+
+1. **Field Tracking**: The `FieldDefinition` struct has an `OpenAPIRequired` field that tracks whether a field was required in the original OpenAPI spec (vs controller-added fields).
+
+2. **Rule Generation**: The `generateCELValidationRules()` function in `pkg/mapper/resource.go`:
+   - Identifies path parameter fields (fields merged with URL path params like `{petId}`)
+   - Identifies if `externalIDRef` is available for the resource
+   - For each OpenAPI-required field, generates a CEL rule like:
+     ```
+     has(self.id) || has(self.name)
+     ```
+
+3. **Template Output**: The `types.go.tmpl` template emits `// +kubebuilder:validation:XValidation` markers before the Spec struct.
+
+### Generated Example
+
+For the Pet resource from the Petstore API:
+
+```go
+// PetSpec defines the desired state of Pet
+// +kubebuilder:validation:XValidation:rule="has(self.id) || has(self.name)",message="name is required when creating a new resource"
+// +kubebuilder:validation:XValidation:rule="has(self.id) || has(self.photoUrls)",message="photoUrls is required when creating a new resource"
+type PetSpec struct {
+    // +optional
+    Id *int64 `json:"id,omitempty"`
+
+    // +optional
+    Name string `json:"name,omitempty"`
+
+    // +optional
+    PhotoUrls []string `json:"photoUrls,omitempty"`
+    // ...
+}
+```
+
+This allows users to:
+- Create new pets by providing `name` and `photoUrls`
+- Reference existing pets by providing just `id`
 
 ## References
 

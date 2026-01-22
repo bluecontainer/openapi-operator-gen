@@ -457,6 +457,9 @@ func init() {
 {{- else }}
 
 // {{ .Kind }}Spec defines the desired state of {{ .Kind }}
+{{- range .CELValidationRules }}
+// +kubebuilder:validation:XValidation:rule={{ printf "%q" .Rule }},message={{ printf "%q" .Message }}
+{{- end }}
 type {{ .Kind }}Spec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
