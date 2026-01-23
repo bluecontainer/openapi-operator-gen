@@ -14,3 +14,4 @@ spec:
   # targetDeployment: "my-deployment"
   # targetHelmRelease: "my-release"
   # targetPodOrdinal: 0
+  onDelete: "Restore"

@@ -210,6 +210,7 @@ type CRDTypeData struct {
 	HasDelete bool
 	HasPost   bool
 	HasPatch  bool
+	HasPut    bool
 
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool

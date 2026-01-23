@@ -1059,12 +1059,16 @@ func (r *{{ .Kind }}Reconciler) syncToEndpoint(ctx context.Context, instance *{{
 			// Extract external ID from response if available (for resources identified by path params)
 			responseExternalID := r.extractExternalIDFromResponse(respData, externalID)
 
-{{- if and .HasDelete .NeedsExternalIDRef }}
-			// Snapshot original state on first adoption via ExternalIDRef
-			if instance.Spec.ExternalIDRef != "" && instance.Status.OriginalState == nil {
+{{- if or .HasPatch .HasPut }}
+			// Snapshot original state on first adoption of existing resource
+			// This applies when:
+			// - Using path params (e.g., id: 10 references existing pet)
+			// - Using externalIDRef to adopt existing resource
+			// - Resource wasn't created by this controller
+			if instance.Status.OriginalState == nil && !instance.Status.CreatedByController {
 				instance.Status.OriginalState = &k8sruntime.RawExtension{Raw: body}
 				instance.Status.AdoptedAt = &now
-				logger.Info("Captured original state for ExternalIDRef resource", "externalID", responseExternalID)
+				logger.Info("Captured original state for adopted resource", "externalID", responseExternalID)
 			}
 {{- end }}
 
@@ -1842,15 +1846,15 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 
 	switch policy {
 	case "Restore":
-{{- if .NeedsExternalIDRef }}
+{{- if or .HasPatch .HasPut }}
 		if instance.Status.OriginalState == nil {
 			logger.Info("No original state to restore, orphaning instead")
 			return nil
 		}
 		return r.restoreOriginalState(ctx, instance)
 {{- else }}
-		// Restore not supported without ExternalIDRef - orphan instead
-		logger.Info("Restore not supported (no ExternalIDRef), orphaning instead")
+		// Restore not supported without PUT/PATCH - orphan instead
+		logger.Info("Restore not supported (no PUT/PATCH method), orphaning instead")
 		return nil
 {{- end }}
 	case "Orphan":
@@ -1907,8 +1911,9 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 	return r.deleteFromEndpoint(ctx, instance, baseURL)
 }
 
-{{- if .NeedsExternalIDRef }}
+{{- if or .HasPatch .HasPut }}
 // restoreOriginalState restores the external resource to its original state captured during adoption.
+// This works for resources adopted via path params (e.g., id: 10) or externalIDRef.
 func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) error {
 {{- if .UpdateWithPost }}
 	httpMethod := "POST"
