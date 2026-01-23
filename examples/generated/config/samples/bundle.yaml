@@ -8,11 +8,22 @@ spec:
   # targetHelmRelease: my-release
   # targetNamespace: backend
   resources:
-    - id: order-0
-      kind: Order
-      spec:
-        name: "bundle-created-order"
-    - id: pet-1
+    # Parent resource
+    - id: parent
       kind: Pet
       spec:
-        name: "bundle-created-pet"
+        name: "parent-resource"
+        photoUrls: ["item1"]
+        status: "available"
+        tags: []
+    # Child resource using parent's external ID
+    # Dependency on 'parent' is automatically inferred from the reference below
+    - id: child
+      kind: Order
+      spec:
+        name: "child-of-${resources.parent.status.externalID}"
+        complete: true
+        petId: ${resources.parent.status.externalID}
+        quantity: 1
+        shipDate: ${now()}
+        status: "placed"

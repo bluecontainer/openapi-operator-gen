@@ -56,6 +56,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [CEL Derived Values](#cel-derived-values)
   - [CEL Variables](#cel-variables)
   - [CEL Aggregate Functions](#cel-aggregate-functions)
+  - [CEL DateTime Functions](#cel-datetime-functions)
   - [Aggregator Status Fields](#aggregator-status-fields)
 - [Bundle CRD](#bundle-crd)
   - [Enabling the Bundle CRD](#enabling-the-bundle-crd)
@@ -1199,6 +1200,55 @@ derivedValues:
   # Sum of quantities for synced orders only
   - name: syncedOrdersQuantity
     expression: "sum(orders.filter(r, r.status.state == 'Synced').map(r, has(r.spec.quantity) ? r.spec.quantity : 0))"
+```
+
+### CEL DateTime Functions
+
+DateTime functions are available for working with timestamps and durations in CEL expressions:
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `now()` | Current UTC time in RFC3339 format | `now()` → `"2026-01-23T08:00:00Z"` |
+| `nowUnix()` | Current Unix timestamp (seconds) | `nowUnix()` → `1737619200` |
+| `nowUnixMilli()` | Current Unix timestamp (milliseconds) | `nowUnixMilli()` → `1737619200000` |
+| `formatTime(unixSecs, layout)` | Format Unix timestamp with Go layout | `formatTime(1706000000, "2006-01-02")` → `"2024-01-23"` |
+| `formatTimeRFC3339(unixSecs)` | Format Unix timestamp as RFC3339 | `formatTimeRFC3339(1706000000)` → `"2024-01-23T08:53:20Z"` |
+| `parseTime(timeStr, layout)` | Parse time string to Unix timestamp | `parseTime("2024-01-23", "2006-01-02")` → `1705968000` |
+| `parseTimeRFC3339(timeStr)` | Parse RFC3339 to Unix timestamp | `parseTimeRFC3339("2024-01-23T08:53:20Z")` → `1706000000` |
+| `addDuration(timeStr, duration)` | Add duration to RFC3339 time | `addDuration("2024-01-23T08:00:00Z", "1h")` → `"2024-01-23T09:00:00Z"` |
+| `timeSince(timeStr)` | Seconds since the given RFC3339 time | `timeSince("2024-01-23T08:00:00Z")` → `3600` |
+| `timeUntil(timeStr)` | Seconds until the given RFC3339 time | `timeUntil("2024-01-24T08:00:00Z")` → `86400` |
+| `durationSeconds(durationStr)` | Parse duration string to seconds | `durationSeconds("1h30m")` → `5400` |
+
+Duration format uses Go's duration syntax: `"1h"`, `"30m"`, `"90s"`, `"1h30m45s"`, `"-1h"` (negative).
+
+Example with datetime functions:
+
+```yaml
+derivedValues:
+  # Check if any resource is older than 24 hours
+  - name: hasStaleResources
+    expression: "resources.exists(r, has(r.status.lastSyncTime) && timeSince(r.status.lastSyncTime) > durationSeconds('24h'))"
+
+  # Calculate expiry time (24 hours from now)
+  - name: expiryTime
+    expression: "addDuration(now(), '24h')"
+
+  # Format current time for logging
+  - name: currentDate
+    expression: "formatTime(nowUnix(), '2006-01-02 15:04:05')"
+```
+
+In Bundle specs, datetime functions can set timestamps:
+
+```yaml
+spec:
+  resources:
+    - id: order
+      kind: Order
+      spec:
+        shipDate: ${now()}
+        expiresAt: ${addDuration(now(), "72h")}
 ```
 
 ### Aggregator Status Fields

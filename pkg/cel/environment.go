@@ -6,13 +6,14 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
-// NewEnvironment creates a new CEL environment with standard variables and aggregate functions.
+// NewEnvironment creates a new CEL environment with standard variables, aggregate functions, and datetime functions.
 // kindNames is a list of kind-specific variable names (e.g., ["orders", "pets", "users"]).
 // The environment includes:
 //   - resources: list of all resource maps
 //   - summary: map with total, synced, failed, pending counts
 //   - kind-specific variables (e.g., orders, pets) for each kind name provided
 //   - Aggregate functions: sum(), max(), min(), avg()
+//   - DateTime functions: now(), nowUnix(), formatTime(), parseTime(), addDuration(), timeSince(), etc.
 func NewEnvironment(kindNames []string) (*cel.Env, error) {
 	// Build base options with standard variables
 	opts := []cel.EnvOption{
@@ -28,11 +29,14 @@ func NewEnvironment(kindNames []string) (*cel.Env, error) {
 	// Add aggregate functions
 	opts = append(opts, AggregateFunctions()...)
 
+	// Add datetime functions
+	opts = append(opts, DateTimeFunctions()...)
+
 	return cel.NewEnv(opts...)
 }
 
 // NewEnvironmentWithResources creates a new CEL environment with standard variables, aggregate functions,
-// and resource-specific variables using the naming convention {kind}_{name}.
+// datetime functions, and resource-specific variables using the naming convention {kind}_{name}.
 // kindNames is a list of kind-specific variable names (e.g., ["orders", "pets", "users"]).
 // resourceKeys is a list of resource-specific variable names (e.g., ["pet_fluffy", "order_1"]).
 // The environment includes:
@@ -41,6 +45,7 @@ func NewEnvironment(kindNames []string) (*cel.Env, error) {
 //   - kind-specific variables (e.g., orders, pets) for each kind name provided
 //   - resource-specific variables (e.g., pet_fluffy, storeinventoryquery_sample)
 //   - Aggregate functions: sum(), max(), min(), avg()
+//   - DateTime functions: now(), nowUnix(), formatTime(), parseTime(), addDuration(), timeSince(), etc.
 func NewEnvironmentWithResources(kindNames []string, resourceKeys []string) (*cel.Env, error) {
 	// Build base options with standard variables
 	opts := []cel.EnvOption{
@@ -61,6 +66,9 @@ func NewEnvironmentWithResources(kindNames []string, resourceKeys []string) (*ce
 
 	// Add aggregate functions
 	opts = append(opts, AggregateFunctions()...)
+
+	// Add datetime functions
+	opts = append(opts, DateTimeFunctions()...)
 
 	return cel.NewEnv(opts...)
 }
@@ -91,6 +99,9 @@ func NewEnvironmentWithOptions(kindNames []string, additionalOpts ...cel.EnvOpti
 
 	// Add aggregate functions
 	opts = append(opts, AggregateFunctions()...)
+
+	// Add datetime functions
+	opts = append(opts, DateTimeFunctions()...)
 
 	// Add any additional options
 	opts = append(opts, additionalOpts...)
