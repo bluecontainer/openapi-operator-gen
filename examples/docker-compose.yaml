@@ -28,7 +28,7 @@
 
 services:
   petstore:
-    image: swaggerapi/petstore3:1.0.27
+    image: swaggerapi/petstore3:unstable
     ports:
       - "8080:8080"
     environment:
@@ -108,6 +108,7 @@ services:
     environment:
       - REST_API_BASE_URL=http://petstore:8080/api/v3
       - KUBECONFIG=/kubeconfig/kubeconfig-fixed.yaml
+      - OPERATOR_LOG_LEVEL=debug
     volumes:
       - k3s-kubeconfig:/kubeconfig:ro
     depends_on:

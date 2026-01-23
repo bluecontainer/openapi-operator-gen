@@ -6,8 +6,8 @@ metadata:
   name: pet-sample-2
   namespace: default
 spec:
-  id: 11
-  name: "example-name cat cat"
+  id: 10
+  name: "bugs bunny"
   # Endpoint targeting (optional - uncomment if needed)
   # targetNamespace: "target-namespace"
   # targetStatefulSet: "my-statefulset"

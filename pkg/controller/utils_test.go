@@ -157,6 +157,186 @@ func TestToFloat64(t *testing.T) {
 	}
 }
 
+func TestValuesEqual_Maps(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        interface{}
+		b        interface{}
+		expected bool
+	}{
+		{
+			name:     "equal simple maps",
+			a:        map[string]interface{}{"name": "test", "id": 1},
+			b:        map[string]interface{}{"name": "test", "id": 1},
+			expected: true,
+		},
+		{
+			name:     "equal maps with int vs float64",
+			a:        map[string]interface{}{"id": 10},
+			b:        map[string]interface{}{"id": float64(10)},
+			expected: true,
+		},
+		{
+			name:     "different maps - different values",
+			a:        map[string]interface{}{"name": "test1"},
+			b:        map[string]interface{}{"name": "test2"},
+			expected: false,
+		},
+		{
+			name:     "different maps - different keys",
+			a:        map[string]interface{}{"name": "test"},
+			b:        map[string]interface{}{"title": "test"},
+			expected: false,
+		},
+		{
+			name:     "different maps - extra key",
+			a:        map[string]interface{}{"name": "test", "extra": "value"},
+			b:        map[string]interface{}{"name": "test"},
+			expected: false,
+		},
+		{
+			name: "equal nested maps",
+			a: map[string]interface{}{
+				"category": map[string]interface{}{
+					"id":   3,
+					"name": "Rabbits",
+				},
+			},
+			b: map[string]interface{}{
+				"category": map[string]interface{}{
+					"id":   float64(3),
+					"name": "Rabbits",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "different nested maps",
+			a: map[string]interface{}{
+				"category": map[string]interface{}{
+					"id":   3,
+					"name": "Rabbits",
+				},
+			},
+			b: map[string]interface{}{
+				"category": map[string]interface{}{
+					"id":   3,
+					"name": "Dogs",
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ValuesEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("ValuesEqual(%v, %v) = %v, expected %v", tt.a, tt.b, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValuesEqual_Slices(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        interface{}
+		b        interface{}
+		expected bool
+	}{
+		{
+			name:     "equal simple slices",
+			a:        []interface{}{"a", "b", "c"},
+			b:        []interface{}{"a", "b", "c"},
+			expected: true,
+		},
+		{
+			name:     "different slices - different values",
+			a:        []interface{}{"a", "b"},
+			b:        []interface{}{"a", "c"},
+			expected: false,
+		},
+		{
+			name:     "different slices - different lengths",
+			a:        []interface{}{"a", "b", "c"},
+			b:        []interface{}{"a", "b"},
+			expected: false,
+		},
+		{
+			name:     "slices with int vs float64",
+			a:        []interface{}{1, 2, 3},
+			b:        []interface{}{float64(1), float64(2), float64(3)},
+			expected: true,
+		},
+		{
+			name: "slices with maps",
+			a: []interface{}{
+				map[string]interface{}{"id": 1, "name": "tag1"},
+				map[string]interface{}{"id": 2, "name": "tag2"},
+			},
+			b: []interface{}{
+				map[string]interface{}{"id": float64(1), "name": "tag1"},
+				map[string]interface{}{"id": float64(2), "name": "tag2"},
+			},
+			expected: true,
+		},
+		{
+			name: "slices with maps - different",
+			a: []interface{}{
+				map[string]interface{}{"id": 1, "name": "tag1"},
+			},
+			b: []interface{}{
+				map[string]interface{}{"id": 1, "name": "tag2"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ValuesEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("ValuesEqual(%v, %v) = %v, expected %v", tt.a, tt.b, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValuesEqual_JSONResponse(t *testing.T) {
+	// This test simulates the actual drift detection scenario:
+	// spec has {id: 10} and API response has full object with nested structures
+	apiResponseJSON := `{"id":10,"category":{"id":3,"name":"Rabbits"},"name":"bugs bunny","photoUrls":["url1","url2"],"tags":[{"id":1,"name":"tag3"},{"id":2,"name":"tag4"}],"status":"available"}`
+
+	var apiResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(apiResponseJSON), &apiResponse); err != nil {
+		t.Fatalf("Failed to unmarshal API response: %v", err)
+	}
+
+	// Each field in the merged state should equal the corresponding field in API response
+	// when they came from the same source (the API response)
+	for key, apiValue := range apiResponse {
+		if !ValuesEqual(apiValue, apiValue) {
+			t.Errorf("ValuesEqual(%v, %v) for key %q should be true", apiValue, apiValue, key)
+		}
+	}
+
+	// Test that category matches
+	specCategory := map[string]interface{}{"id": float64(3), "name": "Rabbits"}
+	if !ValuesEqual(apiResponse["category"], specCategory) {
+		t.Errorf("category comparison failed: %v vs %v", apiResponse["category"], specCategory)
+	}
+
+	// Test that tags match
+	specTags := []interface{}{
+		map[string]interface{}{"id": float64(1), "name": "tag3"},
+		map[string]interface{}{"id": float64(2), "name": "tag4"},
+	}
+	if !ValuesEqual(apiResponse["tags"], specTags) {
+		t.Errorf("tags comparison failed: %v vs %v", apiResponse["tags"], specTags)
+	}
+}
+
 func TestGetExternalIDIfPresent(t *testing.T) {
 	// Test struct with ExternalID
 	type StatusWithID struct {
