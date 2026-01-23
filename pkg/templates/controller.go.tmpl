@@ -1941,6 +1941,9 @@ func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instan
 {{- if .UpdateWithPost }}
 	// Use create URL for POST-based updates
 	url := r.buildResourceURLForCreate(baseURL, instance)
+{{- else if .PutPathDiffers }}
+	// Use PUT-specific URL when PUT path differs from GET path
+	url := r.buildResourceURLForPut(baseURL, instance)
 {{- else }}
 	url := r.buildResourceURL(baseURL, instance)
 {{- end }}
