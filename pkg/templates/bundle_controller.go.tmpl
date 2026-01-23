@@ -898,6 +898,7 @@ func (r *{{ .Kind }}Reconciler) resolveSlice(
 }
 
 // evaluateSimpleExpression evaluates a simple path expression like "resources.pet.status.externalID"
+// or a CEL function call like "now()" or "addDuration(now(), '24h')"
 func (r *{{ .Kind }}Reconciler) evaluateSimpleExpression(expr string, resources map[string]interface{}) (interface{}, error) {
 	// Handle resources.<id>.status.<field> pattern
 	if strings.HasPrefix(expr, "resources.") {
@@ -938,6 +939,29 @@ func (r *{{ .Kind }}Reconciler) evaluateSimpleExpression(expr string, resources 
 		}
 
 		return current, nil
+	}
+
+	// Handle CEL function calls (expressions containing parentheses)
+	// Examples: now(), nowUnix(), addDuration(now(), "24h"), formatTime(nowUnix(), "2006-01-02")
+	if strings.Contains(expr, "(") {
+		// Create a CEL environment with datetime functions
+		env, err := celutil.NewEnvironment([]string{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create CEL environment: %w", err)
+		}
+
+		// Provide empty variables (CEL functions like now() don't need variables)
+		vars := map[string]interface{}{
+			"resources": []map[string]interface{}{},
+			"summary":   map[string]int64{"total": 0},
+		}
+
+		result := celutil.Evaluate(env, expr, vars)
+		if result.Error != nil {
+			return nil, fmt.Errorf("CEL evaluation failed: %w", result.Error)
+		}
+
+		return result.Value, nil
 	}
 
 	return nil, fmt.Errorf("unsupported expression: %s", expr)
