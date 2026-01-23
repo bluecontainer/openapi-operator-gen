@@ -543,15 +543,19 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		}
 	}
 
-	// Return current status
+	// Return current status (default to "Pending" if state is empty)
+	state := existing.Status.State
+	if state == "" {
+		state = "Pending"
+	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
 		ID:           id,
 		Kind:         "{{ . }}",
 		Name:         name,
-		State:        existing.Status.State,
+		State:        state,
 		ExternalID:   controllerutil2.GetExternalIDIfPresent(existing),
 		Message:      existing.Status.Message,
-		Ready:        existing.Status.State == "Synced",
+		Ready:        state == "Synced",
 		LastSyncTime: existing.Status.LastSyncTime,
 	}, nil
 }
@@ -633,14 +637,18 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		}
 	}
 
-	// Return current status (Query CRDs use "Queried" as success state)
+	// Return current status (Query CRDs use "Queried" as success state, default to "Pending" if empty)
+	state := existing.Status.State
+	if state == "" {
+		state = "Pending"
+	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
 		ID:           id,
 		Kind:         "{{ . }}",
 		Name:         name,
-		State:        existing.Status.State,
+		State:        state,
 		Message:      existing.Status.Message,
-		Ready:        existing.Status.State == "Queried",
+		Ready:        state == "Queried",
 		LastSyncTime: existing.Status.LastQueryTime,
 	}, nil
 }
@@ -722,14 +730,18 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		}
 	}
 
-	// Return current status (Action CRDs use "Completed" as success state)
+	// Return current status (Action CRDs use "Completed" as success state, default to "Pending" if empty)
+	state := existing.Status.State
+	if state == "" {
+		state = "Pending"
+	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
 		ID:           id,
 		Kind:         "{{ . }}",
 		Name:         name,
-		State:        existing.Status.State,
+		State:        state,
 		Message:      existing.Status.Message,
-		Ready:        existing.Status.State == "Completed",
+		Ready:        state == "Completed",
 		LastSyncTime: existing.Status.LastExecutionTime,
 	}, nil
 }
