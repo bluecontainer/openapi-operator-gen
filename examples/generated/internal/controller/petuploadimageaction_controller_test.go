@@ -116,8 +116,7 @@ func TestPetUploadimageActionReconciler_E2E(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	// Create fake client with the object
@@ -203,8 +202,7 @@ func TestPetUploadimageActionReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -287,8 +285,7 @@ func TestPetUploadimageActionReconciler_CreateResource(t *testing.T) {
 			Name:      "new-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -351,8 +348,7 @@ func TestPetUploadimageActionReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -415,8 +411,7 @@ func TestPetUploadimageActionReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -479,8 +474,7 @@ func TestPetUploadimageActionReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -549,8 +543,7 @@ func TestPetUploadimageActionReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -605,8 +598,7 @@ func TestPetUploadimageActionReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -662,8 +654,7 @@ func TestPetUploadimageActionReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -879,6 +870,7 @@ func TestPetUploadimageActionReconciler_URLAndResponseConsistency(t *testing.T) 
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
 // TestPetUploadimageActionReconciler_ActionPathParams verifies that action endpoints
 // correctly use path parameters from spec in the URL
 func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
@@ -1024,4 +1016,3 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 		}
 	}
 }
-

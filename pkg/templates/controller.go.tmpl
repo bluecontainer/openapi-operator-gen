@@ -733,6 +733,8 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 		}
 
 		// Compare merged state with API response
+		// Use ValuesEqualIgnoreTimestamps to avoid false drift detection from dynamic
+		// timestamp expressions like ${now()} which generate different values each reconciliation
 		for key, mergedValue := range mergedState {
 			apiValue, exists := apiResponse[key]
 			if !exists {
@@ -742,20 +744,22 @@ func (r *{{ .Kind }}Reconciler) compareSpecWithResponse(instance *{{ .APIVersion
 				}
 				continue
 			}
-			if !controllerutil2.ValuesEqual(mergedValue, apiValue) {
+			if !controllerutil2.ValuesEqualIgnoreTimestamps(mergedValue, apiValue) {
 				return true // Drift detected
 			}
 		}
 	} else {
 		// When mergeOnUpdate is disabled, compare spec directly with API response.
 		// Only fields present in the spec are compared.
+		// Use ValuesEqualIgnoreTimestamps to avoid false drift detection from dynamic
+		// timestamp expressions like ${now()} which generate different values each reconciliation
 		for key, specValue := range specMap {
 			apiValue, exists := apiResponse[key]
 			if !exists {
 				// Field exists in spec but not in API response - could be drift or API doesn't return this field
 				continue
 			}
-			if !controllerutil2.ValuesEqual(specValue, apiValue) {
+			if !controllerutil2.ValuesEqualIgnoreTimestamps(specValue, apiValue) {
 				return true // Drift detected
 			}
 		}

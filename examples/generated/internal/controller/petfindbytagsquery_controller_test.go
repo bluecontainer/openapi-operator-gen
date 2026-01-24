@@ -119,8 +119,7 @@ func TestPetFindbytagsQueryReconciler_E2E(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	// Create fake client with the object
@@ -206,8 +205,7 @@ func TestPetFindbytagsQueryReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -290,8 +288,7 @@ func TestPetFindbytagsQueryReconciler_CreateResource(t *testing.T) {
 			Name:      "new-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -354,8 +351,7 @@ func TestPetFindbytagsQueryReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -418,8 +414,7 @@ func TestPetFindbytagsQueryReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -482,8 +477,7 @@ func TestPetFindbytagsQueryReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -551,8 +545,7 @@ func TestPetFindbytagsQueryReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -607,8 +600,7 @@ func TestPetFindbytagsQueryReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -663,8 +655,7 @@ func TestPetFindbytagsQueryReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -874,6 +865,7 @@ func TestPetFindbytagsQueryReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
 // TestPetFindbytagsQueryReconciler_QueryParams verifies that query parameters from spec
 // are correctly appended to the HTTP request URL
 func TestPetFindbytagsQueryReconciler_QueryParams(t *testing.T) {
@@ -906,8 +898,7 @@ func TestPetFindbytagsQueryReconciler_QueryParams(t *testing.T) {
 			Name:      "test-petfindbytagsquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbytagsQuerySpec{
-		},
+		Spec: v1alpha1.PetFindbytagsQuerySpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -984,4 +975,3 @@ func TestPetFindbytagsQueryReconciler_QueryParams(t *testing.T) {
 		t.Errorf("expected query path pattern %q in URL (prefix=%q, suffix=%q)", expectedQueryPath, staticPrefix, staticSuffix)
 	}
 }
-
