@@ -85,7 +85,7 @@ func init() {
 
 const (
 	{{ .KindLower }}FinalizerName = "{{ .APIGroup }}/bundle-finalizer"
-	{{ .KindLower }}RequeueAfter  = time.Second * 30
+	// {{ .KindLower }}RetryAfter is used to requeue when waiting for child resources to sync
 	{{ .KindLower }}RetryAfter    = time.Second * 5
 )
 
@@ -1359,7 +1359,10 @@ func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+	// No periodic requeue needed - reconciliation is triggered by:
+	// 1. Changes to the bundle CR itself (spec updates)
+	// 2. Changes to child resources (via Owns() watches in SetupWithManager)
+	return ctrl.Result{}, nil
 }
 
 // setConditions sets the status conditions based on bundle state
