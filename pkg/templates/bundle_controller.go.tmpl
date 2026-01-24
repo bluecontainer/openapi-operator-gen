@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -1299,44 +1300,62 @@ func (r *{{ .Kind }}Reconciler) evaluateAggregationStrategy(strategy string, sum
 func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *{{ .APIVersion }}.{{ .Kind }}, state, message string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	now := metav1.Now()
-	bundle.Status.State = state
-	bundle.Status.Message = message
-	bundle.Status.ObservedGeneration = bundle.Generation
+	// Capture the current resource status snapshot (may have been updated by syncChildResources)
+	resourcesSnapshot := make([]{{ .APIVersion }}.BundleResourceStatus, len(bundle.Status.Resources))
+	copy(resourcesSnapshot, bundle.Status.Resources)
 
-	// Update operation state
-	if bundle.Status.OperationState == nil {
-		bundle.Status.OperationState = &{{ .APIVersion }}.BundleOperationState{}
-	}
-	// Map bundle state to operation phase (Phase enum: Pending, Running, Succeeded, Failed)
-	switch state {
-	case "Synced":
-		bundle.Status.OperationState.Phase = "Succeeded"
-	case "Failed":
-		bundle.Status.OperationState.Phase = "Failed"
-	case "Pending", "Creating":
-		bundle.Status.OperationState.Phase = "Running"
-	default:
-		bundle.Status.OperationState.Phase = "Pending"
-	}
-	bundle.Status.OperationState.Message = message
-	if state == "Synced" || state == "Failed" {
-		bundle.Status.OperationState.FinishedAt = &now
-	}
+	// Use retry to handle conflicts from concurrent reconciliations (e.g., when child resources are also being watched)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Refetch the latest version to get current resourceVersion
+		latest := &{{ .APIVersion }}.{{ .Kind }}{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(bundle), latest); err != nil {
+			return err
+		}
 
-	// Calculate and set Aggregate CRD-compatible health status
-	bundle.Status.AggregatedHealth = r.calculateAggregatedHealth(bundle)
+		now := metav1.Now()
+		latest.Status.State = state
+		latest.Status.Message = message
+		latest.Status.ObservedGeneration = latest.Generation
 
-	// Evaluate derived values if configured
-	if len(bundle.Spec.DerivedValues) > 0 {
-		bundle.Status.AggregatedHealth.ComputedValues = r.evaluateDerivedValues(ctx, bundle)
-	}
+		// Apply the captured resource statuses
+		latest.Status.Resources = resourcesSnapshot
 
-	// Set conditions
-	r.setConditions(ctx, bundle, state, message)
+		// Update operation state
+		if latest.Status.OperationState == nil {
+			latest.Status.OperationState = &{{ .APIVersion }}.BundleOperationState{}
+		}
+		// Map bundle state to operation phase (Phase enum: Pending, Running, Succeeded, Failed)
+		switch state {
+		case "Synced":
+			latest.Status.OperationState.Phase = "Succeeded"
+		case "Failed":
+			latest.Status.OperationState.Phase = "Failed"
+		case "Pending", "Creating":
+			latest.Status.OperationState.Phase = "Running"
+		default:
+			latest.Status.OperationState.Phase = "Pending"
+		}
+		latest.Status.OperationState.Message = message
+		if state == "Synced" || state == "Failed" {
+			latest.Status.OperationState.FinishedAt = &now
+		}
 
-	if err := r.Status().Update(ctx, bundle); err != nil {
-		logger.Error(err, "Failed to update status")
+		// Calculate and set Aggregate CRD-compatible health status
+		latest.Status.AggregatedHealth = r.calculateAggregatedHealth(latest)
+
+		// Evaluate derived values if configured
+		if len(latest.Spec.DerivedValues) > 0 {
+			latest.Status.AggregatedHealth.ComputedValues = r.evaluateDerivedValues(ctx, latest)
+		}
+
+		// Set conditions
+		r.setConditions(ctx, latest, state, message)
+
+		return r.Status().Update(ctx, latest)
+	})
+
+	if err != nil {
+		logger.Error(err, "Failed to update status after retries")
 		return ctrl.Result{}, err
 	}
 

@@ -100,8 +100,8 @@ services:
   # The operator container - connects to k3s
   operator-k3s:
     build:
-      context: ./generated
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: examples/Dockerfile.operator
     image: petstore-operator:local
     profiles:
       - k3s
@@ -120,8 +120,8 @@ services:
   # The operator container - connects to local Kubernetes cluster
   operator:
     build:
-      context: ./generated
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: examples/Dockerfile.operator
     image: petstore-operator:local
     profiles:
       - with-k8s
