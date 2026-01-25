@@ -20,6 +20,7 @@ COPY examples/generated/internal/ ./generated/internal/
 # Fix the replace directive to point to /workspace (parent in container)
 WORKDIR /workspace/generated
 RUN sed -i 's|replace github.com/bluecontainer/openapi-operator-gen => \.\./\.\.|replace github.com/bluecontainer/openapi-operator-gen => /workspace|' go.mod && \
+    go mod tidy && \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager cmd/manager/main.go
 
 # Runtime stage

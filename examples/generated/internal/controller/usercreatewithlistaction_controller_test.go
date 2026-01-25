@@ -116,7 +116,8 @@ func TestUserCreatewithlistActionReconciler_E2E(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	// Create fake client with the object
@@ -202,7 +203,8 @@ func TestUserCreatewithlistActionReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -285,7 +287,8 @@ func TestUserCreatewithlistActionReconciler_CreateResource(t *testing.T) {
 			Name:      "new-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -348,7 +351,8 @@ func TestUserCreatewithlistActionReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -411,7 +415,8 @@ func TestUserCreatewithlistActionReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -474,7 +479,8 @@ func TestUserCreatewithlistActionReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -543,7 +549,8 @@ func TestUserCreatewithlistActionReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -598,7 +605,8 @@ func TestUserCreatewithlistActionReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -654,7 +662,8 @@ func TestUserCreatewithlistActionReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -771,7 +780,8 @@ func TestUserCreatewithlistActionReconciler_URLAndResponseConsistency(t *testing
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -865,7 +875,6 @@ func TestUserCreatewithlistActionReconciler_URLAndResponseConsistency(t *testing
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-
 // TestUserCreatewithlistActionReconciler_ActionPathParams verifies that action endpoints
 // correctly use path parameters from spec in the URL
 func TestUserCreatewithlistActionReconciler_ActionPathParams(t *testing.T) {
@@ -905,7 +914,8 @@ func TestUserCreatewithlistActionReconciler_ActionPathParams(t *testing.T) {
 			Name:      "test-usercreatewithlistaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.UserCreatewithlistActionSpec{},
+		Spec: v1alpha1.UserCreatewithlistActionSpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -992,3 +1002,4 @@ func TestUserCreatewithlistActionReconciler_ActionPathParams(t *testing.T) {
 		}
 	}
 }
+

@@ -351,13 +351,17 @@ func (r *{{ .Kind }}Reconciler) syncResources(ctx context.Context, bundle *{{ .A
 			continue
 		}
 
-		// Resolve CEL expressions in spec
-		resolvedSpec, err := r.resolveExpressions(res.Spec, statusMap, bundle)
+		// Get existing child's REST API response data (for preserving ${now()} values)
+		childName := fmt.Sprintf("%s-%s", bundle.Name, id)
+		existingResponseData := r.getExistingChildResponseData(ctx, res.Kind, childName, bundle.Namespace)
+
+		// Resolve CEL expressions in spec, using REST API response values for ${now()} if available
+		resolvedSpec, err := r.resolveExpressions(res.Spec, statusMap, bundle, existingResponseData)
 		if err != nil {
 			statuses = append(statuses, {{ .APIVersion }}.BundleResourceStatus{
 				ID:      id,
 				Kind:    res.Kind,
-				Name:    fmt.Sprintf("%s-%s", bundle.Name, id),
+				Name:    childName,
 				State:   "Failed",
 				Message: fmt.Sprintf("Expression error: %v", err),
 			})
@@ -436,6 +440,50 @@ func (r *{{ .Kind }}Reconciler) syncResources(ctx context.Context, bundle *{{ .A
 	}
 
 	return result, nil
+}
+
+// getExistingChildResponseData retrieves the status.response.data of an existing child resource.
+// Returns nil if the resource doesn't exist or has no response data.
+// This is used to preserve ${now()} values on updates - we use the value from the REST API
+// response (the authoritative source) instead of re-evaluating to new timestamps.
+func (r *{{ .Kind }}Reconciler) getExistingChildResponseData(
+	ctx context.Context,
+	kind string,
+	name string,
+	namespace string,
+) map[string]interface{} {
+	switch kind {
+{{- range .ResourceKinds }}
+	case "{{ . }}":
+		existing := &{{ $.APIVersion }}.{{ . }}{}
+		if err := r.Get(ctx, k8stypes.NamespacedName{Name: name, Namespace: namespace}, existing); err != nil {
+			return nil
+		}
+		// Use status.response.data if available (contains REST API response)
+		if existing.Status.Response != nil && existing.Status.Response.Data != nil && existing.Status.Response.Data.Raw != nil {
+			var dataMap map[string]interface{}
+			if err := json.Unmarshal(existing.Status.Response.Data.Raw, &dataMap); err != nil {
+				return nil
+			}
+			return dataMap
+		}
+		return nil
+{{- end }}
+{{- range .QueryKinds }}
+	case "{{ . }}":
+		// Query CRDs don't have REST API response data to preserve
+		// ${now()} should be re-evaluated for periodic queries
+		return nil
+{{- end }}
+{{- range .ActionKinds }}
+	case "{{ . }}":
+		// Action CRDs don't have REST API response data to preserve in the same way
+		// ${now()} should be evaluated fresh for each action execution
+		return nil
+{{- end }}
+	default:
+		return nil
+	}
 }
 
 // syncChildResource creates or updates a single child resource
@@ -810,11 +858,15 @@ func (r *{{ .Kind }}Reconciler) evaluateConditions(conditions []string, statusMa
 	return false, nil
 }
 
-// resolveExpressions replaces CEL expressions in spec with resolved values
+// resolveExpressions replaces CEL expressions in spec with resolved values.
+// If existingSpec is provided (non-nil), ${now()} expressions will use the
+// existing value instead of generating a new timestamp. This prevents drift
+// on updates when the bundle uses dynamic timestamps.
 func (r *{{ .Kind }}Reconciler) resolveExpressions(
 	spec k8sruntime.RawExtension,
 	statusMap map[string]*{{ .APIVersion }}.BundleResourceStatus,
 	bundle *{{ .APIVersion }}.{{ .Kind }},
+	existingSpec map[string]interface{},
 ) ([]byte, error) {
 	if spec.Raw == nil {
 		return []byte("{}"), nil
@@ -839,8 +891,8 @@ func (r *{{ .Kind }}Reconciler) resolveExpressions(
 		}
 	}
 
-	// Recursively resolve expressions
-	resolved, err := r.resolveMap(data, resourcesVar)
+	// Recursively resolve expressions, passing existingSpec for ${now()} preservation
+	resolved, err := r.resolveMap(data, resourcesVar, existingSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -848,10 +900,13 @@ func (r *{{ .Kind }}Reconciler) resolveExpressions(
 	return json.Marshal(resolved)
 }
 
-// resolveMap recursively resolves CEL expressions in a map
+// resolveMap recursively resolves CEL expressions in a map.
+// existingSpec is used to preserve ${now()} values on updates - if a field had
+// ${now()} and the resource already exists, use the existing value instead.
 func (r *{{ .Kind }}Reconciler) resolveMap(
 	data map[string]interface{},
 	resources map[string]interface{},
+	existingSpec map[string]interface{},
 ) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
@@ -861,6 +916,13 @@ func (r *{{ .Kind }}Reconciler) resolveMap(
 			// Check if it's a standalone CEL expression: ${...}
 			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") && strings.Count(v, "${") == 1 {
 				expr := v[2 : len(v)-1]
+				// For ${now()} expressions, use existing value if available
+				if expr == "now()" && existingSpec != nil {
+					if existingVal, ok := existingSpec[key]; ok {
+						result[key] = existingVal
+						continue
+					}
+				}
 				resolved, err := r.evaluateSimpleExpression(expr, resources)
 				if err != nil {
 					return nil, fmt.Errorf("failed to evaluate %s: %w", key, err)
@@ -877,7 +939,14 @@ func (r *{{ .Kind }}Reconciler) resolveMap(
 				result[key] = v
 			}
 		case map[string]interface{}:
-			resolved, err := r.resolveMap(v, resources)
+			// Get nested existing spec if available
+			var nestedExisting map[string]interface{}
+			if existingSpec != nil {
+				if nested, ok := existingSpec[key].(map[string]interface{}); ok {
+					nestedExisting = nested
+				}
+			}
+			resolved, err := r.resolveMap(v, resources, nestedExisting)
 			if err != nil {
 				return nil, err
 			}
@@ -924,7 +993,8 @@ func (r *{{ .Kind }}Reconciler) resolveSlice(
 				result[i] = v
 			}
 		case map[string]interface{}:
-			resolved, err := r.resolveMap(v, resources)
+			// No existing spec for nested maps in slices
+			resolved, err := r.resolveMap(v, resources, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -1072,9 +1142,16 @@ func (r *{{ .Kind }}Reconciler) calculateSummary(statuses []{{ .APIVersion }}.Bu
 }
 
 // specsEqual compares two specs for equality, treating RFC3339 timestamps as equal
-// if they parse to times within 1 minute of each other. This prevents unnecessary
-// updates when dynamic timestamps like ${now()} are used - once set, the timestamp
-// is considered equal even if it's slightly different from a freshly-resolved value.
+// regardless of their actual values. This prevents unnecessary updates when dynamic
+// timestamps like ${now()} are used - once set, the timestamp is considered equal
+// even if it differs from a freshly-resolved value.
+//
+// The comparison checks that all fields in the desired spec are present and equal
+// in the existing spec. Extra fields in the existing spec (added by API server
+// defaults like mergeOnUpdate, category, etc.) are ignored.
+//
+// Controller-specific fields (mergeOnUpdate, targetHelmRelease, etc.) are excluded
+// from comparison since they may have defaults applied by the API server.
 func (r *{{ .Kind }}Reconciler) specsEqual(existing, desired interface{}) bool {
 	// Fast path: direct equality
 	if reflect.DeepEqual(existing, desired) {
@@ -1097,72 +1174,113 @@ func (r *{{ .Kind }}Reconciler) specsEqual(existing, desired interface{}) bool {
 		return false
 	}
 
-	return r.mapsEqualWithTimestampTolerance(existingMap, desiredMap)
-}
-
-// mapsEqualWithTimestampTolerance compares maps recursively, treating RFC3339 timestamps
-// as equal if they're within 1 minute of each other.
-func (r *{{ .Kind }}Reconciler) mapsEqualWithTimestampTolerance(a, b map[string]interface{}) bool {
-	if len(a) != len(b) {
-		return false
+	// Remove controller-specific fields from desired spec
+	// These fields are not part of the "business" spec and shouldn't cause updates
+	controllerFields := []string{
+		"mergeOnUpdate",     // Has default value true
+		"targetHelmRelease", // Inherited from bundle
+		"targetNamespace",   // Inherited from bundle
+		"readOnly",          // Controller behavior flag
+		"onDelete",          // Controller behavior flag
+		"externalIDRef",     // Reference field, not part of API payload
+	}
+	for _, field := range controllerFields {
+		delete(desiredMap, field)
 	}
 
-	for key, aVal := range a {
-		bVal, exists := b[key]
+	// Check that all fields in desired are present and equal in existing
+	// Extra fields in existing (from API defaults) are ignored
+	return r.desiredSubsetOfExisting(existingMap, desiredMap)
+}
+
+// desiredSubsetOfExisting checks that all fields in desired are present and equal
+// in existing. Extra fields in either map are ignored. This handles cases where:
+// 1. The API server adds default values (like category: {}) that aren't in our spec
+// 2. The bundle spec contains fields that aren't valid for the CRD (like 'name' for Order)
+//    - these get dropped during json.Unmarshal into the typed struct
+func (r *{{ .Kind }}Reconciler) desiredSubsetOfExisting(existing, desired map[string]interface{}) bool {
+	for key, desiredVal := range desired {
+		existingVal, exists := existing[key]
 		if !exists {
-			return false
+			// Desired field not in existing - this could mean:
+			// 1. The field was empty and omitted (ok to skip)
+			// 2. The field is invalid for this CRD type and will be dropped (ok to skip)
+			// Either way, if it's not in existing, we can't compare it
+			// and updating won't help since the field will be dropped again
+			continue
 		}
-		if !r.valuesEqualWithTimestampTolerance(aVal, bVal) {
+		if !r.valuesEqualWithTimestampTolerance(existingVal, desiredVal) {
 			return false
 		}
 	}
 	return true
 }
 
-// valuesEqualWithTimestampTolerance compares values, treating timestamps specially.
-func (r *{{ .Kind }}Reconciler) valuesEqualWithTimestampTolerance(a, b interface{}) bool {
-	// Handle nil
-	if a == nil && b == nil {
+// isEmptyValue checks if a value is an empty slice, empty map, or nil
+func (r *{{ .Kind }}Reconciler) isEmptyValue(v interface{}) bool {
+	if v == nil {
 		return true
 	}
-	if a == nil || b == nil {
+	switch val := v.(type) {
+	case []interface{}:
+		return len(val) == 0
+	case map[string]interface{}:
+		return len(val) == 0
+	case string:
+		return val == ""
+	}
+	return false
+}
+
+// valuesEqualWithTimestampTolerance compares values, treating timestamps specially.
+// For maps, it checks that the desired (b) is a subset of existing (a).
+func (r *{{ .Kind }}Reconciler) valuesEqualWithTimestampTolerance(existing, desired interface{}) bool {
+	// Handle nil
+	if existing == nil && desired == nil {
+		return true
+	}
+	// If desired is nil/empty, it's always satisfied
+	if r.isEmptyValue(desired) {
+		return true
+	}
+	if existing == nil {
 		return false
 	}
 
 	// Check string timestamps
-	aStr, aIsStr := a.(string)
-	bStr, bIsStr := b.(string)
-	if aIsStr && bIsStr {
+	existingStr, existingIsStr := existing.(string)
+	desiredStr, desiredIsStr := desired.(string)
+	if existingIsStr && desiredIsStr {
 		// Try parsing as RFC3339 timestamps
-		aTime, aErr := time.Parse(time.RFC3339, aStr)
-		bTime, bErr := time.Parse(time.RFC3339, bStr)
-		if aErr == nil && bErr == nil {
+		existingTime, existingErr := time.Parse(time.RFC3339, existingStr)
+		desiredTime, desiredErr := time.Parse(time.RFC3339, desiredStr)
+		if existingErr == nil && desiredErr == nil {
 			// Both are timestamps - treat as equal (the existing timestamp wins)
 			// This prevents drift from dynamic values like ${now()}
-			_ = aTime
-			_ = bTime
+			_ = existingTime
+			_ = desiredTime
 			return true
 		}
 		// Not timestamps, compare as strings
-		return aStr == bStr
+		return existingStr == desiredStr
 	}
 
-	// Handle maps
-	aMap, aIsMap := a.(map[string]interface{})
-	bMap, bIsMap := b.(map[string]interface{})
-	if aIsMap && bIsMap {
-		return r.mapsEqualWithTimestampTolerance(aMap, bMap)
+	// Handle maps - check desired is subset of existing
+	existingMap, existingIsMap := existing.(map[string]interface{})
+	desiredMap, desiredIsMap := desired.(map[string]interface{})
+	if existingIsMap && desiredIsMap {
+		return r.desiredSubsetOfExisting(existingMap, desiredMap)
 	}
 
 	// Handle slices
-	aSlice, aIsSlice := a.([]interface{})
-	bSlice, bIsSlice := b.([]interface{})
-	if aIsSlice && bIsSlice {
-		if len(aSlice) != len(bSlice) {
+	existingSlice, existingIsSlice := existing.([]interface{})
+	desiredSlice, desiredIsSlice := desired.([]interface{})
+	if existingIsSlice && desiredIsSlice {
+		if len(existingSlice) != len(desiredSlice) {
 			return false
 		}
-		for i := range aSlice {
-			if !r.valuesEqualWithTimestampTolerance(aSlice[i], bSlice[i]) {
+		for i := range desiredSlice {
+			if !r.valuesEqualWithTimestampTolerance(existingSlice[i], desiredSlice[i]) {
 				return false
 			}
 		}
@@ -1170,14 +1288,14 @@ func (r *{{ .Kind }}Reconciler) valuesEqualWithTimestampTolerance(a, b interface
 	}
 
 	// Handle numeric comparisons (JSON unmarshaling may produce different types)
-	aFloat, aIsNum := toFloat64(a)
-	bFloat, bIsNum := toFloat64(b)
-	if aIsNum && bIsNum {
-		return aFloat == bFloat
+	existingFloat, existingIsNum := toFloat64(existing)
+	desiredFloat, desiredIsNum := toFloat64(desired)
+	if existingIsNum && desiredIsNum {
+		return existingFloat == desiredFloat
 	}
 
 	// Default: direct comparison
-	return reflect.DeepEqual(a, b)
+	return reflect.DeepEqual(existing, desired)
 }
 
 // toFloat64 attempts to convert a value to float64 for numeric comparison.

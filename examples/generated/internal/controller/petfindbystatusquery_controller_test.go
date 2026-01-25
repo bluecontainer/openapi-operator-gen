@@ -119,7 +119,8 @@ func TestPetFindbystatusQueryReconciler_E2E(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	// Create fake client with the object
@@ -205,7 +206,8 @@ func TestPetFindbystatusQueryReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -288,7 +290,8 @@ func TestPetFindbystatusQueryReconciler_CreateResource(t *testing.T) {
 			Name:      "new-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -351,7 +354,8 @@ func TestPetFindbystatusQueryReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -414,7 +418,8 @@ func TestPetFindbystatusQueryReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -477,7 +482,8 @@ func TestPetFindbystatusQueryReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -545,7 +551,8 @@ func TestPetFindbystatusQueryReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -600,7 +607,8 @@ func TestPetFindbystatusQueryReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -655,7 +663,8 @@ func TestPetFindbystatusQueryReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -865,7 +874,6 @@ func TestPetFindbystatusQueryReconciler_URLAndResponseConsistency(t *testing.T) 
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-
 // TestPetFindbystatusQueryReconciler_QueryParams verifies that query parameters from spec
 // are correctly appended to the HTTP request URL
 func TestPetFindbystatusQueryReconciler_QueryParams(t *testing.T) {
@@ -898,7 +906,8 @@ func TestPetFindbystatusQueryReconciler_QueryParams(t *testing.T) {
 			Name:      "test-petfindbystatusquery",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetFindbystatusQuerySpec{},
+		Spec: v1alpha1.PetFindbystatusQuerySpec{
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -975,3 +984,4 @@ func TestPetFindbystatusQueryReconciler_QueryParams(t *testing.T) {
 		t.Errorf("expected query path pattern %q in URL (prefix=%q, suffix=%q)", expectedQueryPath, staticPrefix, staticSuffix)
 	}
 }
+
