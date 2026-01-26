@@ -7,13 +7,33 @@ import (
 	"time"
 )
 
-// ValuesEqual compares two values for equality, handling special cases like timestamps.
+// ValuesEqual compares two values for equality, handling special cases like timestamps,
+// numeric type mismatches, and nested maps/slices.
 // It normalizes RFC 3339 timestamps before comparison to handle format variations
 // (e.g., "2026-01-15T10:00:00Z" vs "2026-01-15T10:00:00.000+00:00").
 func ValuesEqual(a, b interface{}) bool {
+	return valuesEqualInternal(a, b, false)
+}
+
+// ValuesEqualIgnoreTimestamps compares two values for equality, but treats any two
+// valid RFC3339 timestamps as equal regardless of their actual values.
+// This is useful for drift detection when dynamic timestamp expressions like ${now()}
+// are used in specs - the spec value will always differ from the API's stored value,
+// but we don't want to detect this as drift.
+func ValuesEqualIgnoreTimestamps(a, b interface{}) bool {
+	return valuesEqualInternal(a, b, true)
+}
+
+// valuesEqualInternal is the internal implementation that handles both timestamp modes.
+func valuesEqualInternal(a, b interface{}, ignoreTimestampValues bool) bool {
 	// Fast path: direct equality
 	if reflect.DeepEqual(a, b) {
 		return true
+	}
+
+	// Handle nil cases
+	if a == nil || b == nil {
+		return a == nil && b == nil
 	}
 
 	// Handle string comparisons (timestamps)
@@ -24,6 +44,11 @@ func ValuesEqual(a, b interface{}) bool {
 		aTime, aErr := time.Parse(time.RFC3339Nano, aStr)
 		bTime, bErr := time.Parse(time.RFC3339Nano, bStr)
 		if aErr == nil && bErr == nil {
+			if ignoreTimestampValues {
+				// Both are valid timestamps - treat as equal regardless of value
+				// This handles dynamic expressions like ${now()} in specs
+				return true
+			}
 			// Both are valid timestamps - compare as times
 			return aTime.Equal(bTime)
 		}
@@ -39,7 +64,79 @@ func ValuesEqual(a, b interface{}) bool {
 		return aFloat == bFloat
 	}
 
+	// Handle map comparisons (nested objects)
+	aMap, aIsMap := a.(map[string]interface{})
+	bMap, bIsMap := b.(map[string]interface{})
+	if aIsMap && bIsMap {
+		return mapsEqualInternal(aMap, bMap, ignoreTimestampValues)
+	}
+
+	// Handle slice comparisons (arrays)
+	aSlice, aIsSlice := toSlice(a)
+	bSlice, bIsSlice := toSlice(b)
+	if aIsSlice && bIsSlice {
+		return slicesEqualInternal(aSlice, bSlice, ignoreTimestampValues)
+	}
+
 	return false
+}
+
+// mapsEqual compares two maps recursively for equality.
+func mapsEqual(a, b map[string]interface{}) bool {
+	return mapsEqualInternal(a, b, false)
+}
+
+// mapsEqualInternal compares two maps recursively with optional timestamp ignoring.
+func mapsEqualInternal(a, b map[string]interface{}, ignoreTimestampValues bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, aVal := range a {
+		bVal, exists := b[key]
+		if !exists {
+			return false
+		}
+		if !valuesEqualInternal(aVal, bVal, ignoreTimestampValues) {
+			return false
+		}
+	}
+	return true
+}
+
+// slicesEqual compares two slices recursively for equality.
+func slicesEqual(a, b []interface{}) bool {
+	return slicesEqualInternal(a, b, false)
+}
+
+// slicesEqualInternal compares two slices recursively with optional timestamp ignoring.
+func slicesEqualInternal(a, b []interface{}, ignoreTimestampValues bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !valuesEqualInternal(a[i], b[i], ignoreTimestampValues) {
+			return false
+		}
+	}
+	return true
+}
+
+// toSlice attempts to convert a value to []interface{}.
+// Returns the slice and true if conversion was successful.
+func toSlice(v interface{}) ([]interface{}, bool) {
+	if slice, ok := v.([]interface{}); ok {
+		return slice, true
+	}
+	// Handle typed slices using reflection
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice {
+		return nil, false
+	}
+	result := make([]interface{}, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		result[i] = rv.Index(i).Interface()
+	}
+	return result, true
 }
 
 // ToFloat64 attempts to convert a value to float64.

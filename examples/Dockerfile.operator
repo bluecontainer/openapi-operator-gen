@@ -1,0 +1,32 @@
+# Dockerfile for building the operator with local openapi-operator-gen package
+# Build stage
+FROM golang:1.25 AS builder
+
+WORKDIR /workspace
+
+# Copy the openapi-operator-gen package (for local replace directive)
+COPY go.mod go.sum ./
+COPY pkg/ pkg/
+COPY cmd/ cmd/
+COPY internal/ internal/
+
+# Copy the generated operator code
+COPY examples/generated/go.mod examples/generated/go.sum ./generated/
+COPY examples/generated/cmd/ ./generated/cmd/
+COPY examples/generated/api/ ./generated/api/
+COPY examples/generated/internal/ ./generated/internal/
+
+# Build from the generated directory
+# Fix the replace directive to point to /workspace (parent in container)
+WORKDIR /workspace/generated
+RUN sed -i 's|replace github.com/bluecontainer/openapi-operator-gen => \.\./\.\.|replace github.com/bluecontainer/openapi-operator-gen => /workspace|' go.mod && \
+    go mod tidy && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager cmd/manager/main.go
+
+# Runtime stage
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/generated/manager .
+USER 65532:65532
+
+ENTRYPOINT ["/manager"]

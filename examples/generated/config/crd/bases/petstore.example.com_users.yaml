@@ -139,6 +139,11 @@ spec:
           status:
             description: UserStatus defines the observed state of User
             properties:
+              adoptedAt:
+                description: AdoptedAt is when this CR first adopted the external
+                  resource.
+                format: date-time
+                type: string
               conditions:
                 description: Conditions represent the latest available observations
                   of an object's state
@@ -236,6 +241,12 @@ spec:
                 description: ObservedGeneration is the last observed generation
                 format: int64
                 type: integer
+              originalState:
+                description: |-
+                  OriginalState stores the state of the resource when first adopted (via path params or ExternalIDRef).
+                  Used for OnDelete=Restore to revert changes made by the controller.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               response:
                 description: Response contains the last response from the REST API
                   (single endpoint mode)

@@ -15,3 +15,5 @@ spec:
   derivedValues:
     - name: approvedCount
       expression: "sum(storeinventoryqueries.map(r, r.status.results.data.approved))"
+    - name: approvedCount2
+      expression: "storeinventoryquery_storeinventoryquery_sample.status.results.data.approved"

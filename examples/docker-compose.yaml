@@ -28,7 +28,7 @@
 
 services:
   petstore:
-    image: swaggerapi/petstore3:1.0.27
+    image: swaggerapi/petstore3:unstable
     ports:
       - "8080:8080"
     environment:
@@ -100,14 +100,15 @@ services:
   # The operator container - connects to k3s
   operator-k3s:
     build:
-      context: ./generated
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: examples/Dockerfile.operator
     image: petstore-operator:local
     profiles:
       - k3s
     environment:
       - REST_API_BASE_URL=http://petstore:8080/api/v3
       - KUBECONFIG=/kubeconfig/kubeconfig-fixed.yaml
+      - OPERATOR_LOG_LEVEL=debug
     volumes:
       - k3s-kubeconfig:/kubeconfig:ro
     depends_on:
@@ -119,8 +120,8 @@ services:
   # The operator container - connects to local Kubernetes cluster
   operator:
     build:
-      context: ./generated
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: examples/Dockerfile.operator
     image: petstore-operator:local
     profiles:
       - with-k8s

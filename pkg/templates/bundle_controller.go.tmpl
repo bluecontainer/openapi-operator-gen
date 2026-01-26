@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -83,7 +85,7 @@ func init() {
 
 const (
 	{{ .KindLower }}FinalizerName = "{{ .APIGroup }}/bundle-finalizer"
-	{{ .KindLower }}RequeueAfter  = time.Second * 30
+	// {{ .KindLower }}RetryAfter is used to requeue when waiting for child resources to sync
 	{{ .KindLower }}RetryAfter    = time.Second * 5
 )
 
@@ -349,13 +351,17 @@ func (r *{{ .Kind }}Reconciler) syncResources(ctx context.Context, bundle *{{ .A
 			continue
 		}
 
-		// Resolve CEL expressions in spec
-		resolvedSpec, err := r.resolveExpressions(res.Spec, statusMap, bundle)
+		// Get existing child's REST API response data (for preserving ${now()} values)
+		childName := fmt.Sprintf("%s-%s", bundle.Name, id)
+		existingResponseData := r.getExistingChildResponseData(ctx, res.Kind, childName, bundle.Namespace)
+
+		// Resolve CEL expressions in spec, using REST API response values for ${now()} if available
+		resolvedSpec, err := r.resolveExpressions(res.Spec, statusMap, bundle, existingResponseData)
 		if err != nil {
 			statuses = append(statuses, {{ .APIVersion }}.BundleResourceStatus{
 				ID:      id,
 				Kind:    res.Kind,
-				Name:    fmt.Sprintf("%s-%s", bundle.Name, id),
+				Name:    childName,
 				State:   "Failed",
 				Message: fmt.Sprintf("Expression error: %v", err),
 			})
@@ -434,6 +440,50 @@ func (r *{{ .Kind }}Reconciler) syncResources(ctx context.Context, bundle *{{ .A
 	}
 
 	return result, nil
+}
+
+// getExistingChildResponseData retrieves the status.response.data of an existing child resource.
+// Returns nil if the resource doesn't exist or has no response data.
+// This is used to preserve ${now()} values on updates - we use the value from the REST API
+// response (the authoritative source) instead of re-evaluating to new timestamps.
+func (r *{{ .Kind }}Reconciler) getExistingChildResponseData(
+	ctx context.Context,
+	kind string,
+	name string,
+	namespace string,
+) map[string]interface{} {
+	switch kind {
+{{- range .ResourceKinds }}
+	case "{{ . }}":
+		existing := &{{ $.APIVersion }}.{{ . }}{}
+		if err := r.Get(ctx, k8stypes.NamespacedName{Name: name, Namespace: namespace}, existing); err != nil {
+			return nil
+		}
+		// Use status.response.data if available (contains REST API response)
+		if existing.Status.Response != nil && existing.Status.Response.Data != nil && existing.Status.Response.Data.Raw != nil {
+			var dataMap map[string]interface{}
+			if err := json.Unmarshal(existing.Status.Response.Data.Raw, &dataMap); err != nil {
+				return nil
+			}
+			return dataMap
+		}
+		return nil
+{{- end }}
+{{- range .QueryKinds }}
+	case "{{ . }}":
+		// Query CRDs don't have REST API response data to preserve
+		// ${now()} should be re-evaluated for periodic queries
+		return nil
+{{- end }}
+{{- range .ActionKinds }}
+	case "{{ . }}":
+		// Action CRDs don't have REST API response data to preserve in the same way
+		// ${now()} should be evaluated fresh for each action execution
+		return nil
+{{- end }}
+	default:
+		return nil
+	}
 }
 
 // syncChildResource creates or updates a single child resource
@@ -522,24 +572,39 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		return nil, err
 	}
 
-	// Update if spec changed
-	if !reflect.DeepEqual(existing.Spec, child.Spec) {
+	// Update if spec changed (using smart comparison that handles timestamp fields)
+	if !r.specsEqual(existing.Spec, child.Spec) {
 		logger.Info("Updating child resource", "kind", "{{ . }}", "name", name)
 		existing.Spec = child.Spec
 		if err := r.Update(ctx, existing); err != nil {
+			if errors.IsConflict(err) {
+				// Resource was modified, requeue to retry
+				return &{{ $.APIVersion }}.BundleResourceStatus{
+					ID:           id,
+					Kind:         "{{ . }}",
+					Name:         name,
+					State:        "Pending",
+					Message:      "Resource conflict, retrying",
+					LastSyncTime: existing.Status.LastSyncTime,
+				}, nil
+			}
 			return nil, err
 		}
 	}
 
-	// Return current status
+	// Return current status (default to "Pending" if state is empty)
+	state := existing.Status.State
+	if state == "" {
+		state = "Pending"
+	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
 		ID:           id,
 		Kind:         "{{ . }}",
 		Name:         name,
-		State:        existing.Status.State,
+		State:        state,
 		ExternalID:   controllerutil2.GetExternalIDIfPresent(existing),
 		Message:      existing.Status.Message,
-		Ready:        existing.Status.State == "Synced",
+		Ready:        state == "Synced",
 		LastSyncTime: existing.Status.LastSyncTime,
 	}, nil
 }
@@ -601,23 +666,38 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		return nil, err
 	}
 
-	// Update if spec changed
-	if !reflect.DeepEqual(existing.Spec, child.Spec) {
+	// Update if spec changed (using smart comparison that handles timestamp fields)
+	if !r.specsEqual(existing.Spec, child.Spec) {
 		logger.Info("Updating child resource", "kind", "{{ . }}", "name", name)
 		existing.Spec = child.Spec
 		if err := r.Update(ctx, existing); err != nil {
+			if errors.IsConflict(err) {
+				// Resource was modified, requeue to retry
+				return &{{ $.APIVersion }}.BundleResourceStatus{
+					ID:           id,
+					Kind:         "{{ . }}",
+					Name:         name,
+					State:        "Pending",
+					Message:      "Resource conflict, retrying",
+					LastSyncTime: existing.Status.LastQueryTime,
+				}, nil
+			}
 			return nil, err
 		}
 	}
 
-	// Return current status (Query CRDs use "Queried" as success state)
+	// Return current status (Query CRDs use "Queried" as success state, default to "Pending" if empty)
+	state := existing.Status.State
+	if state == "" {
+		state = "Pending"
+	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
 		ID:           id,
 		Kind:         "{{ . }}",
 		Name:         name,
-		State:        existing.Status.State,
+		State:        state,
 		Message:      existing.Status.Message,
-		Ready:        existing.Status.State == "Queried",
+		Ready:        state == "Queried",
 		LastSyncTime: existing.Status.LastQueryTime,
 	}, nil
 }
@@ -679,23 +759,38 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		return nil, err
 	}
 
-	// Update if spec changed
-	if !reflect.DeepEqual(existing.Spec, child.Spec) {
+	// Update if spec changed (using smart comparison that handles timestamp fields)
+	if !r.specsEqual(existing.Spec, child.Spec) {
 		logger.Info("Updating child resource", "kind", "{{ . }}", "name", name)
 		existing.Spec = child.Spec
 		if err := r.Update(ctx, existing); err != nil {
+			if errors.IsConflict(err) {
+				// Resource was modified, requeue to retry
+				return &{{ $.APIVersion }}.BundleResourceStatus{
+					ID:           id,
+					Kind:         "{{ . }}",
+					Name:         name,
+					State:        "Pending",
+					Message:      "Resource conflict, retrying",
+					LastSyncTime: existing.Status.LastExecutionTime,
+				}, nil
+			}
 			return nil, err
 		}
 	}
 
-	// Return current status (Action CRDs use "Completed" as success state)
+	// Return current status (Action CRDs use "Completed" as success state, default to "Pending" if empty)
+	state := existing.Status.State
+	if state == "" {
+		state = "Pending"
+	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
 		ID:           id,
 		Kind:         "{{ . }}",
 		Name:         name,
-		State:        existing.Status.State,
+		State:        state,
 		Message:      existing.Status.Message,
-		Ready:        existing.Status.State == "Completed",
+		Ready:        state == "Completed",
 		LastSyncTime: existing.Status.LastExecutionTime,
 	}, nil
 }
@@ -763,11 +858,15 @@ func (r *{{ .Kind }}Reconciler) evaluateConditions(conditions []string, statusMa
 	return false, nil
 }
 
-// resolveExpressions replaces CEL expressions in spec with resolved values
+// resolveExpressions replaces CEL expressions in spec with resolved values.
+// If existingSpec is provided (non-nil), ${now()} expressions will use the
+// existing value instead of generating a new timestamp. This prevents drift
+// on updates when the bundle uses dynamic timestamps.
 func (r *{{ .Kind }}Reconciler) resolveExpressions(
 	spec k8sruntime.RawExtension,
 	statusMap map[string]*{{ .APIVersion }}.BundleResourceStatus,
 	bundle *{{ .APIVersion }}.{{ .Kind }},
+	existingSpec map[string]interface{},
 ) ([]byte, error) {
 	if spec.Raw == nil {
 		return []byte("{}"), nil
@@ -792,8 +891,8 @@ func (r *{{ .Kind }}Reconciler) resolveExpressions(
 		}
 	}
 
-	// Recursively resolve expressions
-	resolved, err := r.resolveMap(data, resourcesVar)
+	// Recursively resolve expressions, passing existingSpec for ${now()} preservation
+	resolved, err := r.resolveMap(data, resourcesVar, existingSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -801,29 +900,53 @@ func (r *{{ .Kind }}Reconciler) resolveExpressions(
 	return json.Marshal(resolved)
 }
 
-// resolveMap recursively resolves CEL expressions in a map
+// resolveMap recursively resolves CEL expressions in a map.
+// existingSpec is used to preserve ${now()} values on updates - if a field had
+// ${now()} and the resource already exists, use the existing value instead.
 func (r *{{ .Kind }}Reconciler) resolveMap(
 	data map[string]interface{},
 	resources map[string]interface{},
+	existingSpec map[string]interface{},
 ) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
 	for key, value := range data {
 		switch v := value.(type) {
 		case string:
-			// Check if it's a CEL expression: ${...}
-			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+			// Check if it's a standalone CEL expression: ${...}
+			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") && strings.Count(v, "${") == 1 {
 				expr := v[2 : len(v)-1]
+				// For ${now()} expressions, use existing value if available
+				if expr == "now()" && existingSpec != nil {
+					if existingVal, ok := existingSpec[key]; ok {
+						result[key] = existingVal
+						continue
+					}
+				}
 				resolved, err := r.evaluateSimpleExpression(expr, resources)
 				if err != nil {
 					return nil, fmt.Errorf("failed to evaluate %s: %w", key, err)
+				}
+				result[key] = resolved
+			} else if strings.Contains(v, "${") {
+				// Handle embedded expressions like "prefix-${resources.x.status.y}-suffix"
+				resolved, err := r.resolveEmbeddedExpressions(v, resources)
+				if err != nil {
+					return nil, fmt.Errorf("failed to evaluate embedded expression in %s: %w", key, err)
 				}
 				result[key] = resolved
 			} else {
 				result[key] = v
 			}
 		case map[string]interface{}:
-			resolved, err := r.resolveMap(v, resources)
+			// Get nested existing spec if available
+			var nestedExisting map[string]interface{}
+			if existingSpec != nil {
+				if nested, ok := existingSpec[key].(map[string]interface{}); ok {
+					nestedExisting = nested
+				}
+			}
+			resolved, err := r.resolveMap(v, resources, nestedExisting)
 			if err != nil {
 				return nil, err
 			}
@@ -852,9 +975,16 @@ func (r *{{ .Kind }}Reconciler) resolveSlice(
 	for i, value := range data {
 		switch v := value.(type) {
 		case string:
-			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") && strings.Count(v, "${") == 1 {
 				expr := v[2 : len(v)-1]
 				resolved, err := r.evaluateSimpleExpression(expr, resources)
+				if err != nil {
+					return nil, err
+				}
+				result[i] = resolved
+			} else if strings.Contains(v, "${") {
+				// Handle embedded expressions
+				resolved, err := r.resolveEmbeddedExpressions(v, resources)
 				if err != nil {
 					return nil, err
 				}
@@ -863,7 +993,8 @@ func (r *{{ .Kind }}Reconciler) resolveSlice(
 				result[i] = v
 			}
 		case map[string]interface{}:
-			resolved, err := r.resolveMap(v, resources)
+			// No existing spec for nested maps in slices
+			resolved, err := r.resolveMap(v, resources, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -883,6 +1014,7 @@ func (r *{{ .Kind }}Reconciler) resolveSlice(
 }
 
 // evaluateSimpleExpression evaluates a simple path expression like "resources.pet.status.externalID"
+// or a CEL function call like "now()" or "addDuration(now(), '24h')"
 func (r *{{ .Kind }}Reconciler) evaluateSimpleExpression(expr string, resources map[string]interface{}) (interface{}, error) {
 	// Handle resources.<id>.status.<field> pattern
 	if strings.HasPrefix(expr, "resources.") {
@@ -907,10 +1039,90 @@ func (r *{{ .Kind }}Reconciler) evaluateSimpleExpression(expr string, resources 
 			current = m[part]
 		}
 
+		// Convert numeric strings to actual numbers for proper JSON marshaling
+		// This allows expressions like ${resources.parent.status.externalID} to work
+		// with numeric fields like petId: int64
+		if str, ok := current.(string); ok {
+			// Try to parse as integer first
+			if i, err := strconv.ParseInt(str, 10, 64); err == nil {
+				return i, nil
+			}
+			// Try to parse as float
+			if f, err := strconv.ParseFloat(str, 64); err == nil {
+				return f, nil
+			}
+			// Not a number, return as string
+		}
+
 		return current, nil
 	}
 
+	// Handle CEL function calls (expressions containing parentheses)
+	// Examples: now(), nowUnix(), addDuration(now(), "24h"), formatTime(nowUnix(), "2006-01-02")
+	if strings.Contains(expr, "(") {
+		// Create a CEL environment with datetime functions
+		env, err := celutil.NewEnvironment([]string{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create CEL environment: %w", err)
+		}
+
+		// Provide empty variables (CEL functions like now() don't need variables)
+		vars := map[string]interface{}{
+			"resources": []map[string]interface{}{},
+			"summary":   map[string]int64{"total": 0},
+		}
+
+		result := celutil.Evaluate(env, expr, vars)
+		if result.Error != nil {
+			return nil, fmt.Errorf("CEL evaluation failed: %w", result.Error)
+		}
+
+		return result.Value, nil
+	}
+
 	return nil, fmt.Errorf("unsupported expression: %s", expr)
+}
+
+// resolveEmbeddedExpressions handles strings with embedded expressions like "prefix-${resources.x.status.y}-suffix".
+// It replaces all ${...} patterns within the string with their resolved values.
+// The result is always a string since we're doing string interpolation.
+func (r *{{ .Kind }}Reconciler) resolveEmbeddedExpressions(s string, resources map[string]interface{}) (string, error) {
+	result := s
+	for {
+		start := strings.Index(result, "${")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "}")
+		if end == -1 {
+			return "", fmt.Errorf("unclosed expression in: %s", s)
+		}
+		end += start // Adjust to absolute position
+
+		expr := result[start+2 : end]
+		resolved, err := r.evaluateSimpleExpression(expr, resources)
+		if err != nil {
+			return "", err
+		}
+
+		// Convert resolved value to string for interpolation
+		var strValue string
+		switch v := resolved.(type) {
+		case string:
+			strValue = v
+		case int64:
+			strValue = strconv.FormatInt(v, 10)
+		case float64:
+			strValue = strconv.FormatFloat(v, 'f', -1, 64)
+		case bool:
+			strValue = strconv.FormatBool(v)
+		default:
+			strValue = fmt.Sprintf("%v", v)
+		}
+
+		result = result[:start] + strValue + result[end+1:]
+	}
+	return result, nil
 }
 
 // calculateSummary computes resource counts from statuses using shared classification logic
@@ -927,6 +1139,186 @@ func (r *{{ .Kind }}Reconciler) calculateSummary(statuses []{{ .APIVersion }}.Bu
 		Pending: int(counter.Pending),
 		Skipped: int(counter.Skipped),
 	}
+}
+
+// specsEqual compares two specs for equality, treating RFC3339 timestamps as equal
+// regardless of their actual values. This prevents unnecessary updates when dynamic
+// timestamps like ${now()} are used - once set, the timestamp is considered equal
+// even if it differs from a freshly-resolved value.
+//
+// The comparison checks that all fields in the desired spec are present and equal
+// in the existing spec. Extra fields in the existing spec (added by API server
+// defaults like mergeOnUpdate, category, etc.) are ignored.
+//
+// Controller-specific fields (mergeOnUpdate, targetHelmRelease, etc.) are excluded
+// from comparison since they may have defaults applied by the API server.
+func (r *{{ .Kind }}Reconciler) specsEqual(existing, desired interface{}) bool {
+	// Fast path: direct equality
+	if reflect.DeepEqual(existing, desired) {
+		return true
+	}
+
+	// Marshal both to JSON for deep comparison
+	existingJSON, err1 := json.Marshal(existing)
+	desiredJSON, err2 := json.Marshal(desired)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	// Unmarshal to maps for field-by-field comparison
+	var existingMap, desiredMap map[string]interface{}
+	if err := json.Unmarshal(existingJSON, &existingMap); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(desiredJSON, &desiredMap); err != nil {
+		return false
+	}
+
+	// Remove controller-specific fields from desired spec
+	// These fields are not part of the "business" spec and shouldn't cause updates
+	controllerFields := []string{
+		"mergeOnUpdate",     // Has default value true
+		"targetHelmRelease", // Inherited from bundle
+		"targetNamespace",   // Inherited from bundle
+		"readOnly",          // Controller behavior flag
+		"onDelete",          // Controller behavior flag
+		"externalIDRef",     // Reference field, not part of API payload
+	}
+	for _, field := range controllerFields {
+		delete(desiredMap, field)
+	}
+
+	// Check that all fields in desired are present and equal in existing
+	// Extra fields in existing (from API defaults) are ignored
+	return r.desiredSubsetOfExisting(existingMap, desiredMap)
+}
+
+// desiredSubsetOfExisting checks that all fields in desired are present and equal
+// in existing. Extra fields in either map are ignored. This handles cases where:
+// 1. The API server adds default values (like category: {}) that aren't in our spec
+// 2. The bundle spec contains fields that aren't valid for the CRD (like 'name' for Order)
+//    - these get dropped during json.Unmarshal into the typed struct
+func (r *{{ .Kind }}Reconciler) desiredSubsetOfExisting(existing, desired map[string]interface{}) bool {
+	for key, desiredVal := range desired {
+		existingVal, exists := existing[key]
+		if !exists {
+			// Desired field not in existing - this could mean:
+			// 1. The field was empty and omitted (ok to skip)
+			// 2. The field is invalid for this CRD type and will be dropped (ok to skip)
+			// Either way, if it's not in existing, we can't compare it
+			// and updating won't help since the field will be dropped again
+			continue
+		}
+		if !r.valuesEqualWithTimestampTolerance(existingVal, desiredVal) {
+			return false
+		}
+	}
+	return true
+}
+
+// isEmptyValue checks if a value is an empty slice, empty map, or nil
+func (r *{{ .Kind }}Reconciler) isEmptyValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	switch val := v.(type) {
+	case []interface{}:
+		return len(val) == 0
+	case map[string]interface{}:
+		return len(val) == 0
+	case string:
+		return val == ""
+	}
+	return false
+}
+
+// valuesEqualWithTimestampTolerance compares values, treating timestamps specially.
+// For maps, it checks that the desired (b) is a subset of existing (a).
+func (r *{{ .Kind }}Reconciler) valuesEqualWithTimestampTolerance(existing, desired interface{}) bool {
+	// Handle nil
+	if existing == nil && desired == nil {
+		return true
+	}
+	// If desired is nil/empty, it's always satisfied
+	if r.isEmptyValue(desired) {
+		return true
+	}
+	if existing == nil {
+		return false
+	}
+
+	// Check string timestamps
+	existingStr, existingIsStr := existing.(string)
+	desiredStr, desiredIsStr := desired.(string)
+	if existingIsStr && desiredIsStr {
+		// Try parsing as RFC3339 timestamps
+		existingTime, existingErr := time.Parse(time.RFC3339, existingStr)
+		desiredTime, desiredErr := time.Parse(time.RFC3339, desiredStr)
+		if existingErr == nil && desiredErr == nil {
+			// Both are timestamps - treat as equal (the existing timestamp wins)
+			// This prevents drift from dynamic values like ${now()}
+			_ = existingTime
+			_ = desiredTime
+			return true
+		}
+		// Not timestamps, compare as strings
+		return existingStr == desiredStr
+	}
+
+	// Handle maps - check desired is subset of existing
+	existingMap, existingIsMap := existing.(map[string]interface{})
+	desiredMap, desiredIsMap := desired.(map[string]interface{})
+	if existingIsMap && desiredIsMap {
+		return r.desiredSubsetOfExisting(existingMap, desiredMap)
+	}
+
+	// Handle slices
+	existingSlice, existingIsSlice := existing.([]interface{})
+	desiredSlice, desiredIsSlice := desired.([]interface{})
+	if existingIsSlice && desiredIsSlice {
+		if len(existingSlice) != len(desiredSlice) {
+			return false
+		}
+		for i := range desiredSlice {
+			if !r.valuesEqualWithTimestampTolerance(existingSlice[i], desiredSlice[i]) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Handle numeric comparisons (JSON unmarshaling may produce different types)
+	existingFloat, existingIsNum := toFloat64(existing)
+	desiredFloat, desiredIsNum := toFloat64(desired)
+	if existingIsNum && desiredIsNum {
+		return existingFloat == desiredFloat
+	}
+
+	// Default: direct comparison
+	return reflect.DeepEqual(existing, desired)
+}
+
+// toFloat64 attempts to convert a value to float64 for numeric comparison.
+func toFloat64(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	}
+	return 0, false
 }
 
 // calculateAggregatedHealth computes Aggregate CRD-compatible health status from bundle resources.
@@ -1026,38 +1418,69 @@ func (r *{{ .Kind }}Reconciler) evaluateAggregationStrategy(strategy string, sum
 func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *{{ .APIVersion }}.{{ .Kind }}, state, message string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	now := metav1.Now()
-	bundle.Status.State = state
-	bundle.Status.Message = message
-	bundle.Status.ObservedGeneration = bundle.Generation
+	// Capture the current resource status snapshot (may have been updated by syncChildResources)
+	resourcesSnapshot := make([]{{ .APIVersion }}.BundleResourceStatus, len(bundle.Status.Resources))
+	copy(resourcesSnapshot, bundle.Status.Resources)
 
-	// Update operation state
-	if bundle.Status.OperationState == nil {
-		bundle.Status.OperationState = &{{ .APIVersion }}.BundleOperationState{}
-	}
-	bundle.Status.OperationState.Phase = state
-	bundle.Status.OperationState.Message = message
-	if state == "Synced" || state == "Failed" {
-		bundle.Status.OperationState.FinishedAt = &now
-	}
+	// Use retry to handle conflicts from concurrent reconciliations (e.g., when child resources are also being watched)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Refetch the latest version to get current resourceVersion
+		latest := &{{ .APIVersion }}.{{ .Kind }}{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(bundle), latest); err != nil {
+			return err
+		}
 
-	// Calculate and set Aggregate CRD-compatible health status
-	bundle.Status.AggregatedHealth = r.calculateAggregatedHealth(bundle)
+		now := metav1.Now()
+		latest.Status.State = state
+		latest.Status.Message = message
+		latest.Status.ObservedGeneration = latest.Generation
 
-	// Evaluate derived values if configured
-	if len(bundle.Spec.DerivedValues) > 0 {
-		bundle.Status.AggregatedHealth.ComputedValues = r.evaluateDerivedValues(ctx, bundle)
-	}
+		// Apply the captured resource statuses
+		latest.Status.Resources = resourcesSnapshot
 
-	// Set conditions
-	r.setConditions(ctx, bundle, state, message)
+		// Update operation state
+		if latest.Status.OperationState == nil {
+			latest.Status.OperationState = &{{ .APIVersion }}.BundleOperationState{}
+		}
+		// Map bundle state to operation phase (Phase enum: Pending, Running, Succeeded, Failed)
+		switch state {
+		case "Synced":
+			latest.Status.OperationState.Phase = "Succeeded"
+		case "Failed":
+			latest.Status.OperationState.Phase = "Failed"
+		case "Pending", "Creating":
+			latest.Status.OperationState.Phase = "Running"
+		default:
+			latest.Status.OperationState.Phase = "Pending"
+		}
+		latest.Status.OperationState.Message = message
+		if state == "Synced" || state == "Failed" {
+			latest.Status.OperationState.FinishedAt = &now
+		}
 
-	if err := r.Status().Update(ctx, bundle); err != nil {
-		logger.Error(err, "Failed to update status")
+		// Calculate and set Aggregate CRD-compatible health status
+		latest.Status.AggregatedHealth = r.calculateAggregatedHealth(latest)
+
+		// Evaluate derived values if configured
+		if len(latest.Spec.DerivedValues) > 0 {
+			latest.Status.AggregatedHealth.ComputedValues = r.evaluateDerivedValues(ctx, latest)
+		}
+
+		// Set conditions
+		r.setConditions(ctx, latest, state, message)
+
+		return r.Status().Update(ctx, latest)
+	})
+
+	if err != nil {
+		logger.Error(err, "Failed to update status after retries")
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+	// No periodic requeue needed - reconciliation is triggered by:
+	// 1. Changes to the bundle CR itself (spec updates)
+	// 2. Changes to child resources (via Owns() watches in SetupWithManager)
+	return ctrl.Result{}, nil
 }
 
 // setConditions sets the status conditions based on bundle state

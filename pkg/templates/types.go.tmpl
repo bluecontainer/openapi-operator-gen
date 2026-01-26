@@ -457,6 +457,9 @@ func init() {
 {{- else }}
 
 // {{ .Kind }}Spec defines the desired state of {{ .Kind }}
+{{- range .CELValidationRules }}
+// +kubebuilder:validation:XValidation:rule={{ printf "%q" .Rule }},message={{ printf "%q" .Message }}
+{{- end }}
 type {{ .Kind }}Spec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -645,18 +648,18 @@ type {{ .Kind }}Status struct {
 	// Used to determine default OnDelete behavior (Delete if true, Orphan if false).
 	// +optional
 	CreatedByController bool `json:"createdByController,omitempty"`
+{{- end }}
 
-{{- if .NeedsExternalIDRef }}
-	// OriginalState stores the state of the resource when first adopted via ExternalIDRef.
+{{- if or .HasPatch .HasPut }}
+	// OriginalState stores the state of the resource when first adopted (via path params or ExternalIDRef).
 	// Used for OnDelete=Restore to revert changes made by the controller.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	OriginalState *runtime.RawExtension `json:"originalState,omitempty"`
 
-	// AdoptedAt is when this CR first adopted the external resource via ExternalIDRef.
+	// AdoptedAt is when this CR first adopted the external resource.
 	// +optional
 	AdoptedAt *metav1.Time `json:"adoptedAt,omitempty"`
-{{- end }}
 {{- end }}
 }
 

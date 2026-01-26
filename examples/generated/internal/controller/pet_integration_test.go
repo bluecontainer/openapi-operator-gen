@@ -70,8 +70,6 @@ var _ = Describe("Pet Controller Integration", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: v1alpha1.PetSpec{
-					Name:      "test-value",
-					PhotoUrls: []string{"test-value"},
 				},
 			}
 			Expect(GetK8sClient().Create(GetContext(), pet)).To(Succeed())
@@ -97,8 +95,6 @@ var _ = Describe("Pet Controller Integration", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: v1alpha1.PetSpec{
-					Name:      "test-value",
-					PhotoUrls: []string{"test-value"},
 				},
 			}
 			Expect(GetK8sClient().Create(GetContext(), pet)).To(Succeed())
@@ -135,8 +131,6 @@ var _ = Describe("Pet Controller Integration", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: v1alpha1.PetSpec{
-					Name:      "test-value",
-					PhotoUrls: []string{"test-value"},
 				},
 			}
 			Expect(GetK8sClient().Create(GetContext(), pet)).To(Succeed())

@@ -1,0 +1,29 @@
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: simple-bundle
+  namespace: default
+spec:
+  # Target settings (inherited by child resources)
+  # targetHelmRelease: my-release
+  # targetNamespace: backend
+  resources:
+    # Parent resource
+    - id: parent
+      kind: Pet
+      spec:
+        name: "parent-resource"
+        photoUrls: ["item1"]
+        status: "available"
+        tags: []
+    # Child resource using parent's external ID
+    # Dependency on 'parent' is automatically inferred from the reference below
+    - id: child
+      kind: Order
+      spec:
+        name: "child-of-${resources.parent.status.externalID}"
+        complete: true
+        petId: ${resources.parent.status.externalID}
+        quantity: 1
+        shipDate: ${now()}
+        status: "placed"

@@ -80,7 +80,9 @@ func init() {
 }
 
 const (
-	{{ .KindLower }}RequeueAfter = time.Second * 30
+	// {{ .KindLower }}RequeueAfterError is used to retry after an error
+	// We use a short interval since errors should be investigated
+	{{ .KindLower }}RequeueAfterError = time.Second * 30
 )
 
 // {{ .Kind }}Reconciler reconciles a {{ .Kind }} object
@@ -152,10 +154,13 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 	// Aggregate status from all selected resources
 	if err := r.aggregateStatus(ctx, instance); err != nil {
 		r.updateStatus(ctx, instance, "Failed", err.Error())
-		return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, err
+		return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfterError}, err
 	}
 
-	return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+	// No periodic requeue needed - reconciliation is triggered by:
+	// 1. Changes to the aggregate CR itself (spec updates)
+	// 2. Changes to child resources (via watches in SetupWithManager)
+	return ctrl.Result{}, nil
 }
 
 // aggregateStatus collects and aggregates status from all selected resources
