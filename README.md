@@ -7,6 +7,8 @@
 
 A code generator that creates Kubernetes operators from OpenAPI specifications. It maps REST API resources to Kubernetes Custom Resource Definitions (CRDs) and generates controller reconciliation logic that syncs CRs with the backing REST API.
 
+**Why use this approach?** See [Benefits of REST API to Kubernetes Operator Mapping](docs/benefits.md) for a detailed explanation of the value proposition, architectural benefits, and system architectures this enables.
+
 ## Table of Contents
 
 - [Features](#features)
