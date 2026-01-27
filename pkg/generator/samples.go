@@ -431,11 +431,11 @@ func (g *SamplesGenerator) isTargetingField(jsonName string) bool {
 // These are mutually exclusive options shown as comments in samples
 func (g *SamplesGenerator) isBinaryDataField(jsonName string) bool {
 	binaryFields := map[string]bool{
-		"data":           true,
-		"dataFrom":       true,
-		"dataURL":        true,
-		"dataFromVolume": true,
-		"contentType":    true,
+		"data":         true,
+		"dataFrom":     true,
+		"dataURL":      true,
+		"dataFromFile": true,
+		"contentType":  true,
 	}
 	return binaryFields[jsonName]
 }
@@ -451,8 +451,8 @@ func (g *SamplesGenerator) generateBinaryDataExampleValue(jsonName string) strin
 		return `{"configMapRef": {"name": "my-image-data", "key": "image.png"}}`
 	case "dataURL":
 		return `"https://example.com/images/photo.png"`
-	case "dataFromVolume":
-		return `{"claimName": "my-pvc", "path": "/data/image.png"}`
+	case "dataFromFile":
+		return `{"path": "/data/image.png"}`
 	case "contentType":
 		return `"image/png"`
 	default:

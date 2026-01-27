@@ -35,9 +35,8 @@ spec:
   # Option 4: Fetch from URL
   # dataURL: "https://example.com/images/photo.png"
   #
-  # Option 5: Read from PVC (requires volume mount in operator)
-  # dataFromVolume:
-  #   claimName: my-pvc
+  # Option 5: Read from file (requires operator filesystem access)
+  # dataFromFile:
   #   path: /data/image.png
   #
   # Optional: Override content type (default: application/octet-stream)

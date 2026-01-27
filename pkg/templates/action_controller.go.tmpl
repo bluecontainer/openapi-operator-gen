@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+{{- if .HasBinaryBody }}
+	"os"
+{{- end }}
 	"time"
 
 {{- if .HasBinaryBody }}
@@ -411,10 +414,9 @@ func (r *{{ .Kind }}Reconciler) buildRequestBody(instance *{{ .APIVersion }}.{{ 
 		// Option 3: Fetch from URL
 		return r.fetchDataFromURL(context.Background(), instance.Spec.DataURL)
 	}
-	if instance.Spec.DataFromVolume != nil {
-		// Option 4: Volume/PVC reference - not implemented in controller
-		// This would require mounting the volume which is a deployment-time concern
-		return nil, fmt.Errorf("dataFromVolume is not supported in the controller - use data, dataFrom, or dataURL instead")
+	if instance.Spec.DataFromFile != nil {
+		// Option 4: File path reference
+		return r.readDataFromFile(instance.Spec.DataFromFile.Path)
 	}
 {{- end }}
 {{- if .HasRequestBody }}
@@ -505,6 +507,15 @@ func (r *{{ .Kind }}Reconciler) fetchDataFromURL(ctx context.Context, url string
 
 	return data, nil
 }
+
+// readDataFromFile reads binary data from a file path
+func (r *{{ .Kind }}Reconciler) readDataFromFile(filePath string) ([]byte, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+	return data, nil
+}
 {{- end }}
 
 {{- if .HasTypedResults }}
@@ -557,7 +568,7 @@ func (r *{{ .Kind }}Reconciler) executeActionToEndpoint(ctx context.Context, ins
 {{- if .HasBinaryBody }}
 	// Set content type based on whether this is a binary upload
 	contentType := "application/json"
-	if instance.Spec.Data != "" || instance.Spec.DataFrom != nil || instance.Spec.DataURL != "" || instance.Spec.DataFromVolume != nil {
+	if instance.Spec.Data != "" || instance.Spec.DataFrom != nil || instance.Spec.DataURL != "" || instance.Spec.DataFromFile != nil {
 		// Binary upload - use the specified content type or default to octet-stream
 		if instance.Spec.ContentType != "" {
 			contentType = instance.Spec.ContentType

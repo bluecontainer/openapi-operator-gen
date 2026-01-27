@@ -51,19 +51,11 @@ type SecretKeySelector struct {
 	Key string `json:"key"`
 }
 
-// VolumeDataSource references binary data stored in a PVC or volume
-type VolumeDataSource struct {
-	// ClaimName is the name of the PersistentVolumeClaim to use
-	// +kubebuilder:validation:Required
-	ClaimName string `json:"claimName"`
-
-	// Path is the file path within the volume to read
+// FileDataSource references binary data stored in a file accessible to the operator
+type FileDataSource struct {
+	// Path is the absolute file path to read
 	// +kubebuilder:validation:Required
 	Path string `json:"path"`
-
-	// SubPath is an optional subpath within the volume (defaults to empty string)
-	// +optional
-	SubPath string `json:"subPath,omitempty"`
 }
 {{- end }}
 

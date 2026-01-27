@@ -60,11 +60,11 @@ spec:
                 type: string
               data:
                 description: Base64-encoded binary data to upload. Mutually exclusive
-                  with dataFrom, dataURL, and dataFromVolume.
+                  with dataFrom, dataURL, and dataFromFile.
                 type: string
               dataFrom:
                 description: Reference to a ConfigMap or Secret containing the binary
-                  data. Mutually exclusive with data, dataURL, and dataFromVolume.
+                  data. Mutually exclusive with data, dataURL, and dataFromFile.
                 properties:
                   configMapRef:
                     description: ConfigMapRef references a ConfigMap containing the
@@ -95,28 +95,20 @@ spec:
                     - name
                     type: object
                 type: object
-              dataFromVolume:
-                description: Reference to a PVC or volume containing the binary data.
-                  Mutually exclusive with data, dataFrom, and dataURL.
+              dataFromFile:
+                description: Path to a file containing the binary data (requires operator
+                  filesystem access). Mutually exclusive with data, dataFrom, and
+                  dataURL.
                 properties:
-                  claimName:
-                    description: ClaimName is the name of the PersistentVolumeClaim
-                      to use
-                    type: string
                   path:
-                    description: Path is the file path within the volume to read
-                    type: string
-                  subPath:
-                    description: SubPath is an optional subpath within the volume
-                      (defaults to empty string)
+                    description: Path is the absolute file path to read
                     type: string
                 required:
-                - claimName
                 - path
                 type: object
               dataURL:
                 description: URL to fetch binary data from. Mutually exclusive with
-                  data, dataFrom, and dataFromVolume.
+                  data, dataFrom, and dataFromFile.
                 type: string
               petId:
                 description: ID of the parent Pet resource

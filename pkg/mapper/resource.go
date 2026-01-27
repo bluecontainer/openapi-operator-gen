@@ -527,7 +527,7 @@ func (m *Mapper) createBinaryUploadFields() []*FieldDefinition {
 		Name:        "Data",
 		JSONName:    "data",
 		GoType:      "string",
-		Description: "Base64-encoded binary data to upload. Mutually exclusive with dataFrom, dataURL, and dataFromVolume.",
+		Description: "Base64-encoded binary data to upload. Mutually exclusive with dataFrom, dataURL, and dataFromFile.",
 		Required:    false,
 	})
 
@@ -536,7 +536,7 @@ func (m *Mapper) createBinaryUploadFields() []*FieldDefinition {
 		Name:        "DataFrom",
 		JSONName:    "dataFrom",
 		GoType:      "*BinaryDataSource",
-		Description: "Reference to a ConfigMap or Secret containing the binary data. Mutually exclusive with data, dataURL, and dataFromVolume.",
+		Description: "Reference to a ConfigMap or Secret containing the binary data. Mutually exclusive with data, dataURL, and dataFromFile.",
 		Required:    false,
 	})
 
@@ -545,16 +545,16 @@ func (m *Mapper) createBinaryUploadFields() []*FieldDefinition {
 		Name:        "DataURL",
 		JSONName:    "dataURL",
 		GoType:      "string",
-		Description: "URL to fetch binary data from. Mutually exclusive with data, dataFrom, and dataFromVolume.",
+		Description: "URL to fetch binary data from. Mutually exclusive with data, dataFrom, and dataFromFile.",
 		Required:    false,
 	})
 
-	// Option 4: PVC/Volume reference
+	// Option 4: File path reference
 	fields = append(fields, &FieldDefinition{
-		Name:        "DataFromVolume",
-		JSONName:    "dataFromVolume",
-		GoType:      "*VolumeDataSource",
-		Description: "Reference to a PVC or volume containing the binary data. Mutually exclusive with data, dataFrom, and dataURL.",
+		Name:        "DataFromFile",
+		JSONName:    "dataFromFile",
+		GoType:      "*FileDataSource",
+		Description: "Path to a file containing the binary data (requires operator filesystem access). Mutually exclusive with data, dataFrom, and dataURL.",
 		Required:    false,
 	})
 
