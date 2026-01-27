@@ -152,12 +152,17 @@ type {{ .Kind }}Spec struct {
 	// DerivedValues defines CEL expressions to compute custom values from aggregated resources
 	// +optional
 	DerivedValues []DerivedValue `json:"derivedValues,omitempty"`
+
+	// Paused stops reconciliation when true.
+	// Useful for debugging or temporary suspension of aggregation.
+	// +optional
+	Paused bool `json:"paused,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}
 type {{ .Kind }}Status struct {
 	// State represents the aggregated state
-	// +kubebuilder:validation:Enum=Pending;Healthy;Degraded;Unknown
+	// +kubebuilder:validation:Enum=Pending;Healthy;Degraded;Unknown;Paused
 	// +optional
 	State string `json:"state,omitempty"`
 

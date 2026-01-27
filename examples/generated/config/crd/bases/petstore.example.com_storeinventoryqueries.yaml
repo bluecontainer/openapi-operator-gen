@@ -51,12 +51,16 @@ spec:
             description: StoreInventoryQuerySpec defines the query parameters for
               StoreInventoryQuery
             properties:
-              queryInterval:
-                description: |-
-                  QueryInterval specifies how often to re-execute the query.
-                  If not set, the query executes once and stores results (one-shot mode).
-                  Examples: "30s", "5m", "1h"
+              executionInterval:
+                description: Interval at which to re-execute (e.g., 30s, 5m, 1h).
+                  If not set, uses controller default. Set to 0 to disable periodic
+                  re-execution.
                 type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of query execution.
+                type: boolean
               targetBaseURL:
                 description: |-
                   TargetBaseURL specifies a static base URL for the REST API.
@@ -248,6 +252,7 @@ spec:
                 - Querying
                 - Queried
                 - Failed
+                - Paused
                 type: string
             type: object
         type: object

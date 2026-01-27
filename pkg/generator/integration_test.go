@@ -75,6 +75,13 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Status", JSONName: "status", GoType: "string", Required: true},
+					{
+						Name:        "ExecutionInterval",
+						JSONName:    "executionInterval",
+						GoType:      "*metav1.Duration",
+						Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
+						Required:    false,
+					},
 				},
 			},
 		},
@@ -98,10 +105,10 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 					{Name: "PetId", JSONName: "petId", GoType: "int64", Required: true},
 					{Name: "AdditionalMetadata", JSONName: "additionalMetadata", GoType: "string"},
 					{
-						Name:        "ReExecuteInterval",
-						JSONName:    "reExecuteInterval",
+						Name:        "ExecutionInterval",
+						JSONName:    "executionInterval",
 						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.",
+						Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
 						Required:    false,
 					},
 				},
@@ -124,10 +131,10 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 					{Name: "Username", JSONName: "username", GoType: "string", Required: true},
 					{Name: "Password", JSONName: "password", GoType: "string", Required: true},
 					{
-						Name:        "ReExecuteInterval",
-						JSONName:    "reExecuteInterval",
+						Name:        "ExecutionInterval",
+						JSONName:    "executionInterval",
 						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.",
+						Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
 						Required:    false,
 					},
 				},

@@ -51,10 +51,16 @@ spec:
             description: UserCreatewithlistActionSpec defines the parameters for the
               UserCreatewithlistAction action
             properties:
-              reExecuteInterval:
-                description: Interval at which to re-execute the action (e.g., 30s,
-                  5m, 1h). If not set, action is one-shot.
+              executionInterval:
+                description: Interval at which to re-execute (e.g., 30s, 5m, 1h).
+                  If not set, uses controller default. Set to 0 to disable periodic
+                  re-execution.
                 type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of action execution.
+                type: boolean
               targetBaseURL:
                 description: |-
                   TargetBaseURL specifies a static base URL for the REST API.
@@ -291,6 +297,7 @@ spec:
                 - Executing
                 - Completed
                 - Failed
+                - Paused
                 type: string
               successCount:
                 description: SuccessCount is the number of endpoints that executed

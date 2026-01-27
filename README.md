@@ -93,6 +93,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Partial Updates](#partial-updates)
   - [Multi-Endpoint Observation](#multi-endpoint-observation)
   - [Status Fields](#status-fields)
+  - [kstatus Compatibility](#kstatus-compatibility)
 - [Example: Petstore Operator](#example-petstore-operator)
   - [Sample CR](#sample-cr)
 - [Environment Variables](#environment-variables)
@@ -2435,6 +2436,62 @@ Each CRD generates its own EndpointResponse type (e.g., `PetEndpointResponse`, `
 | `data` | Response body from the endpoint |
 | `error` | Error message if the request failed |
 | `lastUpdated` | When this endpoint was last queried |
+
+#### kstatus Compatibility
+
+Generated operators are fully compatible with [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus), the Kubernetes status library used by tools like `kubectl wait`, Flux, and Argo CD. All generated controllers set three standard conditions following the kstatus conventions:
+
+| Condition | Description | When True |
+|-----------|-------------|-----------|
+| `Ready` | Resource has reached its desired state | Resource is synced, observed, or action completed |
+| `Reconciling` | Controller is actively working on the resource | During sync, query, aggregation, or pending states |
+| `Stalled` | Controller encountered an error and cannot proceed | On failures (API errors, validation errors, etc.) |
+
+The conditions follow the **abnormal-true** pattern recommended by kstatus:
+- `Reconciling` is `True` during active work, `False` when done
+- `Stalled` is `True` when errors occur, `False` otherwise
+- `Ready` uses the standard pattern: `True` for success, `False` for not ready
+
+**State to Condition Mapping by CRD Type:**
+
+| CRD Type | Reconciling=True | Stalled=True | Ready=True |
+|----------|------------------|--------------|------------|
+| Resource (CRUD) | `Syncing`, `Pending` | `Failed` | `Synced`, `Observed` |
+| Query | `Querying`, `Pending` | `Failed` | `Queried` |
+| Action | `Executing`, `Pending` | `Failed` | `Completed` |
+| Bundle | `Pending`, `Syncing` | `Failed` or child failures | `Synced` |
+| Aggregate | `Aggregating`, `Pending` | `Failed` | `Healthy` |
+
+All CRDs also set `observedGeneration` in the status to track which generation of the spec has been processed, enabling tools to detect when a spec change has been fully reconciled.
+
+**Paused State:**
+
+All CRD types support a `spec.paused` field. When `paused: true`:
+- Reconciliation stops immediately
+- Status state is set to `Paused`
+- `Reconciling=False` (not actively working)
+- `Ready=False` (not in desired state)
+- `Stalled=False` (not an error condition)
+
+This allows temporarily suspending reconciliation without triggering alerts for stalled resources.
+
+**Usage with kubectl:**
+
+```bash
+# Wait for a resource to be ready
+kubectl wait --for=condition=Ready pet/fluffy --timeout=60s
+
+# Check if resource is stalled
+kubectl get pet/fluffy -o jsonpath='{.status.conditions[?(@.type=="Stalled")].status}'
+
+# Wait for reconciliation to complete
+kubectl wait --for=condition=Reconciling=False pet/fluffy --timeout=60s
+
+# Wait for non-paused resources only (using JSONPath filter)
+for r in $(kubectl get pets -o jsonpath='{.items[?(@.spec.paused!=true)].metadata.name}'); do
+  kubectl wait --for=condition=Ready pet/$r --timeout=60s
+done
+```
 
 ## Example: Petstore Operator
 

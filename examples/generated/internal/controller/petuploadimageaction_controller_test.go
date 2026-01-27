@@ -117,7 +117,10 @@ func TestPetUploadimageActionReconciler_E2E(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	// Create fake client with the object
@@ -203,7 +206,10 @@ func TestPetUploadimageActionReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -286,7 +292,10 @@ func TestPetUploadimageActionReconciler_CreateResource(t *testing.T) {
 			Name:      "new-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -349,7 +358,10 @@ func TestPetUploadimageActionReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -412,7 +424,10 @@ func TestPetUploadimageActionReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -475,7 +490,10 @@ func TestPetUploadimageActionReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -544,7 +562,10 @@ func TestPetUploadimageActionReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -599,7 +620,10 @@ func TestPetUploadimageActionReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -655,7 +679,10 @@ func TestPetUploadimageActionReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{},
+		Spec: v1alpha1.PetUploadimageActionSpec{
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -775,6 +802,8 @@ func TestPetUploadimageActionReconciler_URLAndResponseConsistency(t *testing.T) 
 		Spec: v1alpha1.PetUploadimageActionSpec{
 			// Set parent ID for action endpoint
 			PetId: testResourceIDNumeric,
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
 		},
 	}
 
@@ -917,6 +946,8 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 		},
 		Spec: v1alpha1.PetUploadimageActionSpec{
 			PetId: expectedParentID,
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
 		},
 	}
 

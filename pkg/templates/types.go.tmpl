@@ -168,17 +168,16 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	TargetBaseURL string `json:"targetBaseURL,omitempty"`
 
-	// QueryInterval specifies how often to re-execute the query.
-	// If not set, the query executes once and stores results (one-shot mode).
-	// Examples: "30s", "5m", "1h"
+	// Paused stops reconciliation when true.
+	// Useful for debugging or temporary suspension of query execution.
 	// +optional
-	QueryInterval *metav1.Duration `json:"queryInterval,omitempty"`
+	Paused bool `json:"paused,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}
 type {{ .Kind }}Status struct {
 	// State represents the current state of the query
-	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed
+	// +kubebuilder:validation:Enum=Pending;Querying;Queried;Failed;Paused
 	// +optional
 	State string `json:"state,omitempty"`
 
@@ -374,12 +373,17 @@ type {{ .Kind }}Spec struct {
 	// Example: "http://api.example.com:8080"
 	// +optional
 	TargetBaseURL string `json:"targetBaseURL,omitempty"`
+
+	// Paused stops reconciliation when true.
+	// Useful for debugging or temporary suspension of action execution.
+	// +optional
+	Paused bool `json:"paused,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}
 type {{ .Kind }}Status struct {
 	// State represents the current state of the action
-	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed
+	// +kubebuilder:validation:Enum=Pending;Executing;Completed;Failed;Paused
 	// +optional
 	State string `json:"state,omitempty"`
 
@@ -628,6 +632,18 @@ type {{ .Kind }}Spec struct {
 	// +optional
 	OnDelete string `json:"onDelete,omitempty"`
 {{- end }}
+
+	// ExecutionInterval specifies how often to re-sync with the REST API.
+	// If not set, uses the controller's default interval (typically 30s).
+	// Set to "0" to disable periodic re-sync (only reconcile on spec changes).
+	// Examples: "30s", "5m", "1h"
+	// +optional
+	ExecutionInterval *metav1.Duration `json:"executionInterval,omitempty"`
+
+	// Paused stops reconciliation when true.
+	// Useful for debugging or temporary suspension of resource management.
+	// +optional
+	Paused bool `json:"paused,omitempty"`
 }
 
 // {{ .Kind }}Status defines the observed state of {{ .Kind }}
@@ -636,7 +652,7 @@ type {{ .Kind }}Status struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// State represents the current state of the resource
-	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound
+	// +kubebuilder:validation:Enum=Pending;Syncing;Synced;Failed;Observed;NotFound;Paused
 	// +optional
 	State string `json:"state,omitempty"`
 

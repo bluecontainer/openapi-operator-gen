@@ -110,14 +110,20 @@ spec:
                 description: URL to fetch binary data from. Mutually exclusive with
                   data, dataFrom, and dataFromFile.
                 type: string
+              executionInterval:
+                description: Interval at which to re-execute (e.g., 30s, 5m, 1h).
+                  If not set, uses controller default. Set to 0 to disable periodic
+                  re-execution.
+                type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of action execution.
+                type: boolean
               petId:
                 description: ID of the parent Pet resource
                 format: int64
                 type: integer
-              reExecuteInterval:
-                description: Interval at which to re-execute the action (e.g., 30s,
-                  5m, 1h). If not set, action is one-shot.
-                type: string
               targetBaseURL:
                 description: |-
                   TargetBaseURL specifies a static base URL for the REST API.
@@ -332,6 +338,7 @@ spec:
                 - Executing
                 - Completed
                 - Failed
+                - Paused
                 type: string
               successCount:
                 description: SuccessCount is the number of endpoints that executed

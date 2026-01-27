@@ -246,12 +246,22 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 	}
 {{- end }}
 
+	// Check if paused
+	if instance.Spec.Paused {
+		r.updateStatus(ctx, instance, "Paused", "Reconciliation paused")
+		return ctrl.Result{}, nil
+	}
+
 	// Handle read-only mode: only GET and update status
 	if isReadOnly {
 {{- if .NeedsExternalIDRef }}
 		if instance.Spec.ExternalIDRef == "" {
 			r.updateStatus(ctx, instance, "Failed", "ReadOnly mode requires ExternalIDRef to be set")
-			return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, fmt.Errorf("readOnly mode requires externalIDRef")
+			requeueAfter := r.getRequeueInterval(instance)
+			if requeueAfter > 0 {
+				return ctrl.Result{RequeueAfter: requeueAfter}, fmt.Errorf("readOnly mode requires externalIDRef")
+			}
+			return ctrl.Result{}, fmt.Errorf("readOnly mode requires externalIDRef")
 		}
 {{- end }}
 		if err := r.observeResource(ctx, instance); err != nil {
@@ -261,12 +271,19 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 			// Note: We don't return err to avoid controller-runtime's aggressive exponential backoff
 			if is{{ .Kind }}APIErrorRetryable(err) {
 				logger.Error(err, "Retryable error, will retry after interval")
-				return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+				requeueAfter := r.getRequeueInterval(instance)
+				if requeueAfter > 0 {
+					return ctrl.Result{RequeueAfter: requeueAfter}, nil
+				}
 			}
 			logger.Info("Non-retryable error (client error), not requeueing until spec changes", "error", err.Error())
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+		requeueAfter := r.getRequeueInterval(instance)
+		if requeueAfter <= 0 {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
 	// Sync with REST API (with drift detection)
@@ -278,7 +295,10 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 		// Note: We don't return err to avoid controller-runtime's aggressive exponential backoff
 		if is{{ .Kind }}APIErrorRetryable(err) {
 			logger.Error(err, "Retryable error, will retry after interval")
-			return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+			requeueAfter := r.getRequeueInterval(instance)
+			if requeueAfter > 0 {
+				return ctrl.Result{RequeueAfter: requeueAfter}, nil
+			}
 		}
 		logger.Info("Non-retryable error (client error), not requeueing until spec changes", "error", err.Error())
 		return ctrl.Result{}, nil
@@ -303,7 +323,23 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 	}
 {{- end }}
 
-	return ctrl.Result{RequeueAfter: {{ .KindLower }}RequeueAfter}, nil
+	// Determine requeue interval from spec or use controller default
+	requeueAfter := r.getRequeueInterval(instance)
+	if requeueAfter <= 0 {
+		// executionInterval set to 0 or negative - disable periodic requeue
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// getRequeueInterval returns the requeue interval for this resource.
+// Priority: spec.executionInterval > controller default (30s)
+// Returns 0 or negative if periodic requeue should be disabled.
+func (r *{{ .Kind }}Reconciler) getRequeueInterval(instance *{{ .APIVersion }}.{{ .Kind }}) time.Duration {
+	if instance.Spec.ExecutionInterval != nil {
+		return instance.Spec.ExecutionInterval.Duration
+	}
+	return {{ .KindLower }}RequeueAfter
 }
 
 func (r *{{ .Kind }}Reconciler) getBaseURL(ctx context.Context) (string, error) {
@@ -2131,8 +2167,8 @@ func (r *{{ .Kind }}Reconciler) updateStatus(ctx context.Context, instance *{{ .
 		// Don't overwrite it here since updateStatus is called even when no actual sync occurred
 		latest.Status.ObservedGeneration = latest.Generation
 
-		// Update condition
-		condition := metav1.Condition{
+		// Update Ready condition
+		readyCondition := metav1.Condition{
 			Type:               "Ready",
 			Status:             metav1.ConditionFalse,
 			Reason:             state,
@@ -2141,9 +2177,37 @@ func (r *{{ .Kind }}Reconciler) updateStatus(ctx context.Context, instance *{{ .
 		}
 		// Set Ready=True for successful states
 		if state == "Synced" || state == "Observed" {
-			condition.Status = metav1.ConditionTrue
+			readyCondition.Status = metav1.ConditionTrue
 		}
-		meta.SetStatusCondition(&latest.Status.Conditions, condition)
+		meta.SetStatusCondition(&latest.Status.Conditions, readyCondition)
+
+		// Update Reconciling condition (kstatus compatibility)
+		// Reconciling=True when actively working, False/absent when done
+		reconcilingCondition := metav1.Condition{
+			Type:               "Reconciling",
+			Status:             metav1.ConditionFalse,
+			Reason:             state,
+			Message:            message,
+			LastTransitionTime: now,
+		}
+		if state == "Syncing" || state == "Pending" {
+			reconcilingCondition.Status = metav1.ConditionTrue
+		}
+		meta.SetStatusCondition(&latest.Status.Conditions, reconcilingCondition)
+
+		// Update Stalled condition (kstatus compatibility)
+		// Stalled=True when encountering errors, False/absent otherwise
+		stalledCondition := metav1.Condition{
+			Type:               "Stalled",
+			Status:             metav1.ConditionFalse,
+			Reason:             state,
+			Message:            message,
+			LastTransitionTime: now,
+		}
+		if state == "Failed" {
+			stalledCondition.Status = metav1.ConditionTrue
+		}
+		meta.SetStatusCondition(&latest.Status.Conditions, stalledCondition)
 
 		return r.Status().Update(ctx, latest)
 	})

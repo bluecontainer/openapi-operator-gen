@@ -61,6 +61,13 @@ spec:
                   name:
                     type: string
                 type: object
+              executionInterval:
+                description: |-
+                  ExecutionInterval specifies how often to re-sync with the REST API.
+                  If not set, uses the controller's default interval (typically 30s).
+                  Set to "0" to disable periodic re-sync (only reconcile on spec changes).
+                  Examples: "30s", "5m", "1h"
+                type: string
               id:
                 format: int64
                 type: integer
@@ -85,6 +92,11 @@ spec:
                 - Orphan
                 - Restore
                 type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of resource management.
+                type: boolean
               photoUrls:
                 items:
                   type: string
@@ -336,6 +348,7 @@ spec:
                 - Failed
                 - Observed
                 - NotFound
+                - Paused
                 type: string
             type: object
         type: object

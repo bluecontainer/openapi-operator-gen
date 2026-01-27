@@ -138,6 +138,9 @@ func Test{{.Kind}}Reconciler_E2E(t *testing.T) {
 			{{ .Name }}: "test-value",
 {{- end }}
 {{- end }}
+{{- else if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
 {{- else if and (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
@@ -232,7 +235,10 @@ func Test{{.Kind}}Reconciler_RequeueBehavior(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -323,7 +329,10 @@ func Test{{.Kind}}Reconciler_CreateResource(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -390,7 +399,10 @@ func Test{{.Kind}}Reconciler_HTTPNotFound(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -457,7 +469,10 @@ func Test{{.Kind}}Reconciler_HTTPServerError(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -524,7 +539,10 @@ func Test{{.Kind}}Reconciler_HTTPUnauthorized(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -603,7 +621,10 @@ func Test{{.Kind}}Reconciler_HTTPRateLimited(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -662,7 +683,10 @@ func Test{{.Kind}}Reconciler_HTTPInvalidJSON(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -728,7 +752,10 @@ func Test{{.Kind}}Reconciler_HTTPTimeout(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},
@@ -864,6 +891,10 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 {{- else }}
 			{{.ParentIDField}}: testResourceID,
 {{- end }}
+{{- end }}
+{{- if .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
 {{- end }}
 {{- else if .IsQuery }}
 {{- if .QueryPathParams }}
@@ -1213,6 +1244,10 @@ func Test{{.Kind}}Reconciler_ActionPathParams(t *testing.T) {
 {{- if .HasParentID }}
 			{{.ParentIDField}}: expectedParentID,
 {{- end }}
+{{- if .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- end }}
 		},
 	}
 
@@ -1366,7 +1401,10 @@ func Test{{.Kind}}Reconciler_QueryParams(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: {{.APIVersion}}.{{.Kind}}Spec{
-{{- if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
+{{- if and .IsAction .HasBinaryBody }}
+			// Binary data required for this action endpoint
+			Data: "dGVzdCBiaW5hcnkgZGF0YQ==", // base64 encoded "test binary data"
+{{- else if and (not .IsQuery) (not .IsAction) (not .HasPost) .NeedsExternalIDRef }}
 			ExternalIDRef: "123",
 {{- end }}
 		},

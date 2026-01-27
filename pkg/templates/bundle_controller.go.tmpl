@@ -1553,33 +1553,37 @@ func (r *{{ .Kind }}Reconciler) setConditions(ctx context.Context, bundle *{{ .A
 	}
 	meta.SetStatusCondition(&bundle.Status.Conditions, readyCondition)
 
-	// Progressing condition
-	progressingCondition := metav1.Condition{
-		Type:               "Progressing",
+	// Reconciling condition (kstatus compatibility)
+	// Reconciling=True when actively working, False/absent when done
+	reconcilingCondition := metav1.Condition{
+		Type:               "Reconciling",
 		Status:             metav1.ConditionFalse,
 		Reason:             state,
 		Message:            message,
 		LastTransitionTime: now,
 	}
 	if state == "Syncing" || state == "Pending" {
-		progressingCondition.Status = metav1.ConditionTrue
+		reconcilingCondition.Status = metav1.ConditionTrue
 	}
-	meta.SetStatusCondition(&bundle.Status.Conditions, progressingCondition)
+	meta.SetStatusCondition(&bundle.Status.Conditions, reconcilingCondition)
 
-	// HasFailures condition
-	hasFailuresCondition := metav1.Condition{
-		Type:               "HasFailures",
+	// Stalled condition (kstatus compatibility)
+	// Stalled=True when encountering errors, False/absent otherwise
+	stalledCondition := metav1.Condition{
+		Type:               "Stalled",
 		Status:             metav1.ConditionFalse,
-		Reason:             "NoFailures",
-		Message:            "No resources have failed",
+		Reason:             state,
+		Message:            message,
 		LastTransitionTime: now,
 	}
-	if bundle.Status.Summary.Failed > 0 {
-		hasFailuresCondition.Status = metav1.ConditionTrue
-		hasFailuresCondition.Reason = "ResourcesFailed"
-		hasFailuresCondition.Message = fmt.Sprintf("%d resources have failed", bundle.Status.Summary.Failed)
+	if state == "Failed" || bundle.Status.Summary.Failed > 0 {
+		stalledCondition.Status = metav1.ConditionTrue
+		if bundle.Status.Summary.Failed > 0 {
+			stalledCondition.Reason = "ResourcesFailed"
+			stalledCondition.Message = fmt.Sprintf("%d resources have failed", bundle.Status.Summary.Failed)
+		}
 	}
-	meta.SetStatusCondition(&bundle.Status.Conditions, hasFailuresCondition)
+	meta.SetStatusCondition(&bundle.Status.Conditions, stalledCondition)
 }
 
 // evaluateDerivedValues evaluates CEL expressions from spec.derivedValues.

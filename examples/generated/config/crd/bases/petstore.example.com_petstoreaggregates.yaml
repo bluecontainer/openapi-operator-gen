@@ -107,6 +107,11 @@ spec:
                   - name
                   type: object
                 type: array
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of aggregation.
+                type: boolean
               resourceSelectors:
                 description: |-
                   ResourceSelectors specifies patterns to dynamically select resources for aggregation.
@@ -299,6 +304,7 @@ spec:
                 - Healthy
                 - Degraded
                 - Unknown
+                - Paused
                 type: string
               summary:
                 description: Summary contains counts of resources by state

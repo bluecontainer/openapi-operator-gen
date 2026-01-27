@@ -50,15 +50,19 @@ spec:
           spec:
             description: UserLoginQuerySpec defines the query parameters for UserLoginQuery
             properties:
+              executionInterval:
+                description: Interval at which to re-execute (e.g., 30s, 5m, 1h).
+                  If not set, uses controller default. Set to 0 to disable periodic
+                  re-execution.
+                type: string
               password:
                 description: The password for login in clear text
                 type: string
-              queryInterval:
+              paused:
                 description: |-
-                  QueryInterval specifies how often to re-execute the query.
-                  If not set, the query executes once and stores results (one-shot mode).
-                  Examples: "30s", "5m", "1h"
-                type: string
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of query execution.
+                type: boolean
               targetBaseURL:
                 description: |-
                   TargetBaseURL specifies a static base URL for the REST API.
@@ -253,6 +257,7 @@ spec:
                 - Querying
                 - Queried
                 - Failed
+                - Paused
                 type: string
             type: object
         type: object
