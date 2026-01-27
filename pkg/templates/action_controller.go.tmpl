@@ -10,11 +10,19 @@ package controller
 import (
 	"bytes"
 	"context"
+{{- if .HasBinaryBody }}
+	"encoding/base64"
+{{- end }}
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+{{- if .HasBinaryBody }}
+	corev1 "k8s.io/api/core/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+{{- end }}
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -389,7 +397,28 @@ func (r *{{ .Kind }}Reconciler) buildActionURL(baseURL string, instance *{{ .API
 
 // buildRequestBody builds the JSON request body from spec fields
 func (r *{{ .Kind }}Reconciler) buildRequestBody(instance *{{ .APIVersion }}.{{ .Kind }}) ([]byte, error) {
+{{- if .HasBinaryBody }}
+	// Check for binary data sources (in priority order)
+	if instance.Spec.Data != "" {
+		// Option 1: Inline base64-encoded data
+		return base64.StdEncoding.DecodeString(instance.Spec.Data)
+	}
+	if instance.Spec.DataFrom != nil {
+		// Option 2: ConfigMap or Secret reference
+		return r.resolveBinaryDataFrom(context.Background(), instance)
+	}
+	if instance.Spec.DataURL != "" {
+		// Option 3: Fetch from URL
+		return r.fetchDataFromURL(context.Background(), instance.Spec.DataURL)
+	}
+	if instance.Spec.DataFromVolume != nil {
+		// Option 4: Volume/PVC reference - not implemented in controller
+		// This would require mounting the volume which is a deployment-time concern
+		return nil, fmt.Errorf("dataFromVolume is not supported in the controller - use data, dataFrom, or dataURL instead")
+	}
+{{- end }}
 {{- if .HasRequestBody }}
+	// Fall back to JSON request body
 	body := make(map[string]interface{})
 {{- range .RequestBodyFields }}
 	if !runtime.IsZeroValue(instance.Spec.{{ .GoName }}) {
@@ -404,6 +433,79 @@ func (r *{{ .Kind }}Reconciler) buildRequestBody(instance *{{ .APIVersion }}.{{ 
 	return nil, nil
 {{- end }}
 }
+
+{{- if .HasBinaryBody }}
+// resolveBinaryDataFrom resolves binary data from ConfigMap or Secret
+func (r *{{ .Kind }}Reconciler) resolveBinaryDataFrom(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]byte, error) {
+	dataFrom := instance.Spec.DataFrom
+	if dataFrom == nil {
+		return nil, fmt.Errorf("dataFrom is nil")
+	}
+
+	// Try ConfigMap first
+	if dataFrom.ConfigMapRef != nil {
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, k8stypes.NamespacedName{
+			Name:      dataFrom.ConfigMapRef.Name,
+			Namespace: instance.Namespace,
+		}, &cm); err != nil {
+			return nil, fmt.Errorf("failed to get ConfigMap %s: %w", dataFrom.ConfigMapRef.Name, err)
+		}
+
+		// Try BinaryData first, then Data
+		if data, ok := cm.BinaryData[dataFrom.ConfigMapRef.Key]; ok {
+			return data, nil
+		}
+		if data, ok := cm.Data[dataFrom.ConfigMapRef.Key]; ok {
+			return []byte(data), nil
+		}
+		return nil, fmt.Errorf("key %s not found in ConfigMap %s", dataFrom.ConfigMapRef.Key, dataFrom.ConfigMapRef.Name)
+	}
+
+	// Try Secret
+	if dataFrom.SecretRef != nil {
+		var secret corev1.Secret
+		if err := r.Get(ctx, k8stypes.NamespacedName{
+			Name:      dataFrom.SecretRef.Name,
+			Namespace: instance.Namespace,
+		}, &secret); err != nil {
+			return nil, fmt.Errorf("failed to get Secret %s: %w", dataFrom.SecretRef.Name, err)
+		}
+
+		if data, ok := secret.Data[dataFrom.SecretRef.Key]; ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf("key %s not found in Secret %s", dataFrom.SecretRef.Key, dataFrom.SecretRef.Name)
+	}
+
+	return nil, fmt.Errorf("neither configMapRef nor secretRef specified in dataFrom")
+}
+
+// fetchDataFromURL fetches binary data from a URL
+func (r *{{ .Kind }}Reconciler) fetchDataFromURL(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request for URL %s: %w", url, err)
+	}
+
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch data from URL %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("failed to fetch data from URL %s: status %d", url, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response from URL %s: %w", url, err)
+	}
+
+	return data, nil
+}
+{{- end }}
 
 {{- if .HasTypedResults }}
 // parseResult parses the response body into typed result
@@ -452,7 +554,24 @@ func (r *{{ .Kind }}Reconciler) executeActionToEndpoint(ctx context.Context, ins
 		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
+{{- if .HasBinaryBody }}
+	// Set content type based on whether this is a binary upload
+	contentType := "application/json"
+	if instance.Spec.Data != "" || instance.Spec.DataFrom != nil || instance.Spec.DataURL != "" || instance.Spec.DataFromVolume != nil {
+		// Binary upload - use the specified content type or default to octet-stream
+		if instance.Spec.ContentType != "" {
+			contentType = instance.Spec.ContentType
+		} else {
+			contentType = "{{ .BinaryContentType }}"
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+		}
+	}
+	req.Header.Set("Content-Type", contentType)
+{{- else }}
 	req.Header.Set("Content-Type", "application/json")
+{{- end }}
 	req.Header.Set("Accept", "application/json")
 
 	logger.Info("Executing action", "url", actionURL, "method", "{{ .ActionMethod }}")

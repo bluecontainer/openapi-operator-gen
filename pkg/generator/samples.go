@@ -41,6 +41,7 @@ type ExampleFieldData struct {
 	ExampleValue   string
 	AdoptValue     string // Value used in adopt-and-modify samples (shows modification)
 	IsTargeting    bool
+	IsBinaryData   bool // True if this is a binary data field (shown as comments in samples)
 	IncludeInAdopt bool // True if this field should be included in adopt samples (ID or modified field)
 }
 
@@ -272,11 +273,19 @@ func (g *SamplesGenerator) convertToExampleFields(spec *mapper.FieldDefinition) 
 	for _, f := range spec.Fields {
 		// Skip targeting fields - they'll be shown as comments
 		isTargeting := g.isTargetingField(f.JSONName)
+		isBinaryData := g.isBinaryDataField(f.JSONName)
+
+		// Generate appropriate example value
+		exampleValue := g.generateExampleValue(f)
+		if isBinaryData {
+			exampleValue = g.generateBinaryDataExampleValue(f.JSONName)
+		}
 
 		result = append(result, ExampleFieldData{
 			JSONName:     f.JSONName,
-			ExampleValue: g.generateExampleValue(f),
+			ExampleValue: exampleValue,
 			IsTargeting:  isTargeting,
+			IsBinaryData: isBinaryData,
 		})
 	}
 	return result
@@ -416,6 +425,39 @@ func (g *SamplesGenerator) isTargetingField(jsonName string) bool {
 		"targetPodOrdinal":  true,
 	}
 	return targetingFields[jsonName]
+}
+
+// isBinaryDataField returns true if the field is a binary data source field
+// These are mutually exclusive options shown as comments in samples
+func (g *SamplesGenerator) isBinaryDataField(jsonName string) bool {
+	binaryFields := map[string]bool{
+		"data":           true,
+		"dataFrom":       true,
+		"dataURL":        true,
+		"dataFromVolume": true,
+		"contentType":    true,
+	}
+	return binaryFields[jsonName]
+}
+
+// generateBinaryDataExampleValue generates meaningful example values for binary data fields
+func (g *SamplesGenerator) generateBinaryDataExampleValue(jsonName string) string {
+	switch jsonName {
+	case "data":
+		// Base64-encoded example (small PNG header as example)
+		return `"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="`
+	case "dataFrom":
+		// ConfigMap reference example
+		return `{"configMapRef": {"name": "my-image-data", "key": "image.png"}}`
+	case "dataURL":
+		return `"https://example.com/images/photo.png"`
+	case "dataFromVolume":
+		return `{"claimName": "my-pvc", "path": "/data/image.png"}`
+	case "contentType":
+		return `"image/png"`
+	default:
+		return `""`
+	}
 }
 
 // exampleValueMap provides realistic, connected example values for common field names.

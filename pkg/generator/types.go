@@ -33,6 +33,7 @@ type TypesTemplateData struct {
 	ModuleName       string
 	CRDs             []CRDTypeData
 	NestedTypes      []NestedTypeData // Nested types to generate (for Category, Tag, etc.)
+	HasBinaryActions bool             // True if any action CRD has binary body support
 }
 
 // CRDTypeData holds CRD-specific data for template
@@ -53,13 +54,15 @@ type CRDTypeData struct {
 	PrimitiveArrayType string                   // Base type for primitive arrays (e.g., "string", "int64")
 
 	// Action endpoint fields
-	IsAction       bool   // True if this is an action CRD
-	ActionPath     string // Full action path (e.g., /pet/{petId}/uploadImage)
-	ActionMethod   string // HTTP method (POST or PUT)
-	ParentResource string // Parent resource kind (e.g., "Pet")
-	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
-	ParentIDGoType string // Parent ID Go type (e.g., "int64", "string")
-	ActionName     string // Action name (e.g., "uploadImage")
+	IsAction          bool   // True if this is an action CRD
+	ActionPath        string // Full action path (e.g., /pet/{petId}/uploadImage)
+	ActionMethod      string // HTTP method (POST or PUT)
+	ParentResource    string // Parent resource kind (e.g., "Pet")
+	ParentIDParam     string // Parent ID parameter name (e.g., "petId")
+	ParentIDGoType    string // Parent ID Go type (e.g., "int64", "string")
+	ActionName        string // Action name (e.g., "uploadImage")
+	HasBinaryBody     bool   // True if the action accepts binary data uploads
+	BinaryContentType string // Content type for binary data
 
 	// HTTP method availability (for Resource CRDs)
 	HasDelete bool // True if DELETE method is available
@@ -133,13 +136,15 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			IsPrimitiveArray:   crd.IsPrimitiveArray,
 			PrimitiveArrayType: crd.PrimitiveArrayType,
 			// Action fields
-			IsAction:       crd.IsAction,
-			ActionPath:     crd.ActionPath,
-			ActionMethod:   crd.ActionMethod,
-			ParentResource: crd.ParentResource,
-			ParentIDParam:  crd.ParentIDParam,
-			ParentIDGoType: crd.ParentIDGoType,
-			ActionName:     crd.ActionName,
+			IsAction:          crd.IsAction,
+			ActionPath:        crd.ActionPath,
+			ActionMethod:      crd.ActionMethod,
+			ParentResource:    crd.ParentResource,
+			ParentIDParam:     crd.ParentIDParam,
+			ParentIDGoType:    crd.ParentIDGoType,
+			ActionName:        crd.ActionName,
+			HasBinaryBody:     crd.HasBinaryBody,
+			BinaryContentType: crd.BinaryContentType,
 			// HTTP method availability
 			HasDelete: crd.HasDelete,
 			HasPost:   crd.HasPost,
@@ -163,6 +168,11 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		}
 
 		data.CRDs = append(data.CRDs, crdData)
+
+		// Track if any action has binary body
+		if crd.HasBinaryBody {
+			data.HasBinaryActions = true
+		}
 	}
 
 	// Convert nested types map to sorted slice for deterministic output

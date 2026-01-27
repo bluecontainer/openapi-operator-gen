@@ -6,10 +6,42 @@ metadata:
   name: {{ .KindLower }}-sample
   namespace: default
 spec:
+{{- $hasBinaryFields := false }}
 {{- range .SpecFields }}
-{{- if not .IsTargeting }}
+{{- if .IsBinaryData }}
+{{- $hasBinaryFields = true }}
+{{- else if not .IsTargeting }}
   {{ .JSONName }}: {{ .ExampleValue }}
 {{- end }}
+{{- end }}
+{{- if $hasBinaryFields }}
+  # Binary upload options (mutually exclusive - uncomment ONE):
+  #
+  # Option 1: Inline base64-encoded data
+  # data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  #
+  # Option 2: Reference a ConfigMap
+  # dataFrom:
+  #   configMapRef:
+  #     name: my-image-data
+  #     key: image.png
+  #
+  # Option 3: Reference a Secret
+  # dataFrom:
+  #   secretRef:
+  #     name: my-secret-data
+  #     key: image.png
+  #
+  # Option 4: Fetch from URL
+  # dataURL: "https://example.com/images/photo.png"
+  #
+  # Option 5: Read from PVC (requires volume mount in operator)
+  # dataFromVolume:
+  #   claimName: my-pvc
+  #   path: /data/image.png
+  #
+  # Optional: Override content type (default: application/octet-stream)
+  # contentType: "image/png"
 {{- end }}
   # Endpoint targeting (optional - uncomment if needed)
   # targetNamespace: "target-namespace"

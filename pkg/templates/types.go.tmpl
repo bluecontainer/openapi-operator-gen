@@ -15,6 +15,58 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+{{- /* Generate binary upload types if any CRD has binary body */ -}}
+{{- if .HasBinaryActions }}
+
+// BinaryDataSource references binary data stored in a ConfigMap or Secret
+type BinaryDataSource struct {
+	// ConfigMapRef references a ConfigMap containing the binary data
+	// +optional
+	ConfigMapRef *ConfigMapKeySelector `json:"configMapRef,omitempty"`
+
+	// SecretRef references a Secret containing the binary data
+	// +optional
+	SecretRef *SecretKeySelector `json:"secretRef,omitempty"`
+}
+
+// ConfigMapKeySelector selects a key from a ConfigMap
+type ConfigMapKeySelector struct {
+	// Name of the ConfigMap
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// Key within the ConfigMap to select
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
+}
+
+// SecretKeySelector selects a key from a Secret
+type SecretKeySelector struct {
+	// Name of the Secret
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// Key within the Secret to select
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
+}
+
+// VolumeDataSource references binary data stored in a PVC or volume
+type VolumeDataSource struct {
+	// ClaimName is the name of the PersistentVolumeClaim to use
+	// +kubebuilder:validation:Required
+	ClaimName string `json:"claimName"`
+
+	// Path is the file path within the volume to read
+	// +kubebuilder:validation:Required
+	Path string `json:"path"`
+
+	// SubPath is an optional subpath within the volume (defaults to empty string)
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+}
+{{- end }}
+
 {{- /* Generate nested types first */ -}}
 {{- range .NestedTypes }}
 

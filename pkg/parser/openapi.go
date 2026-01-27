@@ -229,6 +229,9 @@ type ActionEndpoint struct {
 	QueryParams    []Parameter // Query parameters
 	RequestSchema  *Schema     // Request body schema
 	ResponseSchema *Schema     // Response schema
+	// Binary upload fields
+	HasBinaryBody     bool   // True if request body is binary (application/octet-stream or multipart/form-data with binary)
+	BinaryContentType string // Content type for binary data (e.g., "application/octet-stream", "multipart/form-data")
 }
 
 // ParsedSpec contains the parsed OpenAPI specification
@@ -913,16 +916,37 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 				actionEndpoint.RequestSchema = p.convertSchema("RequestBody", content.Schema.Value)
 			}
 		}
-		// Also check for multipart/form-data (common for file uploads)
+		// Check for multipart/form-data (common for file uploads)
 		if content, ok := op.RequestBody.Value.Content["multipart/form-data"]; ok {
 			if content.Schema != nil && content.Schema.Value != nil {
-				actionEndpoint.RequestSchema = p.convertSchema("RequestBody", content.Schema.Value)
+				schema := content.Schema.Value
+				actionEndpoint.RequestSchema = p.convertSchema("RequestBody", schema)
+				// Check if any property has binary format
+				if schema.Properties != nil {
+					for _, prop := range schema.Properties {
+						if prop.Value != nil && prop.Value.Format == "binary" {
+							actionEndpoint.HasBinaryBody = true
+							actionEndpoint.BinaryContentType = "multipart/form-data"
+							break
+						}
+					}
+				}
 			}
 		}
-		// Check for application/octet-stream
+		// Check for application/octet-stream (raw binary)
 		if content, ok := op.RequestBody.Value.Content["application/octet-stream"]; ok {
 			if content.Schema != nil && content.Schema.Value != nil {
-				actionEndpoint.RequestSchema = p.convertSchema("RequestBody", content.Schema.Value)
+				schema := content.Schema.Value
+				actionEndpoint.RequestSchema = p.convertSchema("RequestBody", schema)
+				// application/octet-stream with binary format is a binary upload
+				schemaType := ""
+				if len(schema.Type.Slice()) > 0 {
+					schemaType = schema.Type.Slice()[0]
+				}
+				if schema.Format == "binary" || schemaType == "string" {
+					actionEndpoint.HasBinaryBody = true
+					actionEndpoint.BinaryContentType = "application/octet-stream"
+				}
 			}
 		}
 	}

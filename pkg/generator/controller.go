@@ -73,6 +73,8 @@ type ControllerTemplateData struct {
 	PathParams        []ActionPathParam        // Path parameters other than parent ID
 	RequestBodyFields []ActionRequestBodyField // Request body fields
 	HasRequestBody    bool                     // True if there are request body fields
+	HasBinaryBody     bool                     // True if the action accepts binary data uploads
+	BinaryContentType string                   // Content type for binary data
 
 	// Resource endpoint fields (for standard CRUD resources)
 	ResourcePathParams  []ActionPathParam    // Path parameters for resource endpoints
@@ -261,15 +263,17 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		IsPrimitiveArray:   crd.IsPrimitiveArray,
 		PrimitiveArrayType: crd.PrimitiveArrayType,
 		// Action fields
-		IsAction:       crd.IsAction,
-		ActionPath:     crd.ActionPath,
-		ActionMethod:   crd.ActionMethod,
-		ParentResource: crd.ParentResource,
-		ParentIDParam:  crd.ParentIDParam,
-		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
-		ParentIDGoType: crd.ParentIDGoType,
-		HasParentID:    crd.ParentIDParam != "",
-		ActionName:     crd.ActionName,
+		IsAction:          crd.IsAction,
+		ActionPath:        crd.ActionPath,
+		ActionMethod:      crd.ActionMethod,
+		ParentResource:    crd.ParentResource,
+		ParentIDParam:     crd.ParentIDParam,
+		ParentIDField:     strcase.ToCamel(crd.ParentIDParam),
+		ParentIDGoType:    crd.ParentIDGoType,
+		HasParentID:       crd.ParentIDParam != "",
+		ActionName:        crd.ActionName,
+		HasBinaryBody:     crd.HasBinaryBody,
+		BinaryContentType: crd.BinaryContentType,
 		// HTTP method availability
 		HasDelete:      crd.HasDelete,
 		HasPost:        crd.HasPost,
@@ -476,14 +480,16 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 		IsPrimitiveArray:   crd.IsPrimitiveArray,
 		PrimitiveArrayType: crd.PrimitiveArrayType,
 
-		ParentResource: crd.ParentResource,
-		ParentIDParam:  crd.ParentIDParam,
-		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
-		ParentIDGoType: crd.ParentIDGoType,
-		HasParentID:    crd.ParentIDParam != "",
-		ActionName:     crd.ActionName,
-		HasDelete:      crd.HasDelete,
-		HasPost:        crd.HasPost,
+		ParentResource:    crd.ParentResource,
+		ParentIDParam:     crd.ParentIDParam,
+		ParentIDField:     strcase.ToCamel(crd.ParentIDParam),
+		ParentIDGoType:    crd.ParentIDGoType,
+		HasParentID:       crd.ParentIDParam != "",
+		ActionName:        crd.ActionName,
+		HasBinaryBody:     crd.HasBinaryBody,
+		BinaryContentType: crd.BinaryContentType,
+		HasDelete:         crd.HasDelete,
+		HasPost:           crd.HasPost,
 	}
 
 	filename := fmt.Sprintf("%s_controller_test.go", strings.ToLower(crd.Kind))
