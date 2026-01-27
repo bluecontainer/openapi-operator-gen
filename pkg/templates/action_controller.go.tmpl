@@ -367,7 +367,11 @@ func (r *{{ .Kind }}Reconciler) buildActionURL(baseURL string, instance *{{ .API
 
 	{{- if .HasParentID }}
 	// Add parent ID path parameter
+	{{- if eq .ParentIDGoType "int64" }}
+	builder.WithPathParamInt("{{ .ParentIDParam }}", instance.Spec.{{ .ParentIDField }})
+	{{- else }}
 	builder.WithPathParam("{{ .ParentIDParam }}", instance.Spec.{{ .ParentIDField }})
+	{{- end }}
 	{{- end }}
 
 	{{- range .PathParams }}

@@ -19,6 +19,9 @@ package controller
 import (
 	"context"
 	"encoding/json"
+{{- if and .IsAction .HasParentID (eq .ParentIDGoType "int64") }}
+	"fmt"
+{{- end }}
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -856,7 +859,11 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 {{- if .IsAction }}
 {{- if .HasParentID }}
 			// Set parent ID for action endpoint
+{{- if eq .ParentIDGoType "int64" }}
+			{{.ParentIDField}}: testResourceIDNumeric,
+{{- else }}
 			{{.ParentIDField}}: testResourceID,
+{{- end }}
 {{- end }}
 {{- else if .IsQuery }}
 {{- if .QueryPathParams }}
@@ -966,7 +973,11 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 	expectedPath := "{{.ActionPath}}"
 	{{- if .HasParentID }}
 	// Replace path parameter placeholder with actual value
+	{{- if eq .ParentIDGoType "int64" }}
+	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.ParentIDParam}}{{"}"}}", fmt.Sprintf("%d", testResourceIDNumeric), 1)
+	{{- else }}
 	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.ParentIDParam}}{{"}"}}", testResourceID, 1)
+	{{- end }}
 	{{- end }}
 	{{- range .PathParams }}
 	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.Name}}{{"}"}}", testResourceID, 1)
@@ -1154,7 +1165,13 @@ func Test{{.Kind}}Reconciler_ActionPathParams(t *testing.T) {
 
 {{- if .HasParentID }}
 	// The parent ID we expect to see in the URL
+{{- if eq .ParentIDGoType "int64" }}
+	const expectedParentID int64 = 555
+	const expectedParentIDStr = "555"
+{{- else }}
 	const expectedParentID = "parent-id-555"
+	const expectedParentIDStr = expectedParentID
+{{- end }}
 {{- end }}
 
 	var receivedRequests []httpRequest{{.Kind}}
@@ -1244,15 +1261,15 @@ func Test{{.Kind}}Reconciler_ActionPathParams(t *testing.T) {
 	// Verify parent ID appears in the URL
 	foundParentID := false
 	for _, req := range receivedRequests {
-		if strings.Contains(req.URL, expectedParentID) {
+		if strings.Contains(req.URL, expectedParentIDStr) {
 			foundParentID = true
-			t.Logf("Found parent ID %q in URL: %s", expectedParentID, req.URL)
+			t.Logf("Found parent ID %q in URL: %s", expectedParentIDStr, req.URL)
 			break
 		}
 	}
 
 	if !foundParentID {
-		t.Errorf("expected parent ID %q to appear in URL, got requests: %v", expectedParentID, receivedRequests)
+		t.Errorf("expected parent ID %q to appear in URL, got requests: %v", expectedParentIDStr, receivedRequests)
 	}
 {{- end }}
 
@@ -1277,10 +1294,10 @@ func Test{{.Kind}}Reconciler_ActionPathParams(t *testing.T) {
 	// Build expected URL by replacing path parameter placeholders with actual values
 	expectedActionPath := "{{.ActionPath}}"
 {{- if .HasParentID }}
-	expectedActionPath = strings.Replace(expectedActionPath, "{{"{"}}{{.ParentIDParam}}{{"}"}}", expectedParentID, 1)
+	expectedActionPath = strings.Replace(expectedActionPath, "{{"{"}}{{.ParentIDParam}}{{"}"}}", expectedParentIDStr, 1)
 {{- end }}
 {{- range .PathParams }}
-	expectedActionPath = strings.Replace(expectedActionPath, "{{"{"}}{{.Name}}{{"}"}}", expectedParentID, 1)
+	expectedActionPath = strings.Replace(expectedActionPath, "{{"{"}}{{.Name}}{{"}"}}", expectedParentIDStr, 1)
 {{- end }}
 
 	foundActionPath := false

@@ -23,6 +23,9 @@ var (
 
 	cfg = &config.Config{}
 
+	// Config file path flag
+	configFile string
+
 	// Filter flags (comma-separated strings, parsed into slices)
 	includePaths      string
 	excludePaths      string
@@ -67,6 +70,42 @@ func init() {
 	rootCmd.SetVersionTemplate(fmt.Sprintf("openapi-operator-gen version %s\n  commit: %s\n  built:  %s\n", version, commit, date))
 }
 
+var initConfigFile string
+
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Create an example configuration file",
+	Long: `Create an example openapi-operator-gen configuration file.
+
+This command creates a YAML configuration file with all available options
+documented with comments. You can then edit this file and use it with:
+
+  openapi-operator-gen generate --config myconfig.yaml
+
+Or place it in the current directory as .openapi-operator-gen.yaml for
+automatic discovery.`,
+	RunE: runInit,
+}
+
+func init() {
+	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().StringVarP(&initConfigFile, "output", "o", ".openapi-operator-gen.yaml", "Output path for config file")
+}
+
+func runInit(cmd *cobra.Command, args []string) error {
+	if err := config.WriteExampleConfig(initConfigFile); err != nil {
+		return err
+	}
+	fmt.Printf("Created example config file: %s\n", initConfigFile)
+	fmt.Println()
+	fmt.Println("Edit the file to configure your generator options, then run:")
+	fmt.Println("  openapi-operator-gen generate")
+	fmt.Println()
+	fmt.Println("Or specify the config file explicitly:")
+	fmt.Printf("  openapi-operator-gen generate --config %s\n", initConfigFile)
+	return nil
+}
+
 var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate operator code from OpenAPI spec",
@@ -86,10 +125,13 @@ This command parses the OpenAPI spec and generates:
 func init() {
 	rootCmd.AddCommand(generateCmd)
 
+	// Config file flag
+	generateCmd.Flags().StringVarP(&configFile, "config", "c", "", "Path to config file (default: searches for .openapi-operator-gen.yaml)")
+
 	// Generate command flags
-	generateCmd.Flags().StringVarP(&cfg.SpecPath, "spec", "s", "", "Path or URL to OpenAPI specification file (required)")
+	generateCmd.Flags().StringVarP(&cfg.SpecPath, "spec", "s", "", "Path or URL to OpenAPI specification file")
 	generateCmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "./generated", "Output directory for generated code")
-	generateCmd.Flags().StringVarP(&cfg.APIGroup, "group", "g", "", "Kubernetes API group (e.g., myapp.example.com) (required)")
+	generateCmd.Flags().StringVarP(&cfg.APIGroup, "group", "g", "", "Kubernetes API group (e.g., myapp.example.com)")
 	generateCmd.Flags().StringVarP(&cfg.APIVersion, "version", "v", "v1alpha1", "Kubernetes API version")
 	generateCmd.Flags().StringVarP((*string)(&cfg.MappingMode), "mapping", "m", "per-resource", "Resource mapping mode: per-resource or single-crd")
 	generateCmd.Flags().StringVar(&cfg.ModuleName, "module", "github.com/bluecontainer/generated-operator", "Go module name for generated code")
@@ -111,8 +153,7 @@ func init() {
 	generateCmd.Flags().BoolVar(&cfg.NoIDMerge, "no-id-merge", false, "Disable automatic merging of path ID parameters with body 'id' fields")
 	generateCmd.Flags().StringVar(&idFieldMap, "id-field-map", "", "Explicit path param to body field mappings (comma-separated: orderId=id,petId=id)")
 
-	generateCmd.MarkFlagRequired("spec")
-	generateCmd.MarkFlagRequired("group")
+	// Note: spec and group are no longer marked as required since they can come from config file
 }
 
 // parseCommaSeparated splits a comma-separated string into a slice, trimming whitespace
@@ -160,20 +201,55 @@ func parseIDFieldMap(s string) map[string]string {
 }
 
 func runGenerate(cmd *cobra.Command, args []string) error {
+	// Load config file if specified or found
+	var cfgFilePath string
+	if configFile != "" {
+		cfgFilePath = configFile
+	} else {
+		cfgFilePath = config.FindConfigFile()
+	}
+
+	if cfgFilePath != "" {
+		fileCfg, err := config.LoadConfigFile(cfgFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to load config file %s: %w", cfgFilePath, err)
+		}
+		if fileCfg != nil {
+			fmt.Printf("Using config file: %s\n", cfgFilePath)
+			config.MergeConfigFile(cfg, fileCfg)
+		}
+	}
+
 	// Set the generator version and commit info for embedding in generated go.mod
 	cfg.GeneratorVersion = version
 	cfg.CommitHash = commit
 	cfg.CommitTimestamp = date
 
-	// Parse filter flags into config slices
-	cfg.IncludePaths = parseCommaSeparated(includePaths)
-	cfg.ExcludePaths = parseCommaSeparated(excludePaths)
-	cfg.IncludeTags = parseCommaSeparated(includeTags)
-	cfg.ExcludeTags = parseCommaSeparated(excludeTags)
-	cfg.IncludeOperations = parseCommaSeparated(includeOperations)
-	cfg.ExcludeOperations = parseCommaSeparated(excludeOperations)
-	cfg.UpdateWithPost = parseCommaSeparated(updateWithPost)
-	cfg.IDFieldMap = parseIDFieldMap(idFieldMap)
+	// Parse filter flags into config slices (CLI flags override config file)
+	if includePaths != "" {
+		cfg.IncludePaths = parseCommaSeparated(includePaths)
+	}
+	if excludePaths != "" {
+		cfg.ExcludePaths = parseCommaSeparated(excludePaths)
+	}
+	if includeTags != "" {
+		cfg.IncludeTags = parseCommaSeparated(includeTags)
+	}
+	if excludeTags != "" {
+		cfg.ExcludeTags = parseCommaSeparated(excludeTags)
+	}
+	if includeOperations != "" {
+		cfg.IncludeOperations = parseCommaSeparated(includeOperations)
+	}
+	if excludeOperations != "" {
+		cfg.ExcludeOperations = parseCommaSeparated(excludeOperations)
+	}
+	if updateWithPost != "" {
+		cfg.UpdateWithPost = parseCommaSeparated(updateWithPost)
+	}
+	if idFieldMap != "" {
+		cfg.IDFieldMap = parseIDFieldMap(idFieldMap)
+	}
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {

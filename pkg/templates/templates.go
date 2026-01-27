@@ -114,6 +114,11 @@ var ExampleCRTemplate string
 //go:embed example_cr_ref.yaml.tmpl
 var ExampleCRRefTemplate string
 
+// ExampleCRAdoptTemplate is the template for generating example CR YAML files that adopt and modify existing resources
+//
+//go:embed example_cr_adopt.yaml.tmpl
+var ExampleCRAdoptTemplate string
+
 // KustomizationSamplesTemplate is the template for config/samples/kustomization.yaml
 //
 //go:embed kustomization_samples.yaml.tmpl

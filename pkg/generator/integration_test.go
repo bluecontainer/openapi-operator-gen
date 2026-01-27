@@ -91,10 +91,11 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 			ActionMethod:   "POST",
 			ParentResource: "Pet",
 			ParentIDParam:  "petId",
+			ParentIDGoType: "int64",
 			ActionName:     "uploadImage",
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
-					{Name: "PetId", JSONName: "petId", GoType: "string", Required: true},
+					{Name: "PetId", JSONName: "petId", GoType: "int64", Required: true},
 					{Name: "AdditionalMetadata", JSONName: "additionalMetadata", GoType: "string"},
 					{
 						Name:        "ReExecuteInterval",

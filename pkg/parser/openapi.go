@@ -220,6 +220,7 @@ type ActionEndpoint struct {
 	Path           string // e.g., "/pet/{petId}/uploadImage"
 	ParentResource string // e.g., "Pet"
 	ParentIDParam  string // e.g., "petId"
+	ParentIDType   string // e.g., "integer" - OpenAPI type of parent ID param
 	ActionName     string // e.g., "uploadImage"
 	HTTPMethod     string // POST or PUT
 	Summary        string
@@ -891,8 +892,9 @@ func (p *Parser) extractActionEndpoint(path string, pathItem *openapi3.PathItem,
 			}
 		}
 
-		// Skip the parent ID param as it's handled separately
+		// Capture the parent ID param's type, then skip it (handled separately)
 		if param.Name == parentIDParam {
+			actionEndpoint.ParentIDType = param.Type
 			continue
 		}
 

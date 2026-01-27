@@ -1,0 +1,33 @@
+# Configuration for generating the petstore operator example
+# Usage: openapi-operator-gen generate --config examples/openapi-operator-gen.yaml
+
+# OpenAPI specification path (relative to where command is run)
+spec: examples/petstore.1.0.27.yaml
+
+# Output directory for generated code
+output: examples/generated
+
+# Kubernetes API group
+group: petstore.example.com
+
+# Kubernetes API version
+version: v1alpha1
+
+# Go module name for generated code
+module: github.com/bluecontainer/petstore-operator
+
+# Generate a Status Aggregator CRD for observing multiple resources
+aggregate: true
+
+# Generate an Inline Composition Bundle CRD for creating multiple resources
+bundle: true
+
+# Use POST for updates when PUT is not available
+updateWithPost:
+  - /store/order
+
+# Filtering options
+filters:
+  # Exclude specific operations
+  excludeOperations:
+    - updatePetWithForm

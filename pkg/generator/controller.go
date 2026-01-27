@@ -67,6 +67,7 @@ type ControllerTemplateData struct {
 	ParentResource    string                   // Parent resource kind (e.g., "Pet")
 	ParentIDParam     string                   // Parent ID parameter name (e.g., "petId")
 	ParentIDField     string                   // Go field name for parent ID (e.g., "PetId")
+	ParentIDGoType    string                   // Go type for parent ID (e.g., "int64", "string")
 	HasParentID       bool                     // True if the action has a parent ID parameter
 	ActionName        string                   // Action name (e.g., "uploadImage")
 	PathParams        []ActionPathParam        // Path parameters other than parent ID
@@ -266,6 +267,7 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		ParentResource: crd.ParentResource,
 		ParentIDParam:  crd.ParentIDParam,
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
+		ParentIDGoType: crd.ParentIDGoType,
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
 		// HTTP method availability
@@ -477,6 +479,7 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 		ParentResource: crd.ParentResource,
 		ParentIDParam:  crd.ParentIDParam,
 		ParentIDField:  strcase.ToCamel(crd.ParentIDParam),
+		ParentIDGoType: crd.ParentIDGoType,
 		HasParentID:    crd.ParentIDParam != "",
 		ActionName:     crd.ActionName,
 		HasDelete:      crd.HasDelete,

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,8 +117,7 @@ func TestPetUploadimageActionReconciler_E2E(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	// Create fake client with the object
@@ -203,8 +203,7 @@ func TestPetUploadimageActionReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -287,8 +286,7 @@ func TestPetUploadimageActionReconciler_CreateResource(t *testing.T) {
 			Name:      "new-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -351,8 +349,7 @@ func TestPetUploadimageActionReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -415,8 +412,7 @@ func TestPetUploadimageActionReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -479,8 +475,7 @@ func TestPetUploadimageActionReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -549,8 +544,7 @@ func TestPetUploadimageActionReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -605,8 +599,7 @@ func TestPetUploadimageActionReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -662,8 +655,7 @@ func TestPetUploadimageActionReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-petuploadimageaction",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetUploadimageActionSpec{
-		},
+		Spec: v1alpha1.PetUploadimageActionSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -782,7 +774,7 @@ func TestPetUploadimageActionReconciler_URLAndResponseConsistency(t *testing.T) 
 		},
 		Spec: v1alpha1.PetUploadimageActionSpec{
 			// Set parent ID for action endpoint
-			PetId: testResourceID,
+			PetId: testResourceIDNumeric,
 		},
 	}
 
@@ -844,7 +836,7 @@ func TestPetUploadimageActionReconciler_URLAndResponseConsistency(t *testing.T) 
 	// === Validation 3: Correct path was used ===
 	expectedPath := "/pet/{petId}/uploadImage"
 	// Replace path parameter placeholder with actual value
-	expectedPath = strings.Replace(expectedPath, "{petId}", testResourceID, 1)
+	expectedPath = strings.Replace(expectedPath, "{petId}", fmt.Sprintf("%d", testResourceIDNumeric), 1)
 
 	foundCorrectPath := false
 	for _, req := range receivedRequests {
@@ -879,6 +871,7 @@ func TestPetUploadimageActionReconciler_URLAndResponseConsistency(t *testing.T) 
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
+
 // TestPetUploadimageActionReconciler_ActionPathParams verifies that action endpoints
 // correctly use path parameters from spec in the URL
 func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
@@ -886,7 +879,8 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = v1alpha1.AddToScheme(scheme)
 	// The parent ID we expect to see in the URL
-	const expectedParentID = "parent-id-555"
+	const expectedParentID int64 = 555
+	const expectedParentIDStr = "555"
 
 	var receivedRequests []httpRequestPetUploadimageAction
 
@@ -969,15 +963,15 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 	// Verify parent ID appears in the URL
 	foundParentID := false
 	for _, req := range receivedRequests {
-		if strings.Contains(req.URL, expectedParentID) {
+		if strings.Contains(req.URL, expectedParentIDStr) {
 			foundParentID = true
-			t.Logf("Found parent ID %q in URL: %s", expectedParentID, req.URL)
+			t.Logf("Found parent ID %q in URL: %s", expectedParentIDStr, req.URL)
 			break
 		}
 	}
 
 	if !foundParentID {
-		t.Errorf("expected parent ID %q to appear in URL, got requests: %v", expectedParentID, receivedRequests)
+		t.Errorf("expected parent ID %q to appear in URL, got requests: %v", expectedParentIDStr, receivedRequests)
 	}
 
 	// Verify correct HTTP method
@@ -1000,7 +994,7 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 
 	// Build expected URL by replacing path parameter placeholders with actual values
 	expectedActionPath := "/pet/{petId}/uploadImage"
-	expectedActionPath = strings.Replace(expectedActionPath, "{petId}", expectedParentID, 1)
+	expectedActionPath = strings.Replace(expectedActionPath, "{petId}", expectedParentIDStr, 1)
 
 	foundActionPath := false
 	for _, req := range receivedRequests {
@@ -1024,4 +1018,3 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 		}
 	}
 }
-

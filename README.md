@@ -379,15 +379,76 @@ openapi-operator-gen generate \
   --module <go-module-name>
 ```
 
+### Configuration File
+
+Instead of passing all options via CLI flags, you can use a YAML configuration file. This is especially useful for complex configurations or when you want to version control your generator settings.
+
+**Create an example config file:**
+
+```bash
+openapi-operator-gen init
+```
+
+This creates `.openapi-operator-gen.yaml` with all available options documented.
+
+**Using the config file:**
+
+```bash
+# Auto-discovery (searches for .openapi-operator-gen.yaml in current directory)
+openapi-operator-gen generate
+
+# Explicit config file
+openapi-operator-gen generate --config myconfig.yaml
+```
+
+**Example configuration file:**
+
+```yaml
+# openapi-operator-gen.yaml
+spec: ./api/openapi.yaml
+output: ./generated
+group: myapp.example.com
+version: v1alpha1
+module: github.com/myorg/myapp-operator
+
+# Enable aggregate and bundle CRDs
+aggregate: true
+bundle: true
+
+# Filter specific endpoints
+filters:
+  includePaths:
+    - /users
+    - /pets/*
+  excludeTags:
+    - deprecated
+    - internal
+
+# ID field merging
+idMerge:
+  fieldMap:
+    orderId: id
+    petId: id
+```
+
+**Precedence:** CLI flags always override config file values.
+
+**Auto-discovery locations** (checked in order):
+1. `.openapi-operator-gen.yaml`
+2. `.openapi-operator-gen.yml`
+3. `openapi-operator-gen.yaml`
+4. `openapi-operator-gen.yml`
+
 ### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--spec`, `-s` | Path or URL to OpenAPI specification (YAML or JSON) | Required |
-| `--output`, `-o` | Output directory for generated code | Required |
-| `--group`, `-g` | Kubernetes API group (e.g., `myapp.example.com`) | Required |
+| `--config`, `-c` | Path to YAML config file | Auto-discover |
+| `--spec`, `-s` | Path or URL to OpenAPI specification (YAML or JSON) | Required* |
+| `--output`, `-o` | Output directory for generated code | `./generated` |
+| `--group`, `-g` | Kubernetes API group (e.g., `myapp.example.com`) | Required* |
 | `--version`, `-v` | API version (e.g., `v1alpha1`) | `v1alpha1` |
-| `--module`, `-m` | Go module name for generated code | Required |
+| `--module` | Go module name for generated code | `github.com/bluecontainer/generated-operator` |
 | `--mapping` | Resource mapping mode: `per-resource` or `single-crd` | `per-resource` |
 | `--root-kind` | Kind name for root `/` endpoint | Derived from spec filename |
 | `--include-paths` | Only include paths matching these patterns (comma-separated, glob supported) | All paths |
@@ -401,6 +462,8 @@ openapi-operator-gen generate \
 | `--no-id-merge` | Disable automatic merging of path ID parameters with body 'id' fields | `false` |
 | `--aggregate` | Generate a Status Aggregator CRD (see [Status Aggregator CRD](#status-aggregator-crd)) | `false` |
 | `--bundle` | Generate an Inline Composition Bundle CRD (see [Bundle CRD](#bundle-crd)) | `false` |
+
+*Required flags can be provided via config file instead of CLI.
 
 ### Example: Local File
 
@@ -508,13 +571,23 @@ This is particularly useful for APIs like the Petstore `/store/order` endpoint, 
 
 ### Behavior by HTTP Method Availability
 
-| Has GET | Has POST | Has PUT | `--update-with-post` | Behavior |
-|---------|----------|---------|---------------------|----------|
-| ✓ | ✓ | ✓ | Any | Uses PUT for updates (standard) |
-| ✓ | ✓ | ✗ | Enabled | Uses POST for updates |
-| ✓ | ✓ | ✗ | Disabled | Read-only sync (no updates) |
-| ✓ | ✗ | ✗ | Any | Read-only sync |
-| ✗ | ✓ | ✗ | Any | POST-only (no GET for drift detection) |
+The controller behavior adapts based on available HTTP methods:
+
+| Has GET | Has POST | Has PUT | Has PATCH | Has DELETE | Behavior |
+|---------|----------|---------|-----------|------------|----------|
+| ✓ | ✓ | ✓ | ✓ | ✓ | Full CRUD: POST creates, GET detects drift, PATCH updates, DELETE removes |
+| ✓ | ✓ | ✓ | ✗ | ✓ | Full CRUD: POST creates, GET detects drift, PUT updates, DELETE removes |
+| ✓ | ✓ | ✗ | ✓ | ✓ | Full CRUD: POST creates, GET detects drift, PATCH updates, DELETE removes |
+| ✓ | ✓ | ✓ | ✗ | ✗ | Create/Update: POST creates, PUT updates, no cleanup on CR deletion |
+| ✓ | ✓ | ✗ | ✗ | ✓ | Create/Delete: POST creates, no drift correction, DELETE removes |
+| ✓ | ✓ | ✗ | ✗ | ✗ | Create-only: POST creates, read-only after creation |
+| ✓ | ✗ | ✓ | ✗ | ✓ | Adopt/Update: Reference existing via path params, PUT updates, DELETE removes |
+| ✓ | ✗ | ✗ | ✗ | ✗ | Read-only: Only GET and status updates, no mutations |
+| ✗ | ✓ | ✗ | ✗ | ✗ | POST-only: Creates resources but cannot verify state (no GET) |
+
+**Update preference**: When both PUT and PATCH are available, PATCH is preferred as it performs partial updates.
+
+**`--update-with-post` flag**: When enabled and neither PUT nor PATCH is available, POST is used for updates (for APIs that use POST for upsert operations).
 
 ## OpenAPI Schema Support
 

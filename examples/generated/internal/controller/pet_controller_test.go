@@ -116,8 +116,7 @@ func TestPetReconciler_E2E(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	// Create fake client with the object
@@ -203,8 +202,7 @@ func TestPetReconciler_RequeueBehavior(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -287,8 +285,7 @@ func TestPetReconciler_CreateResource(t *testing.T) {
 			Name:      "new-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -351,8 +348,7 @@ func TestPetReconciler_HTTPNotFound(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -415,8 +411,7 @@ func TestPetReconciler_HTTPServerError(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -479,8 +474,7 @@ func TestPetReconciler_HTTPUnauthorized(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -549,8 +543,7 @@ func TestPetReconciler_HTTPRateLimited(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -605,8 +598,7 @@ func TestPetReconciler_HTTPInvalidJSON(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -662,8 +654,7 @@ func TestPetReconciler_HTTPTimeout(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -780,8 +771,7 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 			Name:      "test-pet",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.PetSpec{
-		},
+		Spec: v1alpha1.PetSpec{},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -876,4 +866,3 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-

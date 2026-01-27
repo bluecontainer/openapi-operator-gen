@@ -24,62 +24,87 @@ spec:
     - id: {{ $kind | lower }}-{{ $i }}
       kind: {{ $kind }}
       spec:
-        name: "bundle-created-{{ $kind | lower }}"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 ---
-# Bundle with dependencies - order of creation matters
+# Bundle with parent-child relationship using CEL expressions
+# The child resource references the parent's externalID via ${resources.<id>.status.externalID}
+# Dependencies are automatically inferred from the CEL expression
 apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
 kind: {{ .Kind }}
 metadata:
-  name: ordered-bundle
+  name: parent-child-bundle
   namespace: default
 spec:
   resources:
 {{- range $i, $kind := .ResourceKinds }}
 {{- if eq $i 0 }}
-    # First resource - no dependencies
+    # Parent resource - created first
+    - id: parent-{{ $kind | lower }}
+      kind: {{ $kind }}
+      spec:
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if eq $i 1 }}
+    # Child resource - references parent's externalID
+    # Dependency on parent is automatically inferred from the ${resources...} reference
+    - id: child-{{ $kind | lower }}
+      kind: {{ $kind }}
+      spec:
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+{{- if isParentIDField .JSONName }}
+        # Reference parent's external ID (creates implicit dependency)
+        {{ .JSONName }}: "${resources.parent-{{ index $.ResourceKinds 0 | lower }}.status.externalID}"
+{{- else }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+# Bundle with explicit dependencies (when not using CEL references)
+apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
+kind: {{ .Kind }}
+metadata:
+  name: explicit-dependency-bundle
+  namespace: default
+spec:
+  resources:
+{{- range $i, $kind := .ResourceKinds }}
+{{- if eq $i 0 }}
+    # First resource - no dependencies (parent)
     - id: primary-{{ $kind | lower }}
       kind: {{ $kind }}
       spec:
-        name: "primary-resource"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if eq $i 1 }}
-    # Second resource - depends on the first
-    - id: dependent-{{ $kind | lower }}
+    # Second resource - explicit dependency (child depends on parent)
+    - id: secondary-{{ $kind | lower }}
       kind: {{ $kind }}
       spec:
-        name: "dependent-resource"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
       dependsOn:
         - primary-{{ index $.ResourceKinds 0 | lower }}
-{{- end }}
-{{- end }}
----
-# Bundle with CEL expression references - dependencies are auto-derived
-# Use ${resources.<id>.status.<field>} to reference other resource values
-# No explicit dependsOn needed - it's inferred from the ${resources.parent...} reference
-apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
-kind: {{ .Kind }}
-metadata:
-  name: bundle-with-references
-  namespace: default
-spec:
-  resources:
-{{- range $i, $kind := .ResourceKinds }}
-{{- if eq $i 0 }}
-    # Parent resource
-    - id: parent
-      kind: {{ $kind }}
-      spec:
-        name: "parent-resource"
-{{- end }}
-{{- if eq $i 1 }}
-    # Child resource using parent's external ID
-    # Dependency on 'parent' is automatically inferred from the reference below
-    - id: child
-      kind: {{ $kind }}
-      spec:
-        name: "child-of-${resources.parent.status.externalID}"
 {{- end }}
 {{- end }}
 ---
@@ -93,18 +118,26 @@ spec:
   resources:
 {{- range $i, $kind := .ResourceKinds }}
 {{- if eq $i 0 }}
-    # Always created
+    # Always created (parent)
     - id: main
       kind: {{ $kind }}
       spec:
-        name: "main-resource"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if eq $i 1 }}
-    # Conditionally created based on a condition
+    # Conditionally created based on a condition (child)
     - id: optional
       kind: {{ $kind }}
       spec:
-        name: "optional-resource"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
       # Skip this resource if condition is true
       skipWhen:
         - "false"  # Always create for this example
@@ -124,7 +157,11 @@ spec:
     - id: backend
       kind: {{ $kind }}
       spec:
-        name: "backend-service"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
       # Custom condition for when this resource is considered ready
       readyWhen:
         - "resources.backend.status.state == 'Synced'"
@@ -133,7 +170,11 @@ spec:
     - id: frontend
       kind: {{ $kind }}
       spec:
-        name: "frontend-service"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
       dependsOn:
         - backend
       readyWhen:
@@ -155,12 +196,17 @@ spec:
     - id: example
       kind: {{ $kind }}
       spec:
-        name: "paused-resource"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if or .QueryKinds .ActionKinds }}
 ---
 # Bundle with mixed resource types (CRUD, Query, Action)
+# Child resources reference the parent resource's externalID
 apiVersion: {{ .APIGroup }}/{{ .APIVersion }}
 kind: {{ .Kind }}
 metadata:
@@ -170,11 +216,31 @@ spec:
   resources:
 {{- range $i, $kind := .ResourceKinds }}
 {{- if eq $i 0 }}
-    # CRUD Resource
-    - id: main-resource
+    # Parent resource - created first (needed by child resources)
+    - id: parent-resource
       kind: {{ $kind }}
       spec:
-        name: "created-resource"
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if eq $i 1 }}
+    # Child resource - references parent's externalID
+    - id: child-resource
+      kind: {{ $kind }}
+      spec:
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+{{- if isParentIDField .JSONName }}
+        # Reference parent's external ID
+        {{ .JSONName }}: "${resources.parent-resource.status.externalID}"
+{{- else }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- range $i, $kind := .QueryKinds }}
@@ -182,17 +248,30 @@ spec:
     # Query CRD (periodic queries)
     - id: status-query
       kind: {{ $kind }}
-      spec: {}
+      spec:
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- range $i, $kind := .ActionKinds }}
 {{- if eq $i 0 }}
-    # Action CRD (one-shot operations)
-    - id: post-create-action
+    # Action CRD - references parent's externalID
+    - id: upload-action
       kind: {{ $kind }}
-      spec: {}
-      dependsOn:
-        - main-resource
+      spec:
+{{- range getSpec $kind }}
+{{- if and (not .IsTargeting) (not (isPrimaryID .JSONName)) }}
+{{- if isParentIDField .JSONName }}
+        # Reference parent's external ID (creates implicit dependency)
+        {{ .JSONName }}: "${resources.parent-resource.status.externalID}"
+{{- else }}
+        {{ .JSONName }}: {{ .ExampleValue }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

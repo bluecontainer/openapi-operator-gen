@@ -204,6 +204,7 @@ type CRDTypeData struct {
 	ActionMethod   string
 	ParentResource string
 	ParentIDParam  string
+	ParentIDGoType string
 	ActionName     string
 
 	// HTTP method availability
@@ -463,6 +464,7 @@ type ControllerTemplateData struct {
 	ParentResource      string
 	ParentIDParam       string
 	ParentIDField       string
+	ParentIDGoType      string
 	HasParentID         bool
 	ActionName          string
 	PathParams          []ActionPathParam
@@ -693,6 +695,7 @@ func TestActionControllerTemplateExecution(t *testing.T) {
 		ParentResource:   "Pet",
 		ParentIDParam:    "petId",
 		ParentIDField:    "PetId",
+		ParentIDGoType:   "int64",
 		HasParentID:      true,
 		ActionName:       "uploadImage",
 		HasRequestBody:   true,
@@ -748,6 +751,7 @@ func TestActionControllerTemplateWithTypedResults(t *testing.T) {
 		ParentResource:   "Pet",
 		ParentIDParam:    "petId",
 		ParentIDField:    "PetId",
+		ParentIDGoType:   "int64",
 		HasParentID:      true,
 		ActionName:       "uploadImage",
 		HasRequestBody:   true,
@@ -847,13 +851,14 @@ func TestTypesTemplateActionCRDExecution(t *testing.T) {
 				ActionMethod:   "POST",
 				ParentResource: "Pet",
 				ParentIDParam:  "petId",
+				ParentIDGoType: "int64",
 				ActionName:     "uploadImage",
 				Spec: &SpecData{
 					Fields: []FieldData{
 						{
 							Name:        "PetId",
 							JSONName:    "petId",
-							GoType:      "string",
+							GoType:      "int64",
 							Description: "ID of pet to update",
 							Required:    true,
 						},

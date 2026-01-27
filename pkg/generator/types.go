@@ -58,6 +58,7 @@ type CRDTypeData struct {
 	ActionMethod   string // HTTP method (POST or PUT)
 	ParentResource string // Parent resource kind (e.g., "Pet")
 	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
+	ParentIDGoType string // Parent ID Go type (e.g., "int64", "string")
 	ActionName     string // Action name (e.g., "uploadImage")
 
 	// HTTP method availability (for Resource CRDs)
@@ -137,6 +138,7 @@ func (g *TypesGenerator) Generate(crds []*mapper.CRDDefinition) error {
 			ActionMethod:   crd.ActionMethod,
 			ParentResource: crd.ParentResource,
 			ParentIDParam:  crd.ParentIDParam,
+			ParentIDGoType: crd.ParentIDGoType,
 			ActionName:     crd.ActionName,
 			// HTTP method availability
 			HasDelete: crd.HasDelete,

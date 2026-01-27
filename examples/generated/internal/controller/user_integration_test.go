@@ -69,8 +69,7 @@ var _ = Describe("User Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserSpec{
-				},
+				Spec: v1alpha1.UserSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), user)).To(Succeed())
 
@@ -94,8 +93,7 @@ var _ = Describe("User Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserSpec{
-				},
+				Spec: v1alpha1.UserSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), user)).To(Succeed())
 
@@ -130,8 +128,7 @@ var _ = Describe("User Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserSpec{
-				},
+				Spec: v1alpha1.UserSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), user)).To(Succeed())
 

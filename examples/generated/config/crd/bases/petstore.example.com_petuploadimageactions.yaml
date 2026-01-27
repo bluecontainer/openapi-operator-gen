@@ -56,7 +56,8 @@ spec:
                 type: string
               petId:
                 description: ID of the parent Pet resource
-                type: string
+                format: int64
+                type: integer
               reExecuteInterval:
                 description: Interval at which to re-execute the action (e.g., 30s,
                   5m, 1h). If not set, action is one-shot.

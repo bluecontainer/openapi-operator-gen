@@ -108,3 +108,19 @@ func NewEnvironmentWithOptions(kindNames []string, additionalOpts ...cel.EnvOpti
 
 	return cel.NewEnv(opts...)
 }
+
+// NewBundleConditionEnvironment creates a CEL environment for evaluating Bundle readyWhen/skipWhen conditions.
+// Unlike the standard environment where `resources` is a list, this environment treats `resources` as a map
+// where keys are resource IDs and values are maps with status information.
+// This allows expressions like: resources.backend.status.state == 'Synced'
+func NewBundleConditionEnvironment() (*cel.Env, error) {
+	opts := []cel.EnvOption{
+		// resources is a map where keys are resource IDs
+		cel.Variable("resources", cel.MapType(cel.StringType, cel.DynType)),
+	}
+
+	// Add datetime functions (useful for time-based conditions)
+	opts = append(opts, DateTimeFunctions()...)
+
+	return cel.NewEnv(opts...)
+}

@@ -83,6 +83,8 @@ type CRDDefinition struct {
 	ActionMethod   string // HTTP method (POST or PUT)
 	ParentResource string // Parent resource kind (e.g., "Pet")
 	ParentIDParam  string // Parent ID parameter name (e.g., "petId")
+	ParentIDType   string // Parent ID OpenAPI type (e.g., "integer")
+	ParentIDGoType string // Parent ID Go type (e.g., "int64", "string")
 	ActionName     string // Action name (e.g., "uploadImage")
 
 	// IDFieldMappings stores mappings from path parameters to body fields.
@@ -369,6 +371,8 @@ func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, kn
 			ActionMethod:   ae.HTTPMethod,
 			ParentResource: ae.ParentResource,
 			ParentIDParam:  ae.ParentIDParam,
+			ParentIDType:   ae.ParentIDType,
+			ParentIDGoType: m.mapParamType(ae.ParentIDType),
 			ActionName:     ae.ActionName,
 		}
 
@@ -407,10 +411,15 @@ func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
 
 	// Add parent resource ID field (required) - only if the action has a parent ID
 	if ae.ParentIDParam != "" {
+		// Use the actual type from the OpenAPI spec for the parent ID field
+		parentIDGoType := m.mapParamType(ae.ParentIDType)
+		if parentIDGoType == "" {
+			parentIDGoType = "string" // fallback for unspecified types
+		}
 		parentIDField := &FieldDefinition{
 			Name:        strcase.ToCamel(ae.ParentIDParam),
 			JSONName:    strcase.ToLowerCamel(ae.ParentIDParam),
-			GoType:      "string",
+			GoType:      parentIDGoType,
 			Description: "ID of the parent " + ae.ParentResource + " resource",
 			Required:    true,
 		}

@@ -686,9 +686,15 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		}
 	}
 
-	// Return current status (Query CRDs use "Queried" as success state, default to "Pending" if empty)
+	// Return current status (Query CRDs use "Queried" as success state)
+	// Normalize to Bundle-compatible states: Queried -> Synced
 	state := existing.Status.State
-	if state == "" {
+	ready := false
+	switch state {
+	case "Queried":
+		state = "Synced" // Normalize to Bundle's allowed state
+		ready = true
+	case "":
 		state = "Pending"
 	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
@@ -697,7 +703,7 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		Name:         name,
 		State:        state,
 		Message:      existing.Status.Message,
-		Ready:        state == "Queried",
+		Ready:        ready,
 		LastSyncTime: existing.Status.LastQueryTime,
 	}, nil
 }
@@ -779,9 +785,17 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		}
 	}
 
-	// Return current status (Action CRDs use "Completed" as success state, default to "Pending" if empty)
+	// Return current status (Action CRDs use "Completed" as success state)
+	// Normalize to Bundle-compatible states: Completed -> Synced, Executing -> Creating
 	state := existing.Status.State
-	if state == "" {
+	ready := false
+	switch state {
+	case "Completed":
+		state = "Synced" // Normalize to Bundle's allowed state
+		ready = true
+	case "Executing":
+		state = "Creating" // Normalize to Bundle's allowed state (in progress)
+	case "":
 		state = "Pending"
 	}
 	return &{{ $.APIVersion }}.BundleResourceStatus{
@@ -790,7 +804,7 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		Name:         name,
 		State:        state,
 		Message:      existing.Status.Message,
-		Ready:        state == "Completed",
+		Ready:        ready,
 		LastSyncTime: existing.Status.LastExecutionTime,
 	}, nil
 }
@@ -832,7 +846,12 @@ func (r *{{ .Kind }}Reconciler) checkDependenciesReady(dependsOn []string, statu
 
 // evaluateConditions evaluates CEL conditions against current resource status
 func (r *{{ .Kind }}Reconciler) evaluateConditions(conditions []string, statusMap map[string]*{{ .APIVersion }}.BundleResourceStatus, bundle *{{ .APIVersion }}.{{ .Kind }}) (bool, error) {
+	if len(conditions) == 0 {
+		return true, nil
+	}
+
 	// Build variables for CEL evaluation
+	// resources is a map where keys are resource IDs for expressions like: resources.backend.status.state
 	resourcesVar := make(map[string]interface{})
 	for id, status := range statusMap {
 		resourcesVar[id] = map[string]interface{}{
@@ -846,16 +865,35 @@ func (r *{{ .Kind }}Reconciler) evaluateConditions(conditions []string, statusMa
 		}
 	}
 
-	// For now, evaluate conditions as simple string matches
-	// TODO: Implement full CEL evaluation
+	// Create CEL environment for Bundle condition evaluation
+	// This environment treats "resources" as a map (not a list) for dot-notation access
+	env, err := celutil.NewBundleConditionEnvironment()
+	if err != nil {
+		return false, fmt.Errorf("failed to create CEL environment: %w", err)
+	}
+
+	// All conditions must be true (AND logic)
 	for _, condition := range conditions {
-		// Simple evaluation: check if condition contains "true"
-		if strings.Contains(condition, "true") {
-			return true, nil
+		vars := map[string]interface{}{
+			"resources": resourcesVar,
+		}
+
+		result := celutil.Evaluate(env, condition, vars)
+		if result.Error != nil {
+			return false, fmt.Errorf("failed to evaluate condition %q: %w", condition, result.Error)
+		}
+
+		// Check if result is a boolean
+		if boolResult, ok := result.Value.(bool); ok {
+			if !boolResult {
+				return false, nil
+			}
+		} else {
+			return false, fmt.Errorf("condition %q did not evaluate to boolean, got %T", condition, result.Value)
 		}
 	}
 
-	return false, nil
+	return true, nil
 }
 
 // resolveExpressions replaces CEL expressions in spec with resolved values.
@@ -1349,8 +1387,20 @@ func (r *{{ .Kind }}Reconciler) calculateAggregatedHealth(bundle *{{ .APIVersion
 		})
 	}
 
-	// Convert BundleSummary to AggregateSummary
-	aggSummary := bundle.Status.Summary.ToAggregateSummary()
+	// Calculate summary from the aggregated resources we just built
+	// This ensures consistency rather than relying on bundle.Status.Summary which may be stale
+	var aggSummary {{ .APIVersion }}.AggregateSummary
+	for _, res := range aggregatedResources {
+		aggSummary.Total++
+		switch res.State {
+		case "Synced":
+			aggSummary.Synced++
+		case "Failed":
+			aggSummary.Failed++
+		case "Pending":
+			aggSummary.Pending++
+		}
+	}
 
 	// Determine aggregated health state using the same strategy as Aggregate CRD
 	strategy := bundle.Spec.AggregationStrategy
@@ -1421,6 +1471,8 @@ func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *
 	// Capture the current resource status snapshot (may have been updated by syncChildResources)
 	resourcesSnapshot := make([]{{ .APIVersion }}.BundleResourceStatus, len(bundle.Status.Resources))
 	copy(resourcesSnapshot, bundle.Status.Resources)
+	// Also capture the summary that was calculated from the statuses
+	summarySnapshot := bundle.Status.Summary
 
 	// Use retry to handle conflicts from concurrent reconciliations (e.g., when child resources are also being watched)
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -1435,8 +1487,9 @@ func (r *{{ .Kind }}Reconciler) updateBundleStatus(ctx context.Context, bundle *
 		latest.Status.Message = message
 		latest.Status.ObservedGeneration = latest.Generation
 
-		// Apply the captured resource statuses
+		// Apply the captured resource statuses and summary
 		latest.Status.Resources = resourcesSnapshot
+		latest.Status.Summary = summarySnapshot
 
 		// Update operation state
 		if latest.Status.OperationState == nil {
