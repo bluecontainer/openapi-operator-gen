@@ -97,13 +97,6 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 				Fields: []*mapper.FieldDefinition{
 					{Name: "PetId", JSONName: "petId", GoType: "int64", Required: true},
 					{Name: "AdditionalMetadata", JSONName: "additionalMetadata", GoType: "string"},
-					{
-						Name:        "ReExecuteInterval",
-						JSONName:    "reExecuteInterval",
-						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.",
-						Required:    false,
-					},
 				},
 			},
 		},
@@ -123,13 +116,6 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Username", JSONName: "username", GoType: "string", Required: true},
 					{Name: "Password", JSONName: "password", GoType: "string", Required: true},
-					{
-						Name:        "ReExecuteInterval",
-						JSONName:    "reExecuteInterval",
-						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.",
-						Required:    false,
-					},
 				},
 			},
 		},

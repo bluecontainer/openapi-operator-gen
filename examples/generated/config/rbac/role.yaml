@@ -8,16 +8,16 @@ rules:
   - petstore.example.com
   resources:
   - orders
-  - petfindbystatusquerys
-  - petfindbytagsquerys
+  - petfindbystatusqueries
+  - petfindbytagsqueries
   - pets
   - petstoreaggregates
   - petstorebundles
   - petuploadimageactions
-  - storeinventoryquerys
+  - storeinventoryqueries
   - usercreatewithlistactions
-  - userloginquerys
-  - userlogoutquerys
+  - userloginqueries
+  - userlogoutqueries
   - users
   verbs:
   - create
@@ -41,16 +41,16 @@ rules:
   - petstore.example.com
   resources:
   - orders/status
-  - petfindbystatusquerys/status
-  - petfindbytagsquerys/status
+  - petfindbystatusqueries/status
+  - petfindbytagsqueries/status
   - pets/status
   - petstoreaggregates/status
   - petstorebundles/status
   - petuploadimageactions/status
-  - storeinventoryquerys/status
+  - storeinventoryqueries/status
   - usercreatewithlistactions/status
-  - userloginquerys/status
-  - userlogoutquerys/status
+  - userloginqueries/status
+  - userlogoutqueries/status
   - users/status
   verbs:
   - get

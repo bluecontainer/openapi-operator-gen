@@ -6,14 +6,52 @@ metadata:
   name: {{ .KindLower }}-sample
   namespace: default
 spec:
+{{- $hasBinaryFields := false }}
 {{- range .SpecFields }}
-{{- if not .IsTargeting }}
+{{- if .IsBinaryData }}
+{{- $hasBinaryFields = true }}
+{{- else if not .IsTargeting }}
   {{ .JSONName }}: {{ .ExampleValue }}
 {{- end }}
 {{- end }}
+{{- if $hasBinaryFields }}
+  # Binary upload options (mutually exclusive - uncomment ONE):
+  #
+  # Option 1: Inline base64-encoded data
+  # data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  #
+  # Option 2: Reference a ConfigMap
+  # dataFrom:
+  #   configMapRef:
+  #     name: my-image-data
+  #     key: image.png
+  #
+  # Option 3: Reference a Secret
+  # dataFrom:
+  #   secretRef:
+  #     name: my-secret-data
+  #     key: image.png
+  #
+  # Option 4: Fetch from URL
+  # dataURL: "https://example.com/images/photo.png"
+  #
+  # Option 5: Read from file (requires operator filesystem access)
+  # dataFromFile:
+  #   path: /data/image.png
+  #
+  # Optional: Override content type (default: application/octet-stream)
+  # contentType: "image/png"
+{{- end }}
   # Endpoint targeting (optional - uncomment if needed)
-  # targetNamespace: "target-namespace"
-  # targetStatefulSet: "my-statefulset"
-  # targetDeployment: "my-deployment"
-  # targetHelmRelease: "my-release"
-  # targetPodOrdinal: 0
+  # target:
+  #   namespace: "target-namespace"
+  #   statefulSet: "my-statefulset"
+  #   deployment: "my-deployment"
+  #   helmRelease: "my-release"
+  #   podOrdinal: 0
+  #   # Single static URL:
+  #   # baseURL: "http://api.example.com:8080"
+  #   # Multiple static URLs (fan-out to all):
+  #   # baseURLs:
+  #   #   - "http://api-1.example.com:8080"
+  #   #   - "http://api-2.example.com:8080"

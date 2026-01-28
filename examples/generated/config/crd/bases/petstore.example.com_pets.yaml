@@ -61,6 +61,13 @@ spec:
                   name:
                     type: string
                 type: object
+              executionInterval:
+                description: |-
+                  ExecutionInterval specifies how often to re-sync with the REST API.
+                  If not set, uses the controller's default interval (typically 30s).
+                  Set to "0" to disable periodic re-sync (only reconcile on spec changes).
+                  Examples: "30s", "5m", "1h"
+                type: string
               id:
                 format: int64
                 type: integer
@@ -85,6 +92,11 @@ spec:
                 - Orphan
                 - Restore
                 type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of resource management.
+                type: boolean
               photoUrls:
                 items:
                   type: string
@@ -113,45 +125,56 @@ spec:
                       type: string
                   type: object
                 type: array
-              targetBaseURL:
+              target:
                 description: |-
-                  TargetBaseURL specifies a static base URL for the REST API.
-                  When set, overrides all other endpoint configuration for this CR.
-                  Example: "http://api.example.com:8080"
-                type: string
-              targetDeployment:
-                description: |-
-                  TargetDeployment specifies a Deployment name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
-              targetHelmRelease:
-                description: |-
-                  TargetHelmRelease specifies a Helm release to discover the workload from.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                  The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-                type: string
-              targetNamespace:
-                description: |-
-                  TargetNamespace specifies the namespace to look for the target workload.
-                  Defaults to the CR's namespace if not specified.
-                type: string
-              targetPod:
-                description: |-
-                  TargetPod specifies a pod name to route requests to directly.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
-              targetPodOrdinal:
-                description: |-
-                  TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-                  Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-                format: int32
-                minimum: 0
-                type: integer
-              targetStatefulSet:
-                description: |-
-                  TargetStatefulSet specifies a StatefulSet name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
+                  Target specifies endpoint targeting configuration.
+                  If not specified, the operator uses its global configuration.
+                properties:
+                  baseURL:
+                    description: |-
+                      BaseURL specifies a static base URL for the REST API.
+                      When set, overrides all other endpoint configuration.
+                      Example: "http://api.example.com:8080"
+                      Mutually exclusive with BaseURLs.
+                    type: string
+                  baseURLs:
+                    description: |-
+                      BaseURLs specifies multiple static base URLs for the REST API.
+                      Operations will fan-out to all URLs (writes must succeed on all, reads use first success).
+                      Example: ["http://api-1.example.com:8080", "http://api-2.example.com:8080"]
+                      Mutually exclusive with BaseURL.
+                    items:
+                      type: string
+                    type: array
+                  deployment:
+                    description: Deployment specifies a Deployment name to route requests
+                      to.
+                    type: string
+                  helmRelease:
+                    description: |-
+                      HelmRelease specifies a Helm release to discover the workload from.
+                      The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<HelmRelease>.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace specifies the namespace to look for the target workload.
+                      Defaults to the CR's namespace if not specified.
+                    type: string
+                  pod:
+                    description: Pod specifies a pod name to route requests to directly.
+                    type: string
+                  podOrdinal:
+                    description: |-
+                      PodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+                      Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  statefulSet:
+                    description: StatefulSet specifies a StatefulSet name to route
+                      requests to.
+                    type: string
+                type: object
             type: object
             x-kubernetes-validations:
             - message: name is required when creating a new resource
@@ -336,6 +359,7 @@ spec:
                 - Failed
                 - Observed
                 - NotFound
+                - Paused
                 type: string
             type: object
         type: object

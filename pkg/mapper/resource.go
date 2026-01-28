@@ -87,6 +87,10 @@ type CRDDefinition struct {
 	ParentIDGoType string // Parent ID Go type (e.g., "int64", "string")
 	ActionName     string // Action name (e.g., "uploadImage")
 
+	// Binary upload fields
+	HasBinaryBody     bool   // True if the action accepts binary data uploads
+	BinaryContentType string // Content type for binary data (e.g., "application/octet-stream")
+
 	// IDFieldMappings stores mappings from path parameters to body fields.
 	// This is used when a path param like {orderId} maps to the body's "id" field.
 	// The controller uses this to:
@@ -359,21 +363,23 @@ func (m *Mapper) mapActionEndpoints(actionEndpoints []*parser.ActionEndpoint, kn
 		seenKinds[ae.Name] = true
 
 		crd := &CRDDefinition{
-			APIGroup:       m.config.APIGroup,
-			APIVersion:     m.config.APIVersion,
-			Kind:           ae.Name,
-			Plural:         pluralize(ae.Name),
-			ShortNames:     []string{}, // Action CRDs don't get short names to avoid conflicts
-			Scope:          "Namespaced",
-			Description:    ae.Summary,
-			IsAction:       true,
-			ActionPath:     ae.Path,
-			ActionMethod:   ae.HTTPMethod,
-			ParentResource: ae.ParentResource,
-			ParentIDParam:  ae.ParentIDParam,
-			ParentIDType:   ae.ParentIDType,
-			ParentIDGoType: m.mapParamType(ae.ParentIDType),
-			ActionName:     ae.ActionName,
+			APIGroup:          m.config.APIGroup,
+			APIVersion:        m.config.APIVersion,
+			Kind:              ae.Name,
+			Plural:            pluralize(ae.Name),
+			ShortNames:        []string{}, // Action CRDs don't get short names to avoid conflicts
+			Scope:             "Namespaced",
+			Description:       ae.Summary,
+			IsAction:          true,
+			ActionPath:        ae.Path,
+			ActionMethod:      ae.HTTPMethod,
+			ParentResource:    ae.ParentResource,
+			ParentIDParam:     ae.ParentIDParam,
+			ParentIDType:      ae.ParentIDType,
+			ParentIDGoType:    m.mapParamType(ae.ParentIDType),
+			ActionName:        ae.ActionName,
+			HasBinaryBody:     ae.HasBinaryBody,
+			BinaryContentType: ae.BinaryContentType,
 		}
 
 		// Generate spec fields from request schema and path params
@@ -425,16 +431,6 @@ func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
 		}
 		spec.Fields = append(spec.Fields, parentIDField)
 	}
-
-	// Add re-execution interval field (optional)
-	reExecuteIntervalField := &FieldDefinition{
-		Name:        "ReExecuteInterval",
-		JSONName:    "reExecuteInterval",
-		GoType:      "*metav1.Duration",
-		Description: "Interval at which to re-execute the action (e.g., 30s, 5m, 1h). If not set, action is one-shot.",
-		Required:    false,
-	}
-	spec.Fields = append(spec.Fields, reExecuteIntervalField)
 
 	// Add path parameters (excluding parent ID which is already added)
 	for _, param := range ae.PathParams {
@@ -503,7 +499,65 @@ func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
 		}
 	}
 
+	// Add binary upload fields if the action has binary body
+	if ae.HasBinaryBody {
+		spec.Fields = append(spec.Fields, m.createBinaryUploadFields()...)
+	}
+
 	return spec
+}
+
+// createBinaryUploadFields creates the fields for binary upload support
+// Supports multiple data sources: inline base64, ConfigMap/Secret reference, URL, and PVC
+func (m *Mapper) createBinaryUploadFields() []*FieldDefinition {
+	fields := make([]*FieldDefinition, 0)
+
+	// Option 1: Inline base64-encoded data
+	fields = append(fields, &FieldDefinition{
+		Name:        "Data",
+		JSONName:    "data",
+		GoType:      "string",
+		Description: "Base64-encoded binary data to upload. Mutually exclusive with dataFrom, dataURL, and dataFromFile.",
+		Required:    false,
+	})
+
+	// Option 2: Reference to ConfigMap or Secret
+	fields = append(fields, &FieldDefinition{
+		Name:        "DataFrom",
+		JSONName:    "dataFrom",
+		GoType:      "*BinaryDataSource",
+		Description: "Reference to a ConfigMap or Secret containing the binary data. Mutually exclusive with data, dataURL, and dataFromFile.",
+		Required:    false,
+	})
+
+	// Option 3: URL to fetch data from
+	fields = append(fields, &FieldDefinition{
+		Name:        "DataURL",
+		JSONName:    "dataURL",
+		GoType:      "string",
+		Description: "URL to fetch binary data from. Mutually exclusive with data, dataFrom, and dataFromFile.",
+		Required:    false,
+	})
+
+	// Option 4: File path reference
+	fields = append(fields, &FieldDefinition{
+		Name:        "DataFromFile",
+		JSONName:    "dataFromFile",
+		GoType:      "*FileDataSource",
+		Description: "Path to a file containing the binary data (requires operator filesystem access). Mutually exclusive with data, dataFrom, and dataURL.",
+		Required:    false,
+	})
+
+	// Content type override (optional)
+	fields = append(fields, &FieldDefinition{
+		Name:        "ContentType",
+		JSONName:    "contentType",
+		GoType:      "string",
+		Description: "Content-Type header to use for the upload. Defaults to application/octet-stream.",
+		Required:    false,
+	})
+
+	return fields
 }
 
 // mapActionResponseSchema maps the response schema for action CRDs

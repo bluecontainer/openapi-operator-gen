@@ -207,6 +207,10 @@ type CRDTypeData struct {
 	ParentIDGoType string
 	ActionName     string
 
+	// Binary upload support for actions
+	HasBinaryBody     bool
+	BinaryContentType string
+
 	// HTTP method availability
 	HasDelete bool
 	HasPost   bool
@@ -241,6 +245,7 @@ type TypesTemplateData struct {
 	ModuleName       string
 	CRDs             []CRDTypeData
 	NestedTypes      []NestedTypeData
+	HasBinaryActions bool // True if any action CRD has binary body support
 }
 
 func TestTypesTemplateExecution(t *testing.T) {
@@ -479,6 +484,10 @@ type ControllerTemplateData struct {
 	HasPost   bool
 	HasPut    bool
 	HasPatch  bool
+
+	// Binary upload support for actions
+	HasBinaryBody     bool
+	BinaryContentType string
 
 	// UpdateWithPost enables using POST for updates when PUT is not available
 	UpdateWithPost bool

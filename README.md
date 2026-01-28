@@ -93,7 +93,9 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Partial Updates](#partial-updates)
   - [Multi-Endpoint Observation](#multi-endpoint-observation)
   - [Status Fields](#status-fields)
+  - [kstatus Compatibility](#kstatus-compatibility)
 - [Example: Petstore Operator](#example-petstore-operator)
+  - [Running with Docker Compose](#running-with-docker-compose)
   - [Sample CR](#sample-cr)
 - [Environment Variables](#environment-variables)
 - [Observability (OpenTelemetry)](#observability-opentelemetry)
@@ -708,8 +710,9 @@ spec:
     - friendly
     - cute
   # Optional targeting fields
-  targetHelmRelease: petstore-prod
-  targetNamespace: production
+  target:
+    helmRelease: petstore-prod
+    namespace: production
 ```
 
 ### Typed Response Mapping
@@ -873,7 +876,8 @@ spec:
   petId: "12345"              # Parent resource ID (required)
   additionalMetadata: "Profile photo"
   # Optional targeting fields
-  targetHelmRelease: petstore-prod
+  target:
+    helmRelease: petstore-prod
 ```
 
 ### One-Shot vs Periodic Execution
@@ -1406,8 +1410,9 @@ metadata:
   name: my-bundle
 spec:
   # Optional: Target settings inherited by child resources
-  targetHelmRelease: my-release
-  targetNamespace: backend
+  target:
+    helmRelease: my-release
+    namespace: backend
 
   # Optional: Pause reconciliation
   paused: false
@@ -1816,10 +1821,10 @@ You can run the operator without any endpoint flags:
 ./bin/manager
 ```
 
-In this mode, every CR must specify where to send requests using one of these spec fields:
-- `targetHelmRelease` - Target a Helm release
-- `targetStatefulSet` - Target a StatefulSet by name
-- `targetDeployment` - Target a Deployment by name
+In this mode, every CR must specify where to send requests using the `target` field:
+- `target.helmRelease` - Target a Helm release
+- `target.statefulSet` - Target a StatefulSet by name
+- `target.deployment` - Target a Deployment by name
 
 Example CR with per-CR targeting:
 ```yaml
@@ -1829,15 +1834,16 @@ metadata:
   name: fluffy
 spec:
   name: Fluffy
-  targetHelmRelease: petstore-prod   # Required when no global config
-  targetNamespace: production         # Optional: defaults to CR namespace
+  target:
+    helmRelease: petstore-prod   # Required when no global config
+    namespace: production         # Optional: defaults to CR namespace
 ```
 
 If a CR doesn't specify a target and no global configuration exists, reconciliation will fail with:
 ```
 no endpoint configured: set global endpoint (--base-url, --pod-name, --statefulset-name,
 --deployment-name, or --helm-release) or specify per-CR targeting
-(targetBaseURL, targetPod, targetHelmRelease, targetStatefulSet, or targetDeployment)
+(target.baseURL, target.pod, target.helmRelease, target.statefulSet, or target.deployment)
 ```
 
 ### 1. Static URL Mode
@@ -1849,6 +1855,25 @@ Use a fixed base URL for the REST API:
 ```
 
 Environment variable: `REST_API_BASE_URL`
+
+#### Multiple Static URLs (Fan-out Mode)
+
+For fan-out to multiple API endpoints, use `--base-urls` with a comma-separated list:
+
+```bash
+./bin/manager --base-urls http://api-1.example.com:8080,http://api-2.example.com:8080
+```
+
+Environment variable: `REST_API_BASE_URLS`
+
+**Fan-out behavior:**
+- **Write operations** (POST, PUT, DELETE): Sent to ALL URLs; all must succeed
+- **Read operations** (GET): Query all URLs, use first successful response
+
+This is useful for:
+- Multi-region deployments requiring consistent state
+- Active-active setups where all instances must be synchronized
+- Testing and validation against multiple API versions
 
 ### 2. StatefulSet Discovery Mode
 
@@ -1895,11 +1920,12 @@ Environment variable: `HELM_RELEASE`
 
 ## Operator Configuration Flags
 
-All endpoint flags are optional. If no global endpoint is configured, each CR must specify its target using per-CR targeting fields (`targetHelmRelease`, `targetStatefulSet`, or `targetDeployment`).
+All endpoint flags are optional. If no global endpoint is configured, each CR must specify its target using the `target` sub-object (`target.helmRelease`, `target.statefulSet`, or `target.deployment`).
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--base-url` | Static REST API base URL | (optional) |
+| `--base-urls` | Comma-separated list of base URLs for fan-out mode | (optional) |
 | `--pod-name` | Pod name for direct endpoint targeting | (optional) |
 | `--statefulset-name` | StatefulSet name for endpoint discovery | (optional) |
 | `--deployment-name` | Deployment name for endpoint discovery | (optional) |
@@ -1987,7 +2013,7 @@ When using workload discovery, you can configure how endpoints are selected:
 | `leader-only` | Always use pod-0 (ordinal 0) as the primary endpoint | ✓ | ✗ |
 | `any-healthy` | Use any single healthy pod, failover if unhealthy | ✓ | ✓ |
 | `all-healthy` | Fan-out requests to all healthy pods (for broadcast operations) | ✓ | ✓ |
-| `by-ordinal` | Route to a specific pod based on `targetPodOrdinal` field in the CR | ✓ | ✗ |
+| `by-ordinal` | Route to a specific pod based on `target.podOrdinal` field in the CR | ✓ | ✗ |
 
 ### Using by-ordinal Strategy
 
@@ -2000,7 +2026,8 @@ metadata:
   name: my-pet
 spec:
   name: Fluffy
-  targetPodOrdinal: 2  # Routes to pod-2
+  target:
+    podOrdinal: 2  # Routes to pod-2
 ```
 
 ### Per-CR Workload Targeting
@@ -2018,9 +2045,10 @@ metadata:
   name: my-pet
 spec:
   name: Fluffy
-  targetHelmRelease: petstore-prod  # Discovers workload from this Helm release
-  targetNamespace: production        # Optional: namespace to look for the Helm release
-  targetPodOrdinal: 0                # Optional: specific pod ordinal (StatefulSet only)
+  target:
+    helmRelease: petstore-prod  # Discovers workload from this Helm release
+    namespace: production        # Optional: namespace to look for the Helm release
+    podOrdinal: 0                # Optional: specific pod ordinal (StatefulSet only)
 ```
 
 The controller auto-detects whether the Helm release contains a StatefulSet or Deployment.
@@ -2034,9 +2062,10 @@ metadata:
   name: my-pet
 spec:
   name: Fluffy
-  targetStatefulSet: petstore-api    # Routes to this StatefulSet
-  targetNamespace: production         # Optional: namespace
-  targetPodOrdinal: 2                 # Optional: specific pod ordinal
+  target:
+    statefulSet: petstore-api    # Routes to this StatefulSet
+    namespace: production         # Optional: namespace
+    podOrdinal: 2                 # Optional: specific pod ordinal
 ```
 
 #### Target by Deployment Name
@@ -2048,11 +2077,12 @@ metadata:
   name: my-pet
 spec:
   name: Fluffy
-  targetDeployment: petstore-api     # Routes to this Deployment
-  targetNamespace: production         # Optional: namespace
+  target:
+    deployment: petstore-api     # Routes to this Deployment
+    namespace: production         # Optional: namespace
 ```
 
-Note: `targetPodOrdinal` is ignored when targeting a Deployment.
+Note: `target.podOrdinal` is ignored when targeting a Deployment.
 
 #### Target by Base URL
 
@@ -2065,13 +2095,40 @@ metadata:
   name: my-pet
 spec:
   name: Fluffy
-  targetBaseURL: "http://api.example.com:8080"  # Direct URL to the REST API
+  target:
+    baseURL: "http://api.example.com:8080"  # Direct URL to the REST API
 ```
 
 This is the simplest targeting option and takes highest priority over all other targeting methods. It's useful when:
 - The API is hosted externally (not in the Kubernetes cluster)
 - You need to target a specific URL without workload discovery
 - Testing against a local development server
+
+#### Target by Multiple Base URLs (Fan-out)
+
+For fan-out to multiple API endpoints at the CR level:
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  name: Fluffy
+  target:
+    baseURLs:
+      - "http://api-1.example.com:8080"
+      - "http://api-2.example.com:8080"
+```
+
+**Fan-out behavior:**
+- **Write operations** (POST, PUT, DELETE): Sent to ALL URLs; all must succeed
+- **Read operations** (GET): Query all URLs, use first successful response
+
+This is useful for:
+- Multi-region deployments requiring consistent state per-resource
+- Active-active setups where specific resources must be synchronized across instances
+- Canary deployments where certain resources should exist on both old and new instances
 
 #### Target by Pod Name
 
@@ -2084,8 +2141,9 @@ metadata:
   name: my-pet
 spec:
   name: Fluffy
-  targetPod: petstore-api-0           # Routes to this specific pod
-  targetNamespace: production          # Optional: namespace
+  target:
+    pod: petstore-api-0           # Routes to this specific pod
+    namespace: production          # Optional: namespace
 ```
 
 This is useful when:
@@ -2099,17 +2157,19 @@ Every generated CR includes these controller-specific fields in the spec:
 
 | Field | Description |
 |-------|-------------|
-| `targetBaseURL` | Static base URL for the REST API (highest priority, overrides all other targeting) |
-| `targetPod` | Pod name to route requests to directly |
-| `targetPodOrdinal` | StatefulSet pod ordinal to route requests to (by-ordinal strategy) |
-| `targetHelmRelease` | Helm release name for per-CR workload discovery |
-| `targetStatefulSet` | StatefulSet name for per-CR workload discovery |
-| `targetDeployment` | Deployment name for per-CR workload discovery |
-| `targetNamespace` | Namespace for target workload (defaults to CR namespace) |
+| `target.baseURL` | Static base URL for the REST API (highest priority, overrides all other targeting) |
+| `target.baseURLs` | List of base URLs for fan-out mode (writes to all, reads use first success) |
+| `target.pod` | Pod name to route requests to directly |
+| `target.podOrdinal` | StatefulSet pod ordinal to route requests to (by-ordinal strategy) |
+| `target.helmRelease` | Helm release name for per-CR workload discovery |
+| `target.statefulSet` | StatefulSet name for per-CR workload discovery |
+| `target.deployment` | Deployment name for per-CR workload discovery |
+| `target.namespace` | Namespace for target workload (defaults to CR namespace) |
 | `externalIDRef` | Reference an existing external resource by ID (only for CRDs without path parameters) |
 | `readOnly` | If true, only observe the resource (no create/update/delete) |
 | `mergeOnUpdate` | If true (default), merge spec with current API state before updates (see [Partial Updates](#partial-updates)) |
 | `onDelete` | Policy for external resource on CR deletion: `Delete`, `Orphan`, or `Restore` (see [OnDelete Policy](#ondelete-policy)) |
+| `paused` | If true, reconciliation is suspended |
 
 These fields are stripped from the payload when sending requests to the REST API.
 
@@ -2118,7 +2178,7 @@ These fields are stripped from the payload when sending requests to the REST API
 #### Targeting Behavior
 
 When a target is specified:
-1. If `targetNamespace` is not specified, the CR's namespace is used
+1. If `target.namespace` is not specified, the CR's namespace is used
 2. The global operator endpoint configuration is ignored for this CR
 3. The endpoint is discovered dynamically at reconciliation time
 
@@ -2436,6 +2496,62 @@ Each CRD generates its own EndpointResponse type (e.g., `PetEndpointResponse`, `
 | `error` | Error message if the request failed |
 | `lastUpdated` | When this endpoint was last queried |
 
+#### kstatus Compatibility
+
+Generated operators are fully compatible with [kstatus](https://github.com/kubernetes-sigs/cli-utils/tree/master/pkg/kstatus), the Kubernetes status library used by tools like `kubectl wait`, Flux, and Argo CD. All generated controllers set three standard conditions following the kstatus conventions:
+
+| Condition | Description | When True |
+|-----------|-------------|-----------|
+| `Ready` | Resource has reached its desired state | Resource is synced, observed, or action completed |
+| `Reconciling` | Controller is actively working on the resource | During sync, query, aggregation, or pending states |
+| `Stalled` | Controller encountered an error and cannot proceed | On failures (API errors, validation errors, etc.) |
+
+The conditions follow the **abnormal-true** pattern recommended by kstatus:
+- `Reconciling` is `True` during active work, `False` when done
+- `Stalled` is `True` when errors occur, `False` otherwise
+- `Ready` uses the standard pattern: `True` for success, `False` for not ready
+
+**State to Condition Mapping by CRD Type:**
+
+| CRD Type | Reconciling=True | Stalled=True | Ready=True |
+|----------|------------------|--------------|------------|
+| Resource (CRUD) | `Syncing`, `Pending` | `Failed` | `Synced`, `Observed` |
+| Query | `Querying`, `Pending` | `Failed` | `Queried` |
+| Action | `Executing`, `Pending` | `Failed` | `Completed` |
+| Bundle | `Pending`, `Syncing` | `Failed` or child failures | `Synced` |
+| Aggregate | `Aggregating`, `Pending` | `Failed` | `Healthy` |
+
+All CRDs also set `observedGeneration` in the status to track which generation of the spec has been processed, enabling tools to detect when a spec change has been fully reconciled.
+
+**Paused State:**
+
+All CRD types support a `spec.paused` field. When `paused: true`:
+- Reconciliation stops immediately
+- Status state is set to `Paused`
+- `Reconciling=False` (not actively working)
+- `Ready=False` (not in desired state)
+- `Stalled=False` (not an error condition)
+
+This allows temporarily suspending reconciliation without triggering alerts for stalled resources.
+
+**Usage with kubectl:**
+
+```bash
+# Wait for a resource to be ready
+kubectl wait --for=condition=Ready pet/fluffy --timeout=60s
+
+# Check if resource is stalled
+kubectl get pet/fluffy -o jsonpath='{.status.conditions[?(@.type=="Stalled")].status}'
+
+# Wait for reconciliation to complete
+kubectl wait --for=condition=Reconciling=False pet/fluffy --timeout=60s
+
+# Wait for non-paused resources only (using JSONPath filter)
+for r in $(kubectl get pets -o jsonpath='{.items[?(@.spec.paused!=true)].metadata.name}'); do
+  kubectl wait --for=condition=Ready pet/$r --timeout=60s
+done
+```
+
 ## Example: Petstore Operator
 
 The repository includes a petstore example:
@@ -2449,6 +2565,82 @@ docker run --rm -v "$(pwd):/app" -w /app golang:1.25 ./scripts/build-example.sh
 ```
 
 This generates an operator with `Pet`, `Store`, and `User` CRDs from the OpenAPI petstore spec.
+
+### Running with Docker Compose
+
+The `examples/` directory includes a `docker-compose.yaml` for local development and testing. It provides profiles for different scenarios:
+
+#### Basic Setup (Petstore API only)
+
+Start just the Swagger Petstore API for local development:
+
+```bash
+cd examples
+docker compose up -d petstore
+
+# Run the operator locally against the petstore
+cd generated
+go run ./cmd/manager --base-url=http://localhost:8080/api/v3
+```
+
+#### Full Stack with k3s
+
+Run a complete environment with a lightweight Kubernetes cluster (k3s), the Petstore API, and the operator:
+
+```bash
+cd examples
+docker compose --profile k3s up -d
+
+# Wait for k3s to be ready, then access the cluster
+KUBECONFIG=./k3s-output/kubeconfig.yaml kubectl get nodes
+
+# Apply a sample CR
+KUBECONFIG=./k3s-output/kubeconfig.yaml kubectl apply -f generated/config/samples/v1alpha1_pet.yaml
+```
+
+#### Multi-Endpoint Fan-out Testing
+
+Test the `baseURLs` fan-out feature with two Petstore instances:
+
+```bash
+cd examples
+docker compose --profile multi-endpoint up -d
+
+# This starts:
+# - petstore-1 on port 8081
+# - petstore-2 on port 8082
+# - k3s-multi on port 6444
+# - operator-multi configured with REST_API_BASE_URLS for both instances
+
+# Access the multi-endpoint cluster
+KUBECONFIG=./k3s-multi-output/kubeconfig.yaml kubectl get nodes
+
+# Apply a CR - writes will fan out to both petstore instances
+KUBECONFIG=./k3s-multi-output/kubeconfig.yaml kubectl apply -f generated/config/samples/v1alpha1_pet.yaml
+
+# Or use the multi-endpoint sample CR with explicit baseURLs
+KUBECONFIG=./k3s-multi-output/kubeconfig.yaml kubectl apply -f generated/config/samples/v1alpha1_pet_multi_endpoint.yaml
+```
+
+#### Connecting to External Cluster (kind/minikube)
+
+If you have an existing Kubernetes cluster:
+
+```bash
+cd examples
+docker compose --profile with-k8s up -d
+
+# The operator will use your ~/.kube/config
+```
+
+#### Docker Compose Profiles Summary
+
+| Profile | Description | Components |
+|---------|-------------|------------|
+| (default) | Petstore API only | `petstore` |
+| `k3s` | Full stack with k3s | `petstore`, `k3s`, `k3s-init`, `operator-k3s` |
+| `with-k8s` | Connect to existing cluster | `petstore`, `operator` |
+| `multi-endpoint` | Fan-out testing with 2 APIs | `petstore-1`, `petstore-2`, `k3s-multi`, `k3s-multi-init`, `operator-multi` |
 
 ### Sample CR
 
@@ -2479,6 +2671,7 @@ All flags can be set via environment variables:
 | Variable | Flag |
 |----------|------|
 | `REST_API_BASE_URL` | `--base-url` |
+| `REST_API_BASE_URLS` | `--base-urls` (comma-separated) |
 | `POD_NAME` | `--pod-name` |
 | `STATEFULSET_NAME` | `--statefulset-name` |
 | `DEPLOYMENT_NAME` | `--deployment-name` |

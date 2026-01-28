@@ -151,6 +151,12 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// Check if paused
+	if instance.Spec.Paused {
+		r.updateStatus(ctx, instance, "Paused", "Reconciliation paused")
+		return ctrl.Result{}, nil
+	}
+
 	// Aggregate status from all selected resources
 	if err := r.aggregateStatus(ctx, instance); err != nil {
 		r.updateStatus(ctx, instance, "Failed", err.Error())
@@ -673,6 +679,38 @@ func (r *{{ .Kind }}Reconciler) setConditions(ctx context.Context, instance *{{ 
 	}
 	meta.SetStatusCondition(&instance.Status.Conditions, readyCondition)
 
+	// Reconciling condition (kstatus compatibility)
+	// Reconciling=True when actively working, False/absent when done
+	reconcilingCondition := metav1.Condition{
+		Type:               "Reconciling",
+		Status:             metav1.ConditionFalse,
+		Reason:             state,
+		Message:            message,
+		LastTransitionTime: now,
+	}
+	if state == "Aggregating" || state == "Pending" {
+		reconcilingCondition.Status = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, reconcilingCondition)
+
+	// Stalled condition (kstatus compatibility)
+	// Stalled=True when encountering errors, False/absent otherwise
+	stalledCondition := metav1.Condition{
+		Type:               "Stalled",
+		Status:             metav1.ConditionFalse,
+		Reason:             state,
+		Message:            message,
+		LastTransitionTime: now,
+	}
+	if state == "Failed" || failed > 0 {
+		stalledCondition.Status = metav1.ConditionTrue
+		if failed > 0 {
+			stalledCondition.Reason = "ResourcesFailed"
+			stalledCondition.Message = formatMessage("%d resources have failed", failed)
+		}
+	}
+	meta.SetStatusCondition(&instance.Status.Conditions, stalledCondition)
+
 	// AllHealthy condition - True when all resources are synced
 	allHealthyCondition := metav1.Condition{
 		Type:               "AllHealthy",
@@ -687,21 +725,6 @@ func (r *{{ .Kind }}Reconciler) setConditions(ctx context.Context, instance *{{ 
 		allHealthyCondition.Message = formatMessage("All %d resources synced", total)
 	}
 	meta.SetStatusCondition(&instance.Status.Conditions, allHealthyCondition)
-
-	// HasFailures condition - True when any resource has failed
-	hasFailuresCondition := metav1.Condition{
-		Type:               "HasFailures",
-		Status:             metav1.ConditionFalse,
-		Reason:             "NoFailures",
-		Message:            "No resources have failed",
-		LastTransitionTime: now,
-	}
-	if failed > 0 {
-		hasFailuresCondition.Status = metav1.ConditionTrue
-		hasFailuresCondition.Reason = "ResourcesFailed"
-		hasFailuresCondition.Message = formatMessage("%d resources have failed", failed)
-	}
-	meta.SetStatusCondition(&instance.Status.Conditions, hasFailuresCondition)
 }
 
 func (r *{{ .Kind }}Reconciler) updateStatus(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, state, message string) {
