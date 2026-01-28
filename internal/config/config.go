@@ -51,6 +51,10 @@ type Config struct {
 	// When true, generates a bundle CRD that creates and manages multiple child resources.
 	GenerateBundle bool
 
+	// GenerateKubectlPlugin controls whether to generate a kubectl plugin alongside the operator.
+	// When true, generates a kubectl plugin for managing and diagnosing operator resources.
+	GenerateKubectlPlugin bool
+
 	// UpdateWithPost specifies which resources should use POST for updates when PUT is not available.
 	// Can be:
 	// - Empty: disabled (default)

@@ -139,6 +139,7 @@ func init() {
 	generateCmd.Flags().StringVar(&cfg.RootKind, "root-kind", "", "Kind name for root '/' endpoint (default: derived from spec filename)")
 	generateCmd.Flags().BoolVar(&cfg.GenerateAggregate, "aggregate", false, "Generate a Status Aggregator CRD for observing multiple resource types")
 	generateCmd.Flags().BoolVar(&cfg.GenerateBundle, "bundle", false, "Generate an Inline Composition Bundle CRD for creating multiple resources")
+	generateCmd.Flags().BoolVar(&cfg.GenerateKubectlPlugin, "kubectl-plugin", false, "Generate a kubectl plugin for managing and diagnosing operator resources")
 	generateCmd.Flags().StringVar(&updateWithPost, "update-with-post", "", "Use POST for updates when PUT is not available. Value: '*' for all, or comma-separated paths (e.g., /store/order,/users/*)")
 
 	// Resource filtering flags
@@ -448,6 +449,25 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	// Generate kubectl plugin if enabled
+	if cfg.GenerateKubectlPlugin {
+		fmt.Println("Generating kubectl plugin...")
+		kubectlPluginGen := generator.NewKubectlPluginGenerator(cfg)
+		if err := kubectlPluginGen.Generate(crds, aggregate, bundle); err != nil {
+			return fmt.Errorf("failed to generate kubectl plugin: %w", err)
+		}
+		fmt.Println("  Generated kubectl-plugin/main.go")
+		fmt.Println("  Generated kubectl-plugin/cmd/root.go")
+		fmt.Println("  Generated kubectl-plugin/cmd/status.go")
+		fmt.Println("  Generated kubectl-plugin/cmd/get.go")
+		fmt.Println("  Generated kubectl-plugin/cmd/describe.go")
+		fmt.Println("  Generated kubectl-plugin/pkg/client/client.go")
+		fmt.Println("  Generated kubectl-plugin/pkg/output/output.go")
+		fmt.Println("  Generated kubectl-plugin/go.mod")
+		fmt.Println("  Generated kubectl-plugin/Makefile")
+		fmt.Println()
+	}
+
 	fmt.Println("Code generation complete!")
 	fmt.Println()
 	fmt.Println("Next steps:")
@@ -457,6 +477,11 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Println("  4. make build     # Build the operator")
 	fmt.Println("  5. make install   # Install CRDs to cluster")
 	fmt.Println("  6. make run       # Run the operator locally")
+	if cfg.GenerateKubectlPlugin {
+		fmt.Println()
+		fmt.Println("To build the kubectl plugin:")
+		fmt.Printf("  cd %s/kubectl-plugin && make install\n", cfg.OutputDir)
+	}
 
 	return nil
 }

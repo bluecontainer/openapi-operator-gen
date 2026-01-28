@@ -56,7 +56,8 @@ example: build
 		--aggregate \
 		--bundle \
 		--exclude-operations="updatePetWithForm" \
-		--update-with-post="/store/order"
+		--update-with-post="/store/order" \
+		--kubectl-plugin
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
 

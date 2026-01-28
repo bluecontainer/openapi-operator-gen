@@ -69,7 +69,8 @@ var _ = Describe("Order Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.OrderSpec{},
+				Spec: v1alpha1.OrderSpec{
+				},
 			}
 			Expect(GetK8sClient().Create(GetContext(), order)).To(Succeed())
 
@@ -93,7 +94,8 @@ var _ = Describe("Order Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.OrderSpec{},
+				Spec: v1alpha1.OrderSpec{
+				},
 			}
 			Expect(GetK8sClient().Create(GetContext(), order)).To(Succeed())
 
@@ -134,7 +136,8 @@ var _ = Describe("Order Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.OrderSpec{},
+				Spec: v1alpha1.OrderSpec{
+				},
 			}
 			Expect(GetK8sClient().Create(GetContext(), order)).To(Succeed())
 

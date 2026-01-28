@@ -213,3 +213,50 @@ var ExampleAggregateCRTestdataTemplate string
 //
 //go:embed example_bundle_cr_testdata.yaml.tmpl
 var ExampleBundleCRTestdataTemplate string
+
+// Kubectl Plugin Templates
+
+// KubectlPluginMainTemplate is the template for the kubectl plugin main.go
+//
+//go:embed kubectl_plugin/main.go.tmpl
+var KubectlPluginMainTemplate string
+
+// KubectlPluginRootCmdTemplate is the template for the kubectl plugin root command
+//
+//go:embed kubectl_plugin/root_cmd.go.tmpl
+var KubectlPluginRootCmdTemplate string
+
+// KubectlPluginStatusCmdTemplate is the template for the kubectl plugin status command
+//
+//go:embed kubectl_plugin/status_cmd.go.tmpl
+var KubectlPluginStatusCmdTemplate string
+
+// KubectlPluginGetCmdTemplate is the template for the kubectl plugin get command
+//
+//go:embed kubectl_plugin/get_cmd.go.tmpl
+var KubectlPluginGetCmdTemplate string
+
+// KubectlPluginDescribeCmdTemplate is the template for the kubectl plugin describe command
+//
+//go:embed kubectl_plugin/describe_cmd.go.tmpl
+var KubectlPluginDescribeCmdTemplate string
+
+// KubectlPluginClientTemplate is the template for the kubectl plugin Kubernetes client
+//
+//go:embed kubectl_plugin/client.go.tmpl
+var KubectlPluginClientTemplate string
+
+// KubectlPluginOutputTemplate is the template for the kubectl plugin output formatters
+//
+//go:embed kubectl_plugin/output.go.tmpl
+var KubectlPluginOutputTemplate string
+
+// KubectlPluginGoModTemplate is the template for the kubectl plugin go.mod file
+//
+//go:embed kubectl_plugin/go.mod.tmpl
+var KubectlPluginGoModTemplate string
+
+// KubectlPluginMakefileTemplate is the template for the kubectl plugin Makefile
+//
+//go:embed kubectl_plugin/makefile.tmpl
+var KubectlPluginMakefileTemplate string
