@@ -395,8 +395,9 @@ metadata:
   name: my-bundle
 spec:
   # Optional: Target settings inherited by child resources
-  targetHelmRelease: my-release
-  targetNamespace: backend
+  target:
+    helmRelease: my-release
+    namespace: backend
 
   # Optional: Pause reconciliation
   paused: false
@@ -553,9 +554,9 @@ Run without endpoint flags - each CR must specify its target:
 ```
 
 CRs must include one of:
-- `spec.targetHelmRelease` - Target a Helm release
-- `spec.targetStatefulSet` - Target a StatefulSet
-- `spec.targetDeployment` - Target a Deployment
+- `spec.target.helmRelease` - Target a Helm release
+- `spec.target.statefulSet` - Target a StatefulSet
+- `spec.target.deployment` - Target a Deployment
 
 ### Option 2: Static URL Mode
 
@@ -653,7 +654,7 @@ Run multiple operator instances that each handle a subset of CRs:
 | `leader-only` | Always use pod-0 (StatefulSet only) |
 | `any-healthy` | Use any single healthy pod |
 | `all-healthy` | Fan-out to all healthy pods |
-| `by-ordinal` | Route to specific pod via `targetPodOrdinal` |
+| `by-ordinal` | Route to specific pod via `target.podOrdinal` |
 
 {{- if .CRDs }}
 ## Example Usage
@@ -667,7 +668,8 @@ metadata:
   name: example
 spec:
   # Resource-specific fields here
-  targetHelmRelease: {{ .AppName }}  # Optional: per-CR targeting
+  target:
+    helmRelease: {{ .AppName }}  # Optional: per-CR targeting
 ```
 
 ### Per-CR Targeting
@@ -681,15 +683,18 @@ metadata:
   name: example
 spec:
   # Target a specific Helm release
-  targetHelmRelease: {{ .AppName }}-prod
-  targetNamespace: production
+  target:
+    helmRelease: {{ .AppName }}-prod
+    namespace: production
 
   # Or target a specific StatefulSet
-  # targetStatefulSet: {{ .AppName }}-api
-  # targetPodOrdinal: 0  # Optional: specific pod
+  # target:
+  #   statefulSet: {{ .AppName }}-api
+  #   podOrdinal: 0  # Optional: specific pod
 
   # Or target a specific Deployment
-  # targetDeployment: {{ .AppName }}-api
+  # target:
+  #   deployment: {{ .AppName }}-api
 ```
 
 {{- $hasExternalIDRef := false }}

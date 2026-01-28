@@ -1,0 +1,31 @@
+# Example Pet CR with multiple base URLs for fan-out
+#
+# This CR demonstrates using target.baseURLs to sync a Pet resource
+# to multiple petstore API instances simultaneously.
+#
+# Usage with docker-compose multi-endpoint profile:
+#   docker compose --profile multi-endpoint up -d
+#   KUBECONFIG=./k3s-multi-output/kubeconfig.yaml kubectl apply -f this-file.yaml
+#
+# The operator will:
+# - For writes (POST/PUT/DELETE): Send to ALL URLs, all must succeed
+# - For reads (GET): Query all URLs and report per-endpoint status
+#
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: pet-multi-endpoint
+  namespace: default
+spec:
+  name: "Multi-Endpoint Pet"
+  status: "available"
+  category:
+    name: "dogs"
+  tags:
+    - name: "multi-endpoint-test"
+
+  # Fan-out to both petstore instances
+  target:
+    baseURLs:
+      - "http://petstore-1:8080/api/v3"
+      - "http://petstore-2:8080/api/v3"

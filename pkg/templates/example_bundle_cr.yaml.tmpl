@@ -16,8 +16,15 @@ metadata:
   namespace: default
 spec:
   # Target settings (inherited by child resources)
-  # targetHelmRelease: my-release
-  # targetNamespace: backend
+  # target:
+  #   helmRelease: my-release
+  #   namespace: backend
+  #   # Single static URL:
+  #   # baseURL: "http://api.example.com:8080"
+  #   # Multiple static URLs (fan-out to all):
+  #   # baseURLs:
+  #   #   - "http://api-1.example.com:8080"
+  #   #   - "http://api-2.example.com:8080"
   resources:
 {{- range $i, $kind := .ResourceKinds }}
 {{- if lt $i 2 }}

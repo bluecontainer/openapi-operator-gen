@@ -537,12 +537,43 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		return nil, fmt.Errorf("invalid spec for {{ . }}: %w", err)
 	}
 
-	// Copy target settings from bundle
-	if bundle.Spec.TargetHelmRelease != "" && child.Spec.TargetHelmRelease == "" {
-		child.Spec.TargetHelmRelease = bundle.Spec.TargetHelmRelease
-	}
-	if bundle.Spec.TargetNamespace != "" && child.Spec.TargetNamespace == "" {
-		child.Spec.TargetNamespace = bundle.Spec.TargetNamespace
+	// Copy target settings from bundle to child (if bundle has target settings)
+	if bundle.Spec.Target != nil {
+		if child.Spec.Target == nil {
+			// Child has no target, copy the entire bundle target
+			child.Spec.Target = &{{ $.APIVersion }}.TargetSpec{
+				HelmRelease: bundle.Spec.Target.HelmRelease,
+				StatefulSet: bundle.Spec.Target.StatefulSet,
+				Deployment:  bundle.Spec.Target.Deployment,
+				Pod:         bundle.Spec.Target.Pod,
+				Namespace:   bundle.Spec.Target.Namespace,
+				BaseURL:     bundle.Spec.Target.BaseURL,
+				PodOrdinal:  bundle.Spec.Target.PodOrdinal,
+			}
+		} else {
+			// Merge: only copy bundle settings if child doesn't have them
+			if bundle.Spec.Target.HelmRelease != "" && child.Spec.Target.HelmRelease == "" {
+				child.Spec.Target.HelmRelease = bundle.Spec.Target.HelmRelease
+			}
+			if bundle.Spec.Target.StatefulSet != "" && child.Spec.Target.StatefulSet == "" {
+				child.Spec.Target.StatefulSet = bundle.Spec.Target.StatefulSet
+			}
+			if bundle.Spec.Target.Deployment != "" && child.Spec.Target.Deployment == "" {
+				child.Spec.Target.Deployment = bundle.Spec.Target.Deployment
+			}
+			if bundle.Spec.Target.Pod != "" && child.Spec.Target.Pod == "" {
+				child.Spec.Target.Pod = bundle.Spec.Target.Pod
+			}
+			if bundle.Spec.Target.Namespace != "" && child.Spec.Target.Namespace == "" {
+				child.Spec.Target.Namespace = bundle.Spec.Target.Namespace
+			}
+			if bundle.Spec.Target.BaseURL != "" && child.Spec.Target.BaseURL == "" {
+				child.Spec.Target.BaseURL = bundle.Spec.Target.BaseURL
+			}
+			if bundle.Spec.Target.PodOrdinal != nil && child.Spec.Target.PodOrdinal == nil {
+				child.Spec.Target.PodOrdinal = bundle.Spec.Target.PodOrdinal
+			}
+		}
 	}
 
 	// Set owner reference for garbage collection
@@ -631,12 +662,43 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		return nil, fmt.Errorf("invalid spec for {{ . }}: %w", err)
 	}
 
-	// Copy target settings from bundle
-	if bundle.Spec.TargetHelmRelease != "" && child.Spec.TargetHelmRelease == "" {
-		child.Spec.TargetHelmRelease = bundle.Spec.TargetHelmRelease
-	}
-	if bundle.Spec.TargetNamespace != "" && child.Spec.TargetNamespace == "" {
-		child.Spec.TargetNamespace = bundle.Spec.TargetNamespace
+	// Copy target settings from bundle to child (if bundle has target settings)
+	if bundle.Spec.Target != nil {
+		if child.Spec.Target == nil {
+			// Child has no target, copy the entire bundle target
+			child.Spec.Target = &{{ $.APIVersion }}.TargetSpec{
+				HelmRelease: bundle.Spec.Target.HelmRelease,
+				StatefulSet: bundle.Spec.Target.StatefulSet,
+				Deployment:  bundle.Spec.Target.Deployment,
+				Pod:         bundle.Spec.Target.Pod,
+				Namespace:   bundle.Spec.Target.Namespace,
+				BaseURL:     bundle.Spec.Target.BaseURL,
+				PodOrdinal:  bundle.Spec.Target.PodOrdinal,
+			}
+		} else {
+			// Merge: only copy bundle settings if child doesn't have them
+			if bundle.Spec.Target.HelmRelease != "" && child.Spec.Target.HelmRelease == "" {
+				child.Spec.Target.HelmRelease = bundle.Spec.Target.HelmRelease
+			}
+			if bundle.Spec.Target.StatefulSet != "" && child.Spec.Target.StatefulSet == "" {
+				child.Spec.Target.StatefulSet = bundle.Spec.Target.StatefulSet
+			}
+			if bundle.Spec.Target.Deployment != "" && child.Spec.Target.Deployment == "" {
+				child.Spec.Target.Deployment = bundle.Spec.Target.Deployment
+			}
+			if bundle.Spec.Target.Pod != "" && child.Spec.Target.Pod == "" {
+				child.Spec.Target.Pod = bundle.Spec.Target.Pod
+			}
+			if bundle.Spec.Target.Namespace != "" && child.Spec.Target.Namespace == "" {
+				child.Spec.Target.Namespace = bundle.Spec.Target.Namespace
+			}
+			if bundle.Spec.Target.BaseURL != "" && child.Spec.Target.BaseURL == "" {
+				child.Spec.Target.BaseURL = bundle.Spec.Target.BaseURL
+			}
+			if bundle.Spec.Target.PodOrdinal != nil && child.Spec.Target.PodOrdinal == nil {
+				child.Spec.Target.PodOrdinal = bundle.Spec.Target.PodOrdinal
+			}
+		}
 	}
 
 	// Set owner reference for garbage collection
@@ -730,12 +792,43 @@ func (r *{{ $.Kind }}Reconciler) sync{{ . }}(
 		return nil, fmt.Errorf("invalid spec for {{ . }}: %w", err)
 	}
 
-	// Copy target settings from bundle
-	if bundle.Spec.TargetHelmRelease != "" && child.Spec.TargetHelmRelease == "" {
-		child.Spec.TargetHelmRelease = bundle.Spec.TargetHelmRelease
-	}
-	if bundle.Spec.TargetNamespace != "" && child.Spec.TargetNamespace == "" {
-		child.Spec.TargetNamespace = bundle.Spec.TargetNamespace
+	// Copy target settings from bundle to child (if bundle has target settings)
+	if bundle.Spec.Target != nil {
+		if child.Spec.Target == nil {
+			// Child has no target, copy the entire bundle target
+			child.Spec.Target = &{{ $.APIVersion }}.TargetSpec{
+				HelmRelease: bundle.Spec.Target.HelmRelease,
+				StatefulSet: bundle.Spec.Target.StatefulSet,
+				Deployment:  bundle.Spec.Target.Deployment,
+				Pod:         bundle.Spec.Target.Pod,
+				Namespace:   bundle.Spec.Target.Namespace,
+				BaseURL:     bundle.Spec.Target.BaseURL,
+				PodOrdinal:  bundle.Spec.Target.PodOrdinal,
+			}
+		} else {
+			// Merge: only copy bundle settings if child doesn't have them
+			if bundle.Spec.Target.HelmRelease != "" && child.Spec.Target.HelmRelease == "" {
+				child.Spec.Target.HelmRelease = bundle.Spec.Target.HelmRelease
+			}
+			if bundle.Spec.Target.StatefulSet != "" && child.Spec.Target.StatefulSet == "" {
+				child.Spec.Target.StatefulSet = bundle.Spec.Target.StatefulSet
+			}
+			if bundle.Spec.Target.Deployment != "" && child.Spec.Target.Deployment == "" {
+				child.Spec.Target.Deployment = bundle.Spec.Target.Deployment
+			}
+			if bundle.Spec.Target.Pod != "" && child.Spec.Target.Pod == "" {
+				child.Spec.Target.Pod = bundle.Spec.Target.Pod
+			}
+			if bundle.Spec.Target.Namespace != "" && child.Spec.Target.Namespace == "" {
+				child.Spec.Target.Namespace = bundle.Spec.Target.Namespace
+			}
+			if bundle.Spec.Target.BaseURL != "" && child.Spec.Target.BaseURL == "" {
+				child.Spec.Target.BaseURL = bundle.Spec.Target.BaseURL
+			}
+			if bundle.Spec.Target.PodOrdinal != nil && child.Spec.Target.PodOrdinal == nil {
+				child.Spec.Target.PodOrdinal = bundle.Spec.Target.PodOrdinal
+			}
+		}
 	}
 
 	// Set owner reference for garbage collection
@@ -1215,12 +1308,13 @@ func (r *{{ .Kind }}Reconciler) specsEqual(existing, desired interface{}) bool {
 	// Remove controller-specific fields from desired spec
 	// These fields are not part of the "business" spec and shouldn't cause updates
 	controllerFields := []string{
+		"target",            // Endpoint targeting configuration
 		"mergeOnUpdate",     // Has default value true
-		"targetHelmRelease", // Inherited from bundle
-		"targetNamespace",   // Inherited from bundle
 		"readOnly",          // Controller behavior flag
+		"paused",            // Controller behavior flag
 		"onDelete",          // Controller behavior flag
 		"externalIDRef",     // Reference field, not part of API payload
+		"executionInterval", // Re-execution interval
 	}
 	for _, field := range controllerFields {
 		delete(desiredMap, field)

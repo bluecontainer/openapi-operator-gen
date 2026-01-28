@@ -59,6 +59,52 @@ type FileDataSource struct {
 }
 {{- end }}
 
+// TargetSpec defines endpoint targeting configuration for routing API requests.
+// All fields are optional - if not specified, the operator uses its global configuration.
+type TargetSpec struct {
+	// HelmRelease specifies a Helm release to discover the workload from.
+	// The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<HelmRelease>.
+	// +optional
+	HelmRelease string `json:"helmRelease,omitempty"`
+
+	// StatefulSet specifies a StatefulSet name to route requests to.
+	// +optional
+	StatefulSet string `json:"statefulSet,omitempty"`
+
+	// Deployment specifies a Deployment name to route requests to.
+	// +optional
+	Deployment string `json:"deployment,omitempty"`
+
+	// Pod specifies a pod name to route requests to directly.
+	// +optional
+	Pod string `json:"pod,omitempty"`
+
+	// Namespace specifies the namespace to look for the target workload.
+	// Defaults to the CR's namespace if not specified.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// BaseURL specifies a static base URL for the REST API.
+	// When set, overrides all other endpoint configuration.
+	// Example: "http://api.example.com:8080"
+	// Mutually exclusive with BaseURLs.
+	// +optional
+	BaseURL string `json:"baseURL,omitempty"`
+
+	// BaseURLs specifies multiple static base URLs for the REST API.
+	// Operations will fan-out to all URLs (writes must succeed on all, reads use first success).
+	// Example: ["http://api-1.example.com:8080", "http://api-2.example.com:8080"]
+	// Mutually exclusive with BaseURL.
+	// +optional
+	BaseURLs []string `json:"baseURLs,omitempty"`
+
+	// PodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	PodOrdinal *int32 `json:"podOrdinal,omitempty"`
+}
+
 {{- /* Generate nested types first */ -}}
 {{- range .NestedTypes }}
 
@@ -137,36 +183,16 @@ type {{ .Kind }}Spec struct {
 {{- end }}
 	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
 {{ end }}
-	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-	// +kubebuilder:validation:Minimum=0
+	// Target specifies endpoint targeting configuration.
+	// If not specified, the operator uses its global configuration.
 	// +optional
-	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+	Target *TargetSpec `json:"target,omitempty"`
 
-	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// ExecutionInterval specifies how often to re-execute the query.
+	// If not set, the query executes once and stores results (one-shot mode).
+	// Examples: "30s", "5m", "1h"
 	// +optional
-	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
-
-	// TargetStatefulSet specifies a StatefulSet name to route requests to.
-	// +optional
-	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
-
-	// TargetDeployment specifies a Deployment name to route requests to.
-	// +optional
-	TargetDeployment string `json:"targetDeployment,omitempty"`
-
-	// TargetPod specifies a pod name to route requests to directly.
-	// +optional
-	TargetPod string `json:"targetPod,omitempty"`
-
-	// TargetNamespace specifies the namespace to look for the target workload.
-	// +optional
-	TargetNamespace string `json:"targetNamespace,omitempty"`
-
-	// TargetBaseURL specifies a static base URL for the REST API.
-	// When set, overrides all other endpoint configuration for this CR.
-	// Example: "http://api.example.com:8080"
-	// +optional
-	TargetBaseURL string `json:"targetBaseURL,omitempty"`
+	ExecutionInterval *metav1.Duration `json:"executionInterval,omitempty"`
 
 	// Paused stops reconciliation when true.
 	// Useful for debugging or temporary suspension of query execution.
@@ -343,36 +369,16 @@ type {{ .Kind }}Spec struct {
 {{- end }}
 	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
 {{ end }}
-	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-	// +kubebuilder:validation:Minimum=0
+	// Target specifies endpoint targeting configuration.
+	// If not specified, the operator uses its global configuration.
 	// +optional
-	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
+	Target *TargetSpec `json:"target,omitempty"`
 
-	// TargetHelmRelease specifies a Helm release to discover the workload from.
+	// ExecutionInterval specifies how often to re-execute the action.
+	// If not set, the action executes once (one-shot mode).
+	// Examples: "30s", "5m", "1h"
 	// +optional
-	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
-
-	// TargetStatefulSet specifies a StatefulSet name to route requests to.
-	// +optional
-	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
-
-	// TargetDeployment specifies a Deployment name to route requests to.
-	// +optional
-	TargetDeployment string `json:"targetDeployment,omitempty"`
-
-	// TargetPod specifies a pod name to route requests to directly.
-	// +optional
-	TargetPod string `json:"targetPod,omitempty"`
-
-	// TargetNamespace specifies the namespace to look for the target workload.
-	// +optional
-	TargetNamespace string `json:"targetNamespace,omitempty"`
-
-	// TargetBaseURL specifies a static base URL for the REST API.
-	// When set, overrides all other endpoint configuration for this CR.
-	// Example: "http://api.example.com:8080"
-	// +optional
-	TargetBaseURL string `json:"targetBaseURL,omitempty"`
+	ExecutionInterval *metav1.Duration `json:"executionInterval,omitempty"`
 
 	// Paused stops reconciliation when true.
 	// Useful for debugging or temporary suspension of action execution.
@@ -551,43 +557,10 @@ type {{ .Kind }}Spec struct {
 {{- end }}
 	{{ .Name }} {{ .GoType }} `json:"{{ .JSONName }}{{ if not .Required }},omitempty{{ end }}"`
 {{ end }}
-	// TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-	// Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-	// +kubebuilder:validation:Minimum=0
+	// Target specifies endpoint targeting configuration.
+	// If not specified, the operator uses its global configuration.
 	// +optional
-	TargetPodOrdinal *int32 `json:"targetPodOrdinal,omitempty"`
-
-	// TargetHelmRelease specifies a Helm release to discover the workload from.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-	// +optional
-	TargetHelmRelease string `json:"targetHelmRelease,omitempty"`
-
-	// TargetStatefulSet specifies a StatefulSet name to route requests to.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetStatefulSet string `json:"targetStatefulSet,omitempty"`
-
-	// TargetDeployment specifies a Deployment name to route requests to.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetDeployment string `json:"targetDeployment,omitempty"`
-
-	// TargetPod specifies a pod name to route requests to directly.
-	// When set, overrides the operator's global endpoint configuration for this CR.
-	// +optional
-	TargetPod string `json:"targetPod,omitempty"`
-
-	// TargetNamespace specifies the namespace to look for the target workload.
-	// Defaults to the CR's namespace if not specified.
-	// +optional
-	TargetNamespace string `json:"targetNamespace,omitempty"`
-
-	// TargetBaseURL specifies a static base URL for the REST API.
-	// When set, overrides all other endpoint configuration for this CR.
-	// Example: "http://api.example.com:8080"
-	// +optional
-	TargetBaseURL string `json:"targetBaseURL,omitempty"`
+	Target *TargetSpec `json:"target,omitempty"`
 
 {{- if .NeedsExternalIDRef }}
 	// ExternalIDRef references an existing resource in the external REST API by its ID.

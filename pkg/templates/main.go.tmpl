@@ -59,6 +59,7 @@ func main() {
 
 	// Static URL mode
 	var baseURL string
+	var baseURLsFlag string // comma-separated list of base URLs
 
 	// Workload discovery mode
 	var stsName string
@@ -83,6 +84,7 @@ func main() {
 
 	// Static URL mode flags
 	flag.StringVar(&baseURL, "base-url", "", "Base URL of the REST API (static mode)")
+	flag.StringVar(&baseURLsFlag, "base-urls", "", "Comma-separated list of base URLs for fan-out mode (writes to all, reads use first success)")
 
 	// Workload discovery mode flags
 	flag.StringVar(&stsName, "statefulset-name", "", "Name of the StatefulSet to discover endpoints from")
@@ -150,6 +152,20 @@ func main() {
 	// Check environment variables as fallback
 	if baseURL == "" {
 		baseURL = os.Getenv("REST_API_BASE_URL")
+	}
+	if baseURLsFlag == "" {
+		baseURLsFlag = os.Getenv("REST_API_BASE_URLS")
+	}
+
+	// Parse baseURLs from comma-separated flag/env var
+	var baseURLs []string
+	if baseURLsFlag != "" {
+		for _, u := range strings.Split(baseURLsFlag, ",") {
+			u = strings.TrimSpace(u)
+			if u != "" {
+				baseURLs = append(baseURLs, u)
+			}
+		}
 	}
 	if stsName == "" {
 		stsName = os.Getenv("STATEFULSET_NAME")
@@ -234,10 +250,10 @@ func main() {
 
 	// Check if global endpoint configuration is provided
 	useWorkloadDiscovery := stsName != "" || deployName != "" || podName != "" || helmRelease != ""
-	hasGlobalConfig := useWorkloadDiscovery || baseURL != ""
+	hasGlobalConfig := useWorkloadDiscovery || baseURL != "" || len(baseURLs) > 0
 
 	if !hasGlobalConfig {
-		setupLog.Info("No global endpoint configuration provided - CRs must specify targetBaseURL, targetPod, targetHelmRelease, targetStatefulSet, or targetDeployment")
+		setupLog.Info("No global endpoint configuration provided - CRs must specify target.baseURL, target.baseURLs, target.pod, target.helmRelease, target.statefulSet, or target.deployment")
 	}
 
 	// Configure manager options
@@ -350,6 +366,8 @@ func main() {
 		setupLog.Info("Using pod endpoint discovery",
 			"pod", podName,
 			"namespace", namespace)
+	} else if len(baseURLs) > 0 {
+		setupLog.Info("Using static base URLs (fan-out mode)", "urls", baseURLs)
 	} else if baseURL != "" {
 		setupLog.Info("Using static base URL", "url", baseURL)
 	}
@@ -361,6 +379,7 @@ func main() {
 		HTTPClient:       httpClient,
 		EndpointResolver: resolver,
 		BaseURL:          baseURL,
+		BaseURLs:         baseURLs,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "{{ .Kind }}")
 		os.Exit(1)

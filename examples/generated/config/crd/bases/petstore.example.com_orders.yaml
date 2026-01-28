@@ -110,45 +110,56 @@ spec:
                 - approved
                 - delivered
                 type: string
-              targetBaseURL:
+              target:
                 description: |-
-                  TargetBaseURL specifies a static base URL for the REST API.
-                  When set, overrides all other endpoint configuration for this CR.
-                  Example: "http://api.example.com:8080"
-                type: string
-              targetDeployment:
-                description: |-
-                  TargetDeployment specifies a Deployment name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
-              targetHelmRelease:
-                description: |-
-                  TargetHelmRelease specifies a Helm release to discover the workload from.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                  The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-                type: string
-              targetNamespace:
-                description: |-
-                  TargetNamespace specifies the namespace to look for the target workload.
-                  Defaults to the CR's namespace if not specified.
-                type: string
-              targetPod:
-                description: |-
-                  TargetPod specifies a pod name to route requests to directly.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
-              targetPodOrdinal:
-                description: |-
-                  TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-                  Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-                format: int32
-                minimum: 0
-                type: integer
-              targetStatefulSet:
-                description: |-
-                  TargetStatefulSet specifies a StatefulSet name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
+                  Target specifies endpoint targeting configuration.
+                  If not specified, the operator uses its global configuration.
+                properties:
+                  baseURL:
+                    description: |-
+                      BaseURL specifies a static base URL for the REST API.
+                      When set, overrides all other endpoint configuration.
+                      Example: "http://api.example.com:8080"
+                      Mutually exclusive with BaseURLs.
+                    type: string
+                  baseURLs:
+                    description: |-
+                      BaseURLs specifies multiple static base URLs for the REST API.
+                      Operations will fan-out to all URLs (writes must succeed on all, reads use first success).
+                      Example: ["http://api-1.example.com:8080", "http://api-2.example.com:8080"]
+                      Mutually exclusive with BaseURL.
+                    items:
+                      type: string
+                    type: array
+                  deployment:
+                    description: Deployment specifies a Deployment name to route requests
+                      to.
+                    type: string
+                  helmRelease:
+                    description: |-
+                      HelmRelease specifies a Helm release to discover the workload from.
+                      The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<HelmRelease>.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace specifies the namespace to look for the target workload.
+                      Defaults to the CR's namespace if not specified.
+                    type: string
+                  pod:
+                    description: Pod specifies a pod name to route requests to directly.
+                    type: string
+                  podOrdinal:
+                    description: |-
+                      PodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+                      Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  statefulSet:
+                    description: StatefulSet specifies a StatefulSet name to route
+                      requests to.
+                    type: string
+                type: object
             type: object
           status:
             description: OrderStatus defines the observed state of Order

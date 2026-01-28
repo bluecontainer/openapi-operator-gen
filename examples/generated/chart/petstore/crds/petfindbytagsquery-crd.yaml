@@ -26,7 +26,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PetFindbytagsQuery is the Schema for the petfindbytagsquerys
+        description: PetFindbytagsQuery is the Schema for the petfindbytagsqueries
           API (Query Operation)
         properties:
           apiVersion:
@@ -49,48 +49,62 @@ spec:
           spec:
             description: PetFindbytagsQuerySpec defines the query parameters for PetFindbytagsQuery
             properties:
-              queryInterval:
+              executionInterval:
                 description: |-
-                  QueryInterval specifies how often to re-execute the query.
+                  ExecutionInterval specifies how often to re-execute the query.
                   If not set, the query executes once and stores results (one-shot mode).
                   Examples: "30s", "5m", "1h"
                 type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of query execution.
+                type: boolean
               tags:
                 description: Tags to filter by
                 items:
                   type: string
                 type: array
-              targetBaseURL:
+              target:
                 description: |-
-                  TargetBaseURL specifies a static base URL for the REST API.
-                  When set, overrides all other endpoint configuration for this CR.
-                  Example: "http://api.example.com:8080"
-                type: string
-              targetDeployment:
-                description: TargetDeployment specifies a Deployment name to route
-                  requests to.
-                type: string
-              targetHelmRelease:
-                description: TargetHelmRelease specifies a Helm release to discover
-                  the workload from.
-                type: string
-              targetNamespace:
-                description: TargetNamespace specifies the namespace to look for the
-                  target workload.
-                type: string
-              targetPod:
-                description: TargetPod specifies a pod name to route requests to directly.
-                type: string
-              targetPodOrdinal:
-                description: TargetPodOrdinal specifies the StatefulSet pod ordinal
-                  to route requests to.
-                format: int32
-                minimum: 0
-                type: integer
-              targetStatefulSet:
-                description: TargetStatefulSet specifies a StatefulSet name to route
-                  requests to.
-                type: string
+                  Target specifies endpoint targeting configuration.
+                  If not specified, the operator uses its global configuration.
+                properties:
+                  baseURL:
+                    description: |-
+                      BaseURL specifies a static base URL for the REST API.
+                      When set, overrides all other endpoint configuration.
+                      Example: "http://api.example.com:8080"
+                    type: string
+                  deployment:
+                    description: Deployment specifies a Deployment name to route requests
+                      to.
+                    type: string
+                  helmRelease:
+                    description: |-
+                      HelmRelease specifies a Helm release to discover the workload from.
+                      The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<HelmRelease>.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace specifies the namespace to look for the target workload.
+                      Defaults to the CR's namespace if not specified.
+                    type: string
+                  pod:
+                    description: Pod specifies a pod name to route requests to directly.
+                    type: string
+                  podOrdinal:
+                    description: |-
+                      PodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+                      Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  statefulSet:
+                    description: StatefulSet specifies a StatefulSet name to route
+                      requests to.
+                    type: string
+                type: object
             required:
             - tags
             type: object
@@ -193,312 +207,43 @@ spec:
                     data:
                       description: Data contains the response body from the endpoint
                       items:
-                        description: Pet is the Schema for the pets API
+                        description: PetFindbytagsQueryResult represents a single
+                          result item from the PetFindbytagsQuery query
                         properties:
-                          apiVersion:
-                            description: |-
-                              APIVersion defines the versioned schema of this representation of an object.
-                              Servers should convert recognized schemas to the latest internal value, and
-                              may reject unrecognized values.
-                              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-                            type: string
-                          kind:
-                            description: |-
-                              Kind is a string value representing the REST resource this object represents.
-                              Servers may infer this from the endpoint the client submits requests to.
-                              Cannot be updated.
-                              In CamelCase.
-                              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                            type: string
-                          metadata:
-                            type: object
-                          spec:
-                            description: PetSpec defines the desired state of Pet
+                          category:
+                            description: PetFindbytagsQueryResultCategory is a nested
+                              type used by CRD specs
                             properties:
-                              category:
-                                description: PetCategory is a nested type used by
-                                  CRD specs
-                                properties:
-                                  id:
-                                    format: int64
-                                    type: integer
-                                  name:
-                                    type: string
-                                type: object
                               id:
                                 format: int64
                                 type: integer
-                              mergeOnUpdate:
-                                default: true
-                                description: |-
-                                  MergeOnUpdate controls whether updates merge the spec with the current API state.
-                                  When true (default), the controller will GET the current resource state and merge
-                                  only the fields specified in the spec before sending PUT/PATCH, preserving fields
-                                  not specified in the spec. When false, the spec is sent as-is (full replacement).
-                                type: boolean
                               name:
                                 type: string
-                              onDelete:
-                                description: |-
-                                  OnDelete specifies what to do with the external resource when the CR is deleted.
-                                  - Delete: Delete the external resource (default for resources created by the controller)
-                                  - Orphan: Leave the external resource as-is (default for resources adopted via ExternalIDRef)
-                                  - Restore: Restore the original state captured when the resource was first adopted
-                                enum:
-                                - Delete
-                                - Orphan
-                                - Restore
-                                type: string
-                              photoUrls:
-                                items:
-                                  type: string
-                                type: array
-                              readOnly:
-                                description: |-
-                                  ReadOnly indicates that this CR is for observation only.
-                                  When true, the controller will only GET the resource and update status,
-                                  without performing any create, update, or delete operations.
-                                type: boolean
-                              status:
-                                description: pet status in the store
-                                enum:
-                                - available
-                                - pending
-                                - sold
-                                type: string
-                              tags:
-                                items:
-                                  description: PetTagsItem is a nested type used by
-                                    CRD specs
-                                  properties:
-                                    id:
-                                      format: int64
-                                      type: integer
-                                    name:
-                                      type: string
-                                  type: object
-                                type: array
-                              targetBaseURL:
-                                description: |-
-                                  TargetBaseURL specifies a static base URL for the REST API.
-                                  When set, overrides all other endpoint configuration for this CR.
-                                  Example: "http://api.example.com:8080"
-                                type: string
-                              targetDeployment:
-                                description: |-
-                                  TargetDeployment specifies a Deployment name to route requests to.
-                                  When set, overrides the operator's global endpoint configuration for this CR.
-                                type: string
-                              targetHelmRelease:
-                                description: |-
-                                  TargetHelmRelease specifies a Helm release to discover the workload from.
-                                  When set, overrides the operator's global endpoint configuration for this CR.
-                                  The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-                                type: string
-                              targetNamespace:
-                                description: |-
-                                  TargetNamespace specifies the namespace to look for the target workload.
-                                  Defaults to the CR's namespace if not specified.
-                                type: string
-                              targetPod:
-                                description: |-
-                                  TargetPod specifies a pod name to route requests to directly.
-                                  When set, overrides the operator's global endpoint configuration for this CR.
-                                type: string
-                              targetPodOrdinal:
-                                description: |-
-                                  TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-                                  Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-                                format: int32
-                                minimum: 0
-                                type: integer
-                              targetStatefulSet:
-                                description: |-
-                                  TargetStatefulSet specifies a StatefulSet name to route requests to.
-                                  When set, overrides the operator's global endpoint configuration for this CR.
-                                type: string
-                            required:
-                            - name
-                            - photoUrls
                             type: object
+                          id:
+                            format: int64
+                            type: integer
+                          name:
+                            type: string
+                          photoUrls:
+                            items:
+                              type: string
+                            type: array
                           status:
-                            description: PetStatus defines the observed state of Pet
-                            properties:
-                              conditions:
-                                description: Conditions represent the latest available
-                                  observations of an object's state
-                                items:
-                                  description: Condition contains details for one
-                                    aspect of the current state of this API Resource.
-                                  properties:
-                                    lastTransitionTime:
-                                      description: |-
-                                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
-                                      format: date-time
-                                      type: string
-                                    message:
-                                      description: |-
-                                        message is a human readable message indicating details about the transition.
-                                        This may be an empty string.
-                                      maxLength: 32768
-                                      type: string
-                                    observedGeneration:
-                                      description: |-
-                                        observedGeneration represents the .metadata.generation that the condition was set based upon.
-                                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                                        with respect to the current state of the instance.
-                                      format: int64
-                                      minimum: 0
-                                      type: integer
-                                    reason:
-                                      description: |-
-                                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                                        Producers of specific condition types may define expected values and meanings for this field,
-                                        and whether the values are considered a guaranteed API.
-                                        The value should be a CamelCase string.
-                                        This field may not be empty.
-                                      maxLength: 1024
-                                      minLength: 1
-                                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                                      type: string
-                                    status:
-                                      description: status of the condition, one of
-                                        True, False, Unknown.
-                                      enum:
-                                      - "True"
-                                      - "False"
-                                      - Unknown
-                                      type: string
-                                    type:
-                                      description: type of condition in CamelCase
-                                        or in foo.example.com/CamelCase.
-                                      maxLength: 316
-                                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                                      type: string
-                                  required:
-                                  - lastTransitionTime
-                                  - message
-                                  - reason
-                                  - status
-                                  - type
-                                  type: object
-                                type: array
-                                x-kubernetes-list-map-keys:
-                                - type
-                                x-kubernetes-list-type: map
-                              createdByController:
-                                description: |-
-                                  CreatedByController indicates if this controller created the external resource via POST.
-                                  Used to determine default OnDelete behavior (Delete if true, Orphan if false).
-                                type: boolean
-                              driftDetected:
-                                description: DriftDetected indicates whether drift
-                                  was detected between the spec and external resource
-                                type: boolean
-                              driftDetectedCount:
-                                description: DriftDetectedCount is the number of times
-                                  drift has been detected (cumulative)
-                                format: int64
-                                type: integer
-                              externalID:
-                                description: ExternalID is the ID of the resource
-                                  in the external REST API (set from POST response)
-                                type: string
-                              lastGetTime:
-                                description: LastGetTime is the last time the resource
-                                  was fetched from the REST API via GET
-                                format: date-time
-                                type: string
-                              lastSyncTime:
-                                description: LastSyncTime is the last time the resource
-                                  was synced with the REST API
-                                format: date-time
-                                type: string
-                              message:
-                                description: Message is a human-readable message about
-                                  the current state
-                                type: string
-                              observedGeneration:
-                                description: ObservedGeneration is the last observed
-                                  generation
-                                format: int64
-                                type: integer
-                              response:
-                                description: Response contains the last response from
-                                  the REST API (single endpoint mode)
-                                properties:
-                                  data:
-                                    description: Data contains the response body from
-                                      the endpoint
-                                    type: object
-                                    x-kubernetes-preserve-unknown-fields: true
-                                  error:
-                                    description: Error contains the error message
-                                      if the request failed
-                                    type: string
-                                  lastUpdated:
-                                    description: LastUpdated is when this endpoint
-                                      was last queried
-                                    format: date-time
-                                    type: string
-                                  statusCode:
-                                    description: StatusCode is the HTTP status code
-                                      returned by the endpoint
-                                    type: integer
-                                  success:
-                                    description: Success indicates whether the request
-                                      to this endpoint succeeded
-                                    type: boolean
-                                required:
-                                - success
-                                type: object
-                              responses:
-                                additionalProperties:
-                                  description: PetEndpointResponse contains the response
-                                    from a single endpoint for Pet resources
-                                  properties:
-                                    data:
-                                      description: Data contains the response body
-                                        from the endpoint
-                                      type: object
-                                      x-kubernetes-preserve-unknown-fields: true
-                                    error:
-                                      description: Error contains the error message
-                                        if the request failed
-                                      type: string
-                                    lastUpdated:
-                                      description: LastUpdated is when this endpoint
-                                        was last queried
-                                      format: date-time
-                                      type: string
-                                    statusCode:
-                                      description: StatusCode is the HTTP status code
-                                        returned by the endpoint
-                                      type: integer
-                                    success:
-                                      description: Success indicates whether the request
-                                        to this endpoint succeeded
-                                      type: boolean
-                                  required:
-                                  - success
-                                  type: object
-                                description: |-
-                                  Responses contains responses from multiple endpoints (all-healthy strategy)
-                                  Keys are endpoint URLs, values are the response data
-                                type: object
-                              state:
-                                description: State represents the current state of
-                                  the resource
-                                enum:
-                                - Pending
-                                - Syncing
-                                - Synced
-                                - Failed
-                                - Observed
-                                - NotFound
-                                type: string
-                            type: object
+                            description: pet status in the store
+                            type: string
+                          tags:
+                            items:
+                              description: PetFindbytagsQueryResultTagsItem is a nested
+                                type used by CRD specs
+                              properties:
+                                id:
+                                  format: int64
+                                  type: integer
+                                name:
+                                  type: string
+                              type: object
+                            type: array
                         type: object
                       type: array
                     error:
@@ -534,312 +279,43 @@ spec:
                   data:
                     description: Data contains the response body from the endpoint
                     items:
-                      description: Pet is the Schema for the pets API
+                      description: PetFindbytagsQueryResult represents a single result
+                        item from the PetFindbytagsQuery query
                       properties:
-                        apiVersion:
-                          description: |-
-                            APIVersion defines the versioned schema of this representation of an object.
-                            Servers should convert recognized schemas to the latest internal value, and
-                            may reject unrecognized values.
-                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-                          type: string
-                        kind:
-                          description: |-
-                            Kind is a string value representing the REST resource this object represents.
-                            Servers may infer this from the endpoint the client submits requests to.
-                            Cannot be updated.
-                            In CamelCase.
-                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                          type: string
-                        metadata:
-                          type: object
-                        spec:
-                          description: PetSpec defines the desired state of Pet
+                        category:
+                          description: PetFindbytagsQueryResultCategory is a nested
+                            type used by CRD specs
                           properties:
-                            category:
-                              description: PetCategory is a nested type used by CRD
-                                specs
-                              properties:
-                                id:
-                                  format: int64
-                                  type: integer
-                                name:
-                                  type: string
-                              type: object
                             id:
                               format: int64
                               type: integer
-                            mergeOnUpdate:
-                              default: true
-                              description: |-
-                                MergeOnUpdate controls whether updates merge the spec with the current API state.
-                                When true (default), the controller will GET the current resource state and merge
-                                only the fields specified in the spec before sending PUT/PATCH, preserving fields
-                                not specified in the spec. When false, the spec is sent as-is (full replacement).
-                              type: boolean
                             name:
                               type: string
-                            onDelete:
-                              description: |-
-                                OnDelete specifies what to do with the external resource when the CR is deleted.
-                                - Delete: Delete the external resource (default for resources created by the controller)
-                                - Orphan: Leave the external resource as-is (default for resources adopted via ExternalIDRef)
-                                - Restore: Restore the original state captured when the resource was first adopted
-                              enum:
-                              - Delete
-                              - Orphan
-                              - Restore
-                              type: string
-                            photoUrls:
-                              items:
-                                type: string
-                              type: array
-                            readOnly:
-                              description: |-
-                                ReadOnly indicates that this CR is for observation only.
-                                When true, the controller will only GET the resource and update status,
-                                without performing any create, update, or delete operations.
-                              type: boolean
-                            status:
-                              description: pet status in the store
-                              enum:
-                              - available
-                              - pending
-                              - sold
-                              type: string
-                            tags:
-                              items:
-                                description: PetTagsItem is a nested type used by
-                                  CRD specs
-                                properties:
-                                  id:
-                                    format: int64
-                                    type: integer
-                                  name:
-                                    type: string
-                                type: object
-                              type: array
-                            targetBaseURL:
-                              description: |-
-                                TargetBaseURL specifies a static base URL for the REST API.
-                                When set, overrides all other endpoint configuration for this CR.
-                                Example: "http://api.example.com:8080"
-                              type: string
-                            targetDeployment:
-                              description: |-
-                                TargetDeployment specifies a Deployment name to route requests to.
-                                When set, overrides the operator's global endpoint configuration for this CR.
-                              type: string
-                            targetHelmRelease:
-                              description: |-
-                                TargetHelmRelease specifies a Helm release to discover the workload from.
-                                When set, overrides the operator's global endpoint configuration for this CR.
-                                The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-                              type: string
-                            targetNamespace:
-                              description: |-
-                                TargetNamespace specifies the namespace to look for the target workload.
-                                Defaults to the CR's namespace if not specified.
-                              type: string
-                            targetPod:
-                              description: |-
-                                TargetPod specifies a pod name to route requests to directly.
-                                When set, overrides the operator's global endpoint configuration for this CR.
-                              type: string
-                            targetPodOrdinal:
-                              description: |-
-                                TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-                                Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-                              format: int32
-                              minimum: 0
-                              type: integer
-                            targetStatefulSet:
-                              description: |-
-                                TargetStatefulSet specifies a StatefulSet name to route requests to.
-                                When set, overrides the operator's global endpoint configuration for this CR.
-                              type: string
-                          required:
-                          - name
-                          - photoUrls
                           type: object
+                        id:
+                          format: int64
+                          type: integer
+                        name:
+                          type: string
+                        photoUrls:
+                          items:
+                            type: string
+                          type: array
                         status:
-                          description: PetStatus defines the observed state of Pet
-                          properties:
-                            conditions:
-                              description: Conditions represent the latest available
-                                observations of an object's state
-                              items:
-                                description: Condition contains details for one aspect
-                                  of the current state of this API Resource.
-                                properties:
-                                  lastTransitionTime:
-                                    description: |-
-                                      lastTransitionTime is the last time the condition transitioned from one status to another.
-                                      This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
-                                    format: date-time
-                                    type: string
-                                  message:
-                                    description: |-
-                                      message is a human readable message indicating details about the transition.
-                                      This may be an empty string.
-                                    maxLength: 32768
-                                    type: string
-                                  observedGeneration:
-                                    description: |-
-                                      observedGeneration represents the .metadata.generation that the condition was set based upon.
-                                      For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                                      with respect to the current state of the instance.
-                                    format: int64
-                                    minimum: 0
-                                    type: integer
-                                  reason:
-                                    description: |-
-                                      reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                                      Producers of specific condition types may define expected values and meanings for this field,
-                                      and whether the values are considered a guaranteed API.
-                                      The value should be a CamelCase string.
-                                      This field may not be empty.
-                                    maxLength: 1024
-                                    minLength: 1
-                                    pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                                    type: string
-                                  status:
-                                    description: status of the condition, one of True,
-                                      False, Unknown.
-                                    enum:
-                                    - "True"
-                                    - "False"
-                                    - Unknown
-                                    type: string
-                                  type:
-                                    description: type of condition in CamelCase or
-                                      in foo.example.com/CamelCase.
-                                    maxLength: 316
-                                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                                    type: string
-                                required:
-                                - lastTransitionTime
-                                - message
-                                - reason
-                                - status
-                                - type
-                                type: object
-                              type: array
-                              x-kubernetes-list-map-keys:
-                              - type
-                              x-kubernetes-list-type: map
-                            createdByController:
-                              description: |-
-                                CreatedByController indicates if this controller created the external resource via POST.
-                                Used to determine default OnDelete behavior (Delete if true, Orphan if false).
-                              type: boolean
-                            driftDetected:
-                              description: DriftDetected indicates whether drift was
-                                detected between the spec and external resource
-                              type: boolean
-                            driftDetectedCount:
-                              description: DriftDetectedCount is the number of times
-                                drift has been detected (cumulative)
-                              format: int64
-                              type: integer
-                            externalID:
-                              description: ExternalID is the ID of the resource in
-                                the external REST API (set from POST response)
-                              type: string
-                            lastGetTime:
-                              description: LastGetTime is the last time the resource
-                                was fetched from the REST API via GET
-                              format: date-time
-                              type: string
-                            lastSyncTime:
-                              description: LastSyncTime is the last time the resource
-                                was synced with the REST API
-                              format: date-time
-                              type: string
-                            message:
-                              description: Message is a human-readable message about
-                                the current state
-                              type: string
-                            observedGeneration:
-                              description: ObservedGeneration is the last observed
-                                generation
-                              format: int64
-                              type: integer
-                            response:
-                              description: Response contains the last response from
-                                the REST API (single endpoint mode)
-                              properties:
-                                data:
-                                  description: Data contains the response body from
-                                    the endpoint
-                                  type: object
-                                  x-kubernetes-preserve-unknown-fields: true
-                                error:
-                                  description: Error contains the error message if
-                                    the request failed
-                                  type: string
-                                lastUpdated:
-                                  description: LastUpdated is when this endpoint was
-                                    last queried
-                                  format: date-time
-                                  type: string
-                                statusCode:
-                                  description: StatusCode is the HTTP status code
-                                    returned by the endpoint
-                                  type: integer
-                                success:
-                                  description: Success indicates whether the request
-                                    to this endpoint succeeded
-                                  type: boolean
-                              required:
-                              - success
-                              type: object
-                            responses:
-                              additionalProperties:
-                                description: PetEndpointResponse contains the response
-                                  from a single endpoint for Pet resources
-                                properties:
-                                  data:
-                                    description: Data contains the response body from
-                                      the endpoint
-                                    type: object
-                                    x-kubernetes-preserve-unknown-fields: true
-                                  error:
-                                    description: Error contains the error message
-                                      if the request failed
-                                    type: string
-                                  lastUpdated:
-                                    description: LastUpdated is when this endpoint
-                                      was last queried
-                                    format: date-time
-                                    type: string
-                                  statusCode:
-                                    description: StatusCode is the HTTP status code
-                                      returned by the endpoint
-                                    type: integer
-                                  success:
-                                    description: Success indicates whether the request
-                                      to this endpoint succeeded
-                                    type: boolean
-                                required:
-                                - success
-                                type: object
-                              description: |-
-                                Responses contains responses from multiple endpoints (all-healthy strategy)
-                                Keys are endpoint URLs, values are the response data
-                              type: object
-                            state:
-                              description: State represents the current state of the
-                                resource
-                              enum:
-                              - Pending
-                              - Syncing
-                              - Synced
-                              - Failed
-                              - Observed
-                              - NotFound
-                              type: string
-                          type: object
+                          description: pet status in the store
+                          type: string
+                        tags:
+                          items:
+                            description: PetFindbytagsQueryResultTagsItem is a nested
+                              type used by CRD specs
+                            properties:
+                              id:
+                                format: int64
+                                type: integer
+                              name:
+                                type: string
+                            type: object
+                          type: array
                       type: object
                     type: array
                   error:
@@ -867,6 +343,7 @@ spec:
                 - Querying
                 - Queried
                 - Failed
+                - Paused
                 type: string
             type: object
         type: object

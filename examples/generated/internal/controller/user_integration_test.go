@@ -107,7 +107,10 @@ var _ = Describe("User Controller Integration", func() {
 			}, timeout, interval).Should(Succeed())
 
 			// Update a field
-			updated.Spec.TargetNamespace = "updated-namespace"
+			if updated.Spec.Target == nil {
+				updated.Spec.Target = &v1alpha1.TargetSpec{}
+			}
+			updated.Spec.Target.Namespace = "updated-namespace"
 			Expect(GetK8sClient().Update(GetContext(), updated)).To(Succeed())
 
 			By("Verifying the update")
@@ -117,7 +120,10 @@ var _ = Describe("User Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				}, fetched)
-				return fetched.Spec.TargetNamespace
+				if fetched.Spec.Target == nil {
+					return ""
+				}
+				return fetched.Spec.Target.Namespace
 			}, timeout, interval).Should(Equal("updated-namespace"))
 		})
 

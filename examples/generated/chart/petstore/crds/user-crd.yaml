@@ -53,6 +53,13 @@ spec:
             properties:
               email:
                 type: string
+              executionInterval:
+                description: |-
+                  ExecutionInterval specifies how often to re-sync with the REST API.
+                  If not set, uses the controller's default interval (typically 30s).
+                  Set to "0" to disable periodic re-sync (only reconcile on spec changes).
+                  Examples: "30s", "5m", "1h"
+                type: string
               firstName:
                 type: string
               id:
@@ -81,6 +88,11 @@ spec:
                 type: string
               password:
                 type: string
+              paused:
+                description: |-
+                  Paused stops reconciliation when true.
+                  Useful for debugging or temporary suspension of resource management.
+                type: boolean
               phone:
                 type: string
               readOnly:
@@ -89,45 +101,46 @@ spec:
                   When true, the controller will only GET the resource and update status,
                   without performing any create, update, or delete operations.
                 type: boolean
-              targetBaseURL:
+              target:
                 description: |-
-                  TargetBaseURL specifies a static base URL for the REST API.
-                  When set, overrides all other endpoint configuration for this CR.
-                  Example: "http://api.example.com:8080"
-                type: string
-              targetDeployment:
-                description: |-
-                  TargetDeployment specifies a Deployment name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
-              targetHelmRelease:
-                description: |-
-                  TargetHelmRelease specifies a Helm release to discover the workload from.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                  The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<TargetHelmRelease>.
-                type: string
-              targetNamespace:
-                description: |-
-                  TargetNamespace specifies the namespace to look for the target workload.
-                  Defaults to the CR's namespace if not specified.
-                type: string
-              targetPod:
-                description: |-
-                  TargetPod specifies a pod name to route requests to directly.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
-              targetPodOrdinal:
-                description: |-
-                  TargetPodOrdinal specifies the StatefulSet pod ordinal to route requests to.
-                  Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
-                format: int32
-                minimum: 0
-                type: integer
-              targetStatefulSet:
-                description: |-
-                  TargetStatefulSet specifies a StatefulSet name to route requests to.
-                  When set, overrides the operator's global endpoint configuration for this CR.
-                type: string
+                  Target specifies endpoint targeting configuration.
+                  If not specified, the operator uses its global configuration.
+                properties:
+                  baseURL:
+                    description: |-
+                      BaseURL specifies a static base URL for the REST API.
+                      When set, overrides all other endpoint configuration.
+                      Example: "http://api.example.com:8080"
+                    type: string
+                  deployment:
+                    description: Deployment specifies a Deployment name to route requests
+                      to.
+                    type: string
+                  helmRelease:
+                    description: |-
+                      HelmRelease specifies a Helm release to discover the workload from.
+                      The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<HelmRelease>.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace specifies the namespace to look for the target workload.
+                      Defaults to the CR's namespace if not specified.
+                    type: string
+                  pod:
+                    description: Pod specifies a pod name to route requests to directly.
+                    type: string
+                  podOrdinal:
+                    description: |-
+                      PodOrdinal specifies the StatefulSet pod ordinal to route requests to.
+                      Only used when targeting a StatefulSet and the operator is configured with --strategy=by-ordinal.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  statefulSet:
+                    description: StatefulSet specifies a StatefulSet name to route
+                      requests to.
+                    type: string
+                type: object
               userStatus:
                 description: User Status
                 format: int32
@@ -138,6 +151,11 @@ spec:
           status:
             description: UserStatus defines the observed state of User
             properties:
+              adoptedAt:
+                description: AdoptedAt is when this CR first adopted the external
+                  resource.
+                format: date-time
+                type: string
               conditions:
                 description: Conditions represent the latest available observations
                   of an object's state
@@ -235,6 +253,12 @@ spec:
                 description: ObservedGeneration is the last observed generation
                 format: int64
                 type: integer
+              originalState:
+                description: |-
+                  OriginalState stores the state of the resource when first adopted (via path params or ExternalIDRef).
+                  Used for OnDelete=Restore to revert changes made by the controller.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               response:
                 description: Response contains the last response from the REST API
                   (single endpoint mode)
@@ -302,6 +326,7 @@ spec:
                 - Failed
                 - Observed
                 - NotFound
+                - Paused
                 type: string
             type: object
         type: object

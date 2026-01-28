@@ -432,16 +432,6 @@ func (m *Mapper) createActionSpec(ae *parser.ActionEndpoint) *FieldDefinition {
 		spec.Fields = append(spec.Fields, parentIDField)
 	}
 
-	// Add execution interval field (optional) - normalized across Query/Action/Resource CRDs
-	executionIntervalField := &FieldDefinition{
-		Name:        "ExecutionInterval",
-		JSONName:    "executionInterval",
-		GoType:      "*metav1.Duration",
-		Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
-		Required:    false,
-	}
-	spec.Fields = append(spec.Fields, executionIntervalField)
-
 	// Add path parameters (excluding parent ID which is already added)
 	for _, param := range ae.PathParams {
 		if param.Name == ae.ParentIDParam {
@@ -941,16 +931,6 @@ func (m *Mapper) createQuerySpec(qe *parser.QueryEndpoint) *FieldDefinition {
 
 		spec.Fields = append(spec.Fields, field)
 	}
-
-	// Add execution interval field (optional) - normalized across Query/Action/Resource CRDs
-	executionIntervalField := &FieldDefinition{
-		Name:        "ExecutionInterval",
-		JSONName:    "executionInterval",
-		GoType:      "*metav1.Duration",
-		Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
-		Required:    false,
-	}
-	spec.Fields = append(spec.Fields, executionIntervalField)
 
 	return spec
 }

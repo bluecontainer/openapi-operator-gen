@@ -99,6 +99,8 @@ type {{ .Kind }}Reconciler struct {
 	EndpointResolver *endpoint.Resolver
 	// BaseURL is used when EndpointResolver is nil (static URL mode)
 	BaseURL string
+	// BaseURLs is used for fan-out mode (writes to all URLs, reads use first success)
+	BaseURLs []string
 }
 
 // +kubebuilder:rbac:groups={{ .APIGroup }},resources={{ .Plural }},verbs=get;list;watch;create;update;patch;delete
@@ -232,13 +234,13 @@ func (r *{{ .Kind }}Reconciler) getBaseURL(ctx context.Context) (string, error) 
 			return url, nil
 		}
 	}
-	return "", fmt.Errorf("no endpoint configured: set global endpoint (--base-url, --statefulset-name, --deployment-name, or --helm-release) or specify per-CR targeting (targetHelmRelease, targetStatefulSet, or targetDeployment)")
+	return "", fmt.Errorf("no endpoint configured: set global endpoint (--base-url, --statefulset-name, --deployment-name, or --helm-release) or specify per-CR targeting (target.helmRelease, target.statefulSet, or target.deployment)")
 }
 
 func (r *{{ .Kind }}Reconciler) getBaseURLByOrdinal(ctx context.Context, ordinal *int32) (string, error) {
 	if r.EndpointResolver != nil && r.EndpointResolver.IsByOrdinalStrategy() {
 		if ordinal == nil {
-			return "", fmt.Errorf("targetPodOrdinal is required when using by-ordinal strategy")
+			return "", fmt.Errorf("target.podOrdinal is required when using by-ordinal strategy")
 		}
 		return r.EndpointResolver.GetEndpointByOrdinal(int(*ordinal))
 	}
@@ -247,32 +249,53 @@ func (r *{{ .Kind }}Reconciler) getBaseURLByOrdinal(ctx context.Context, ordinal
 
 // resolveBaseURL determines the base URL to use for API requests based on CR targeting fields
 func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) (string, error) {
+	target := instance.Spec.Target
+
 	// Per-CR static base URL takes highest priority
-	if instance.Spec.TargetBaseURL != "" {
-		return instance.Spec.TargetBaseURL, nil
+	if target != nil && target.BaseURL != "" {
+		return target.BaseURL, nil
+	}
+
+	// Per-CR static base URLs array - return first URL for single operations
+	if target != nil && len(target.BaseURLs) > 0 {
+		return target.BaseURLs[0], nil
+	}
+
+	// Global static base URLs (from --base-urls flag or REST_API_BASE_URLS env var)
+	// Return first URL for single operations
+	if len(r.BaseURLs) > 0 {
+		return r.BaseURLs[0], nil
 	}
 
 	if r.EndpointResolver != nil {
-		namespace := instance.Spec.TargetNamespace
-		if namespace == "" {
-			namespace = instance.Namespace
+		namespace := instance.Namespace
+		if target != nil && target.Namespace != "" {
+			namespace = target.Namespace
 		}
 
 		// Per-CR pod targeting
-		if instance.Spec.TargetPod != "" {
-			return r.EndpointResolver.GetEndpointForPod(ctx, instance.Spec.TargetPod, namespace)
+		if target != nil && target.Pod != "" {
+			return r.EndpointResolver.GetEndpointForPod(ctx, target.Pod, namespace)
 		}
 
-		if instance.Spec.TargetHelmRelease != "" {
-			return r.EndpointResolver.GetEndpointForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace, instance.Spec.TargetPodOrdinal)
+		if target != nil && target.HelmRelease != "" {
+			var podOrdinal *int32
+			if target != nil {
+				podOrdinal = target.PodOrdinal
+			}
+			return r.EndpointResolver.GetEndpointForHelmRelease(ctx, target.HelmRelease, namespace, podOrdinal)
 		}
 
-		if instance.Spec.TargetStatefulSet != "" {
-			return r.EndpointResolver.GetEndpointForStatefulSet(ctx, instance.Spec.TargetStatefulSet, namespace, instance.Spec.TargetPodOrdinal)
+		if target != nil && target.StatefulSet != "" {
+			var podOrdinal *int32
+			if target != nil {
+				podOrdinal = target.PodOrdinal
+			}
+			return r.EndpointResolver.GetEndpointForStatefulSet(ctx, target.StatefulSet, namespace, podOrdinal)
 		}
 
-		if instance.Spec.TargetDeployment != "" {
-			return r.EndpointResolver.GetEndpointForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
+		if target != nil && target.Deployment != "" {
+			return r.EndpointResolver.GetEndpointForDeployment(ctx, target.Deployment, namespace)
 		}
 
 		// Global pod-name targeting (from operator flags)
@@ -281,7 +304,11 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 		}
 
 		if r.EndpointResolver.IsByOrdinalStrategy() {
-			return r.getBaseURLByOrdinal(ctx, instance.Spec.TargetPodOrdinal)
+			var podOrdinal *int32
+			if target != nil {
+				podOrdinal = target.PodOrdinal
+			}
+			return r.getBaseURLByOrdinal(ctx, podOrdinal)
 		}
 	}
 
@@ -291,9 +318,21 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 // resolveAllHealthyEndpoints returns all healthy endpoint URLs based on CR targeting fields.
 // This is used for all-healthy strategy fan-out operations.
 func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]string, error) {
-	// Per-CR static base URL takes highest priority
-	if instance.Spec.TargetBaseURL != "" {
-		return []string{instance.Spec.TargetBaseURL}, nil
+	target := instance.Spec.Target
+
+	// Per-CR static base URLs array takes highest priority (fan-out to all)
+	if target != nil && len(target.BaseURLs) > 0 {
+		return target.BaseURLs, nil
+	}
+
+	// Per-CR static base URL (single endpoint)
+	if target != nil && target.BaseURL != "" {
+		return []string{target.BaseURL}, nil
+	}
+
+	// Global static base URLs (from --base-urls flag or REST_API_BASE_URLS env var)
+	if len(r.BaseURLs) > 0 {
+		return r.BaseURLs, nil
 	}
 
 	if r.EndpointResolver == nil {
@@ -305,14 +344,14 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		return []string{url}, nil
 	}
 
-	namespace := instance.Spec.TargetNamespace
-	if namespace == "" {
-		namespace = instance.Namespace
+	namespace := instance.Namespace
+	if target != nil && target.Namespace != "" {
+		namespace = target.Namespace
 	}
 
 	// Per-CR pod targeting (returns single endpoint)
-	if instance.Spec.TargetPod != "" {
-		url, err := r.EndpointResolver.GetEndpointForPod(ctx, instance.Spec.TargetPod, namespace)
+	if target != nil && target.Pod != "" {
+		url, err := r.EndpointResolver.GetEndpointForPod(ctx, target.Pod, namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -320,18 +359,18 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 	}
 
 	// Per-CR Helm release targeting
-	if instance.Spec.TargetHelmRelease != "" {
-		return r.EndpointResolver.GetAllEndpointsForHelmRelease(ctx, instance.Spec.TargetHelmRelease, namespace)
+	if target != nil && target.HelmRelease != "" {
+		return r.EndpointResolver.GetAllEndpointsForHelmRelease(ctx, target.HelmRelease, namespace)
 	}
 
 	// Per-CR StatefulSet targeting
-	if instance.Spec.TargetStatefulSet != "" {
-		return r.EndpointResolver.GetAllEndpointsForStatefulSet(ctx, instance.Spec.TargetStatefulSet, namespace)
+	if target != nil && target.StatefulSet != "" {
+		return r.EndpointResolver.GetAllEndpointsForStatefulSet(ctx, target.StatefulSet, namespace)
 	}
 
 	// Per-CR Deployment targeting
-	if instance.Spec.TargetDeployment != "" {
-		return r.EndpointResolver.GetAllEndpointsForDeployment(ctx, instance.Spec.TargetDeployment, namespace)
+	if target != nil && target.Deployment != "" {
+		return r.EndpointResolver.GetAllEndpointsForDeployment(ctx, target.Deployment, namespace)
 	}
 
 	// Global pod-name targeting (returns single endpoint)
@@ -550,8 +589,12 @@ func (r *{{ .Kind }}Reconciler) executeQuery(ctx context.Context, instance *{{ .
 	logger := log.FromContext(ctx)
 	now := metav1.Now()
 
-	// Check if using all-healthy strategy (fan out to multiple endpoints)
-	if r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy() {
+	// Check if fan-out is needed (multiple endpoints from all-healthy strategy, per-CR baseURLs, or global baseURLs)
+	target := instance.Spec.Target
+	usesFanOut := (r.EndpointResolver != nil && r.EndpointResolver.IsAllHealthyStrategy()) ||
+		(target != nil && len(target.BaseURLs) > 1) ||
+		len(r.BaseURLs) > 1
+	if usesFanOut {
 		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			r.updateStatus(ctx, instance, "Failed", fmt.Sprintf("failed to get all healthy endpoints: %v", err), 0)

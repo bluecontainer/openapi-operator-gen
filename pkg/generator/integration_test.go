@@ -75,13 +75,6 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 			Spec: &mapper.FieldDefinition{
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Status", JSONName: "status", GoType: "string", Required: true},
-					{
-						Name:        "ExecutionInterval",
-						JSONName:    "executionInterval",
-						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
-						Required:    false,
-					},
 				},
 			},
 		},
@@ -104,13 +97,6 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 				Fields: []*mapper.FieldDefinition{
 					{Name: "PetId", JSONName: "petId", GoType: "int64", Required: true},
 					{Name: "AdditionalMetadata", JSONName: "additionalMetadata", GoType: "string"},
-					{
-						Name:        "ExecutionInterval",
-						JSONName:    "executionInterval",
-						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
-						Required:    false,
-					},
 				},
 			},
 		},
@@ -130,13 +116,6 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 				Fields: []*mapper.FieldDefinition{
 					{Name: "Username", JSONName: "username", GoType: "string", Required: true},
 					{Name: "Password", JSONName: "password", GoType: "string", Required: true},
-					{
-						Name:        "ExecutionInterval",
-						JSONName:    "executionInterval",
-						GoType:      "*metav1.Duration",
-						Description: "Interval at which to re-execute (e.g., 30s, 5m, 1h). If not set, uses controller default. Set to 0 to disable periodic re-execution.",
-						Required:    false,
-					},
 				},
 			},
 		},

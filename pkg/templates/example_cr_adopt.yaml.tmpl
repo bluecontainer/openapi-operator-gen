@@ -22,8 +22,15 @@ spec:
   onDelete: "Restore"
 
   # Endpoint targeting (optional - uncomment if needed)
-  # targetNamespace: "target-namespace"
-  # targetStatefulSet: "my-statefulset"
-  # targetDeployment: "my-deployment"
-  # targetHelmRelease: "my-release"
-  # targetPodOrdinal: 0
+  # target:
+  #   namespace: "target-namespace"
+  #   statefulSet: "my-statefulset"
+  #   deployment: "my-deployment"
+  #   helmRelease: "my-release"
+  #   podOrdinal: 0
+  #   # Single static URL:
+  #   # baseURL: "http://api.example.com:8080"
+  #   # Multiple static URLs (fan-out to all):
+  #   # baseURLs:
+  #   #   - "http://api-1.example.com:8080"
+  #   #   - "http://api-2.example.com:8080"
