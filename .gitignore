@@ -29,3 +29,4 @@ Thumbs.db
 **/k3s-output/
 # Generated examples (optional - uncomment to ignore)
 # examples/generated/
+examples/k3s-multi-output/
