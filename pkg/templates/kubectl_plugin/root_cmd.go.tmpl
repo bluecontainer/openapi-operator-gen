@@ -42,7 +42,9 @@ var rootCmd = &cobra.Command{
 It provides commands for:
   - Viewing aggregate health status
   - Listing and describing resources
-  - Running diagnostics
+  - Running diagnostics and comparing across pods
+  - Drift detection and reporting
+  - Pausing and resuming reconciliation
   - Executing queries and actions
 
 Examples:
@@ -53,7 +55,22 @@ Examples:
   kubectl {{ .PluginName }} get pets
 
   # Get detailed information about a resource
-  kubectl {{ .PluginName }} describe pet fluffy`,
+  kubectl {{ .PluginName }} describe pet fluffy
+
+  # Run diagnostics on a resource
+  kubectl {{ .PluginName }} diagnose pet fluffy
+
+  # Compare resource across pods
+  kubectl {{ .PluginName }} compare pet fluffy --pods=0,1,2
+
+  # Show drift report
+  kubectl {{ .PluginName }} drift
+
+  # Pause reconciliation for a resource
+  kubectl {{ .PluginName }} pause pet fluffy --reason="Maintenance"
+
+  # Resume reconciliation
+  kubectl {{ .PluginName }} unpause pet fluffy`,
 	Version: version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip client initialization for help and version commands
@@ -75,10 +92,19 @@ func init() {
 	// Set version template
 	rootCmd.SetVersionTemplate(fmt.Sprintf("kubectl-{{ .PluginName }} version %s\n  commit: %s\n  built:  %s\n", version, commit, buildDate))
 
-	// Add subcommands
+	// Add subcommands - Phase 1: Core Commands
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(describeCmd)
+
+	// Phase 2: Diagnostic Commands
+	rootCmd.AddCommand(compareCmd)
+	rootCmd.AddCommand(diagnoseCmd)
+	rootCmd.AddCommand(driftCmd)
+
+	// Phase 3: Management Commands
+	rootCmd.AddCommand(pauseCmd)
+	rootCmd.AddCommand(unpauseCmd)
 }
 
 // initClient initializes the Kubernetes client

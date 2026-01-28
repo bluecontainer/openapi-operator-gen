@@ -76,13 +76,23 @@ func (g *KubectlPluginGenerator) Generate(crds []*mapper.CRDDefinition, aggregat
 		tmplContent string
 		outputPath  string
 	}{
+		// Core files
 		{templates.KubectlPluginMainTemplate, filepath.Join(pluginDir, "main.go")},
 		{templates.KubectlPluginRootCmdTemplate, filepath.Join(pluginDir, "cmd", "root.go")},
+		// Phase 1: Core Commands
 		{templates.KubectlPluginStatusCmdTemplate, filepath.Join(pluginDir, "cmd", "status.go")},
 		{templates.KubectlPluginGetCmdTemplate, filepath.Join(pluginDir, "cmd", "get.go")},
 		{templates.KubectlPluginDescribeCmdTemplate, filepath.Join(pluginDir, "cmd", "describe.go")},
+		// Phase 2: Diagnostic Commands
+		{templates.KubectlPluginCompareCmdTemplate, filepath.Join(pluginDir, "cmd", "compare.go")},
+		{templates.KubectlPluginDiagnoseCmdTemplate, filepath.Join(pluginDir, "cmd", "diagnose.go")},
+		{templates.KubectlPluginDriftCmdTemplate, filepath.Join(pluginDir, "cmd", "drift.go")},
+		// Phase 3: Management Commands
+		{templates.KubectlPluginPauseCmdTemplate, filepath.Join(pluginDir, "cmd", "pause.go")},
+		// Shared packages
 		{templates.KubectlPluginClientTemplate, filepath.Join(pluginDir, "pkg", "client", "client.go")},
 		{templates.KubectlPluginOutputTemplate, filepath.Join(pluginDir, "pkg", "output", "output.go")},
+		// Build files
 		{templates.KubectlPluginGoModTemplate, filepath.Join(pluginDir, "go.mod")},
 		{templates.KubectlPluginMakefileTemplate, filepath.Join(pluginDir, "Makefile")},
 	}

@@ -260,3 +260,25 @@ var KubectlPluginGoModTemplate string
 //
 //go:embed kubectl_plugin/makefile.tmpl
 var KubectlPluginMakefileTemplate string
+
+// Phase 2: Diagnostic Commands
+
+// KubectlPluginCompareCmdTemplate is the template for the kubectl plugin compare command
+//
+//go:embed kubectl_plugin/compare_cmd.go.tmpl
+var KubectlPluginCompareCmdTemplate string
+
+// KubectlPluginDiagnoseCmdTemplate is the template for the kubectl plugin diagnose command
+//
+//go:embed kubectl_plugin/diagnose_cmd.go.tmpl
+var KubectlPluginDiagnoseCmdTemplate string
+
+// KubectlPluginDriftCmdTemplate is the template for the kubectl plugin drift command
+//
+//go:embed kubectl_plugin/drift_cmd.go.tmpl
+var KubectlPluginDriftCmdTemplate string
+
+// KubectlPluginPauseCmdTemplate is the template for the kubectl plugin pause/unpause commands
+//
+//go:embed kubectl_plugin/pause_cmd.go.tmpl
+var KubectlPluginPauseCmdTemplate string

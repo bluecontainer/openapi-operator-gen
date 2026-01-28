@@ -174,8 +174,42 @@ func printResourceDetailFormatted(obj *unstructured.Unstructured) error {
 			fmt.Printf("  Sync Count:         %d\n", syncCount)
 		}
 
-		// Response data
-		if response, ok := status["response"].(map[string]interface{}); ok {
+		// Multi-endpoint responses (when using fan-out mode)
+		if responses, ok := status["responses"].(map[string]interface{}); ok && len(responses) > 0 {
+			fmt.Println()
+			fmt.Printf("  Endpoint Responses: (%d endpoints)\n", len(responses))
+
+			for endpoint, respRaw := range responses {
+				resp, ok := respRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				// Get shortened endpoint name for display
+				shortName := shortenEndpointName(endpoint)
+
+				success, _ := resp["success"].(bool)
+				statusCode, _ := resp["statusCode"].(int64)
+				errMsg, _ := resp["error"].(string)
+
+				fmt.Println()
+				fmt.Printf("    [%s] %s\n", shortName, endpoint)
+
+				if success {
+					fmt.Printf("      Status: %s (HTTP %d)\n", output.Green("Success"), statusCode)
+					if data, ok := resp["data"]; ok {
+						fmt.Println("      Data:")
+						printNestedValue(data, "        ")
+					}
+				} else {
+					fmt.Printf("      Status: %s\n", output.Red("Failed"))
+					if errMsg != "" {
+						fmt.Printf("      Error: %s\n", errMsg)
+					}
+				}
+			}
+		} else if response, ok := status["response"].(map[string]interface{}); ok {
+			// Single endpoint response
 			fmt.Println()
 			fmt.Println("  Response:")
 
@@ -325,4 +359,34 @@ func isSimpleArray(arr []interface{}) bool {
 		}
 	}
 	return true
+}
+
+// shortenEndpointName creates a short display name for an endpoint URL
+func shortenEndpointName(endpoint string) string {
+	// Try to extract pod name from URL like http://petstore-0.petstore:8080
+	// or http://10.0.0.1:8080
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+
+	// Remove path
+	if idx := strings.Index(endpoint, "/"); idx != -1 {
+		endpoint = endpoint[:idx]
+	}
+
+	// Remove port
+	if idx := strings.LastIndex(endpoint, ":"); idx != -1 {
+		endpoint = endpoint[:idx]
+	}
+
+	// If it looks like a pod DNS name (contains dots), take first part
+	if parts := strings.Split(endpoint, "."); len(parts) > 1 {
+		return parts[0]
+	}
+
+	// Truncate long names
+	if len(endpoint) > 15 {
+		return endpoint[:12] + "..."
+	}
+
+	return endpoint
 }
