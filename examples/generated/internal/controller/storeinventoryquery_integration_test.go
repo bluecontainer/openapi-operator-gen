@@ -69,8 +69,7 @@ var _ = Describe("StoreInventoryQuery Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.StoreInventoryQuerySpec{
-				},
+				Spec: v1alpha1.StoreInventoryQuerySpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), storeinventoryquery)).To(Succeed())
 
@@ -94,8 +93,7 @@ var _ = Describe("StoreInventoryQuery Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.StoreInventoryQuerySpec{
-				},
+				Spec: v1alpha1.StoreInventoryQuerySpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), storeinventoryquery)).To(Succeed())
 
@@ -136,8 +134,7 @@ var _ = Describe("StoreInventoryQuery Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.StoreInventoryQuerySpec{
-				},
+				Spec: v1alpha1.StoreInventoryQuerySpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), storeinventoryquery)).To(Succeed())
 

@@ -69,8 +69,7 @@ var _ = Describe("PetUploadimageAction Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.PetUploadimageActionSpec{
-				},
+				Spec: v1alpha1.PetUploadimageActionSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), petuploadimageaction)).To(Succeed())
 
@@ -94,8 +93,7 @@ var _ = Describe("PetUploadimageAction Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.PetUploadimageActionSpec{
-				},
+				Spec: v1alpha1.PetUploadimageActionSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), petuploadimageaction)).To(Succeed())
 
@@ -136,8 +134,7 @@ var _ = Describe("PetUploadimageAction Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.PetUploadimageActionSpec{
-				},
+				Spec: v1alpha1.PetUploadimageActionSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), petuploadimageaction)).To(Succeed())
 

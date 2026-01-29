@@ -41,16 +41,16 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen kustomize ## Generate CRD manifests.
-	$(CONTROLLER_GEN) crd paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) crd paths="./api/..." paths="./internal/..." output:crd:artifacts:config=config/crd/bases
 	@cd config/crd/bases && rm -f kustomization.yaml && $(KUSTOMIZE) create --autodetect
 
 .PHONY: rbac
 rbac: controller-gen ## Generate RBAC manifests (ClusterRole, Role).
-	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./..." output:rbac:artifacts:config=config/rbac
+	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./api/..." paths="./internal/..." output:rbac:artifacts:config=config/rbac
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./internal/..."
 
 .PHONY: generate-yaml
 generate-yaml: manifests rbac ## Generate all Kubernetes YAML manifests (CRDs, RBAC, Deployment).

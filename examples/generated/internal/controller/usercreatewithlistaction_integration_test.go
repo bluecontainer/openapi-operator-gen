@@ -69,8 +69,7 @@ var _ = Describe("UserCreatewithlistAction Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserCreatewithlistActionSpec{
-				},
+				Spec: v1alpha1.UserCreatewithlistActionSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), usercreatewithlistaction)).To(Succeed())
 
@@ -94,8 +93,7 @@ var _ = Describe("UserCreatewithlistAction Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserCreatewithlistActionSpec{
-				},
+				Spec: v1alpha1.UserCreatewithlistActionSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), usercreatewithlistaction)).To(Succeed())
 
@@ -136,8 +134,7 @@ var _ = Describe("UserCreatewithlistAction Controller Integration", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: v1alpha1.UserCreatewithlistActionSpec{
-				},
+				Spec: v1alpha1.UserCreatewithlistActionSpec{},
 			}
 			Expect(GetK8sClient().Create(GetContext(), usercreatewithlistaction)).To(Succeed())
 
