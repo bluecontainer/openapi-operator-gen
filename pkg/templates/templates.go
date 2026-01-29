@@ -282,3 +282,28 @@ var KubectlPluginDriftCmdTemplate string
 //
 //go:embed kubectl_plugin/pause_cmd.go.tmpl
 var KubectlPluginPauseCmdTemplate string
+
+// KubectlPluginQueryCmdTemplate is the template for the kubectl plugin query command
+//
+//go:embed kubectl_plugin/query_cmd.go.tmpl
+var KubectlPluginQueryCmdTemplate string
+
+// KubectlPluginActionCmdTemplate is the template for the kubectl plugin action command
+//
+//go:embed kubectl_plugin/action_cmd.go.tmpl
+var KubectlPluginActionCmdTemplate string
+
+// KubectlPluginPatchCmdTemplate is the template for the kubectl plugin patch command
+//
+//go:embed kubectl_plugin/patch_cmd.go.tmpl
+var KubectlPluginPatchCmdTemplate string
+
+// KubectlPluginCleanupCmdTemplate is the template for the kubectl plugin cleanup command
+//
+//go:embed kubectl_plugin/cleanup_cmd.go.tmpl
+var KubectlPluginCleanupCmdTemplate string
+
+// KubectlPluginCreateCmdTemplate is the template for the kubectl plugin create command
+//
+//go:embed kubectl_plugin/create_cmd.go.tmpl
+var KubectlPluginCreateCmdTemplate string

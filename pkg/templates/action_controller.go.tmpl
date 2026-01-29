@@ -531,24 +531,29 @@ func (r *{{ .Kind }}Reconciler) resolveBinaryDataFrom(ctx context.Context, insta
 
 // fetchDataFromURL fetches binary data from a URL
 func (r *{{ .Kind }}Reconciler) fetchDataFromURL(ctx context.Context, url string) ([]byte, error) {
+	logger := log.FromContext(ctx)
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request for URL %s: %w", url, err)
 	}
 
+	logger.V(1).Info("REST API request", "method", "GET", "url", url)
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from URL %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("failed to fetch data from URL %s: status %d", url, resp.StatusCode)
-	}
-
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response from URL %s: %w", url, err)
+	}
+
+	logger.V(1).Info("REST API response", "method", "GET", "url", url, "statusCode", resp.StatusCode, "bodyLength", len(data))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("failed to fetch data from URL %s: status %d", url, resp.StatusCode)
 	}
 
 	return data, nil
@@ -632,6 +637,21 @@ func (r *{{ .Kind }}Reconciler) executeActionToEndpoint(ctx context.Context, ins
 	req.Header.Set("Accept", "application/json")
 
 	logger.Info("Executing action", "url", actionURL, "method", "{{ .ActionMethod }}")
+{{- if .HasBinaryBody }}
+	if body != nil && contentType == "application/json" {
+		logger.V(1).Info("REST API request", "method", "{{ .ActionMethod }}", "url", actionURL, "body", string(body))
+	} else if body != nil {
+		logger.V(1).Info("REST API request", "method", "{{ .ActionMethod }}", "url", actionURL, "contentType", contentType, "bodyLength", len(body))
+	} else {
+		logger.V(1).Info("REST API request", "method", "{{ .ActionMethod }}", "url", actionURL)
+	}
+{{- else }}
+	if body != nil {
+		logger.V(1).Info("REST API request", "method", "{{ .ActionMethod }}", "url", actionURL, "body", string(body))
+	} else {
+		logger.V(1).Info("REST API request", "method", "{{ .ActionMethod }}", "url", actionURL)
+	}
+{{- end }}
 	resp, err := r.HTTPClient.Do(req)
 	duration := time.Since(start).Seconds()
 
@@ -652,6 +672,8 @@ func (r *{{ .Kind }}Reconciler) executeActionToEndpoint(ctx context.Context, ins
 		span.SetStatus(codes.Error, err.Error())
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	logger.V(1).Info("REST API response", "method", "{{ .ActionMethod }}", "url", actionURL, "statusCode", resp.StatusCode, "body", string(respBody))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		r.recordActionMetrics(ctx, "error", resp.StatusCode, duration)

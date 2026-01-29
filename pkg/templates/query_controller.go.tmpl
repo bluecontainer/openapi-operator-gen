@@ -490,6 +490,7 @@ func (r *{{ .Kind }}Reconciler) executeQueryToEndpoint(ctx context.Context, inst
 	req.Header.Set("Accept", "application/json")
 
 	logger.Info("Executing query", "url", queryURL)
+	logger.V(1).Info("REST API request", "method", "GET", "url", queryURL)
 	resp, err := r.HTTPClient.Do(req)
 	duration := time.Since(start).Seconds()
 
@@ -510,6 +511,8 @@ func (r *{{ .Kind }}Reconciler) executeQueryToEndpoint(ctx context.Context, inst
 		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	logger.V(1).Info("REST API response", "method", "GET", "url", queryURL, "statusCode", resp.StatusCode, "body", string(body))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		r.recordQueryMetrics(ctx, "error", resp.StatusCode, duration)

@@ -87,8 +87,13 @@ func (g *KubectlPluginGenerator) Generate(crds []*mapper.CRDDefinition, aggregat
 		{templates.KubectlPluginCompareCmdTemplate, filepath.Join(pluginDir, "cmd", "compare.go")},
 		{templates.KubectlPluginDiagnoseCmdTemplate, filepath.Join(pluginDir, "cmd", "diagnose.go")},
 		{templates.KubectlPluginDriftCmdTemplate, filepath.Join(pluginDir, "cmd", "drift.go")},
-		// Phase 3: Management Commands
+		// Phase 3: Interactive/Management Commands
+		{templates.KubectlPluginCreateCmdTemplate, filepath.Join(pluginDir, "cmd", "create.go")},
+		{templates.KubectlPluginQueryCmdTemplate, filepath.Join(pluginDir, "cmd", "query.go")},
+		{templates.KubectlPluginActionCmdTemplate, filepath.Join(pluginDir, "cmd", "action.go")},
+		{templates.KubectlPluginPatchCmdTemplate, filepath.Join(pluginDir, "cmd", "patch.go")},
 		{templates.KubectlPluginPauseCmdTemplate, filepath.Join(pluginDir, "cmd", "pause.go")},
+		{templates.KubectlPluginCleanupCmdTemplate, filepath.Join(pluginDir, "cmd", "cleanup.go")},
 		// Shared packages
 		{templates.KubectlPluginClientTemplate, filepath.Join(pluginDir, "pkg", "client", "client.go")},
 		{templates.KubectlPluginOutputTemplate, filepath.Join(pluginDir, "pkg", "output", "output.go")},

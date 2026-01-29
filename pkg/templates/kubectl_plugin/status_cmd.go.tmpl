@@ -184,7 +184,7 @@ func collectStatus(ctx context.Context) (*AggregateStatus, error) {
 			}
 
 			switch state {
-			case "Synced":
+			case "Synced", "Queried", "Completed":
 				summary.Synced++
 			case "Failed", "Error":
 				summary.Failed++

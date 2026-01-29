@@ -104,6 +104,13 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Tracing](#tracing)
   - [Kubernetes Deployment](#kubernetes-deployment-with-opentelemetry)
 - [Helm Chart Generation](#helm-chart-generation)
+- [Kubectl Plugin](#kubectl-plugin)
+  - [Installing the Plugin](#installing-the-plugin)
+  - [Plugin Commands](#plugin-commands)
+  - [Phase 1: Core Commands](#phase-1-core-commands)
+  - [Phase 2: Diagnostic Commands](#phase-2-diagnostic-commands)
+  - [Phase 3: Interactive Commands](#phase-3-interactive-commands)
+  - [TTL-Based Patches](#ttl-based-patches)
 - [Releasing](#releasing)
 - [License](#license)
 
@@ -123,6 +130,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - Per-CR workload targeting for multi-tenant scenarios
 - Helm chart generation via [helmify](https://github.com/arttor/helmify)
 - OpenTelemetry instrumentation for observability
+- Generated kubectl plugin for operator management
 
 ## Architecture
 
@@ -2932,6 +2940,217 @@ helm push petstore-0.1.0.tgz oci://<your-registry>/charts
 | `make helm-install` | Generate and install Helm chart |
 | `make helm-upgrade` | Upgrade existing Helm release |
 | `make helm-uninstall` | Uninstall Helm release |
+
+## Kubectl Plugin
+
+When the `--kubectl-plugin` flag is used, the generator creates a kubectl plugin that provides a convenient CLI for managing operator resources. The plugin is generated in the `kubectl-plugin/` directory.
+
+### Installing the Plugin
+
+```bash
+cd examples/generated/kubectl-plugin
+
+# Build and install to PATH
+make install
+
+# Verify installation
+kubectl petstore --help
+```
+
+The plugin is named `kubectl-<api-name>` (e.g., `kubectl-petstore` for the petstore API). Once installed, it can be invoked as `kubectl petstore <command>`.
+
+### Plugin Commands
+
+The plugin provides commands organized in three phases:
+
+| Phase | Commands | Description |
+|-------|----------|-------------|
+| **Phase 1: Core** | `status`, `get`, `describe` | Basic resource viewing |
+| **Phase 2: Diagnostic** | `compare`, `diagnose`, `drift` | Multi-endpoint diagnostics |
+| **Phase 3: Interactive** | `query`, `action`, `patch`, `pause`, `unpause`, `cleanup` | Resource management |
+
+### Phase 1: Core Commands
+
+**status** - View aggregate health status across all resources:
+```bash
+kubectl petstore status
+```
+
+**get** - List resources of a specific kind:
+```bash
+kubectl petstore get pets
+kubectl petstore get pets -o yaml
+kubectl petstore get orders --all-namespaces
+```
+
+**describe** - Get detailed information about a resource:
+```bash
+kubectl petstore describe pet fluffy
+kubectl petstore describe pet fluffy --show-response
+```
+
+### Phase 2: Diagnostic Commands
+
+**compare** - Compare resource state across multiple pods (multi-endpoint mode):
+```bash
+kubectl petstore compare pet fluffy
+kubectl petstore compare pet fluffy --pods=0,1,2
+```
+
+**diagnose** - Run diagnostics on a resource:
+```bash
+kubectl petstore diagnose pet fluffy
+```
+
+**drift** - Show drift detection report:
+```bash
+kubectl petstore drift
+kubectl petstore drift --kind=Pet --show-diff
+kubectl petstore drift --all-namespaces
+```
+
+In multi-endpoint mode, drift report shows which specific endpoints have drift:
+```
+DRIFT REPORT (namespace: default)
+
+RESOURCE      DRIFT   COUNT   LAST DETECTED           DRIFTED ENDPOINTS
+pet/fluffy    Yes     3       2024-01-15T10:30:00Z    2/3: pod-0, pod-2
+pet/buddy     No      0       -                       0/3
+order/12345   Yes     1       2024-01-15T09:15:00Z    1/3: pod-1
+```
+
+### Phase 3: Interactive Commands
+
+**List available types** - See available query and action types:
+```bash
+# List all query types
+kubectl petstore query queries
+
+# List all action types
+kubectl petstore action actions
+```
+
+**query** - Execute read-only query CRDs:
+```bash
+# One-shot query (auto-waits for result)
+kubectl petstore query petfindbystatusquery --status=available
+
+# Periodic query (creates persistent CR)
+kubectl petstore query storeinventoryquery --interval=5m --name=inventory-monitor
+
+# Target specific pod in multi-endpoint mode
+kubectl petstore query storeinventoryquery --pod=0
+
+# Get results from an existing query CR (without creating a new one)
+kubectl petstore query petfindbystatusquery --get=my-status-query
+
+# Quiet mode - output only result data (for scripting/piping to jq)
+kubectl petstore query petfindbystatusquery --status=available -q --output=json
+
+# Combine quiet mode with JSON for easy scripting
+kubectl petstore query storeinventoryquery -q | jq '.items[0].name'
+```
+
+Query command flags:
+| Flag | Description |
+|------|-------------|
+| `--pod=N` | Target specific pod ordinal in multi-endpoint mode |
+| `--interval=DURATION` | Create periodic query (e.g., `5m`, `1h`) |
+| `--name=NAME` | Name for the query CR (required for periodic queries) |
+| `--wait` | Wait for query to complete (default for one-shot queries) |
+| `--timeout=DURATION` | Timeout for waiting (default: `30s`) |
+| `--get=NAME` | Get results from existing query CR instead of creating new one |
+| `-q, --quiet` | Output only result data, no status messages (defaults to JSON) |
+
+**action** - Execute write operation CRDs:
+```bash
+# Execute an action with parameters
+kubectl petstore action petuploadimageaction --petId=123 --file=./photo.jpg
+
+# Target specific pod in multi-endpoint mode
+kubectl petstore action usercreatewithlistaction --pod=0
+
+# Execute without waiting for result
+kubectl petstore action petuploadimageaction --petId=123 --wait=false
+
+# Custom name for the action CR
+kubectl petstore action petuploadimageaction --petId=123 --name=upload-fluffy-photo
+```
+
+Action command flags:
+| Flag | Description |
+|------|-------------|
+| `--pod=N` | Target specific pod ordinal in multi-endpoint mode |
+| `--name=NAME` | Name for the action CR (auto-generated if not specified) |
+| `--wait` | Wait for action to complete (default: `true`) |
+| `--timeout=DURATION` | Timeout for waiting (default: `60s`) |
+| `--file=PATH` | File to upload (for upload actions, base64 encoded) |
+
+**patch** - Make temporary changes with TTL auto-rollback:
+```bash
+# Patch with 1 hour TTL
+kubectl petstore patch pet fluffy --spec='{"status":"pending"}' --ttl=1h
+
+# Dry run to preview changes
+kubectl petstore patch pet fluffy --spec='{"status":"pending"}' --ttl=1h --dry-run
+
+# Restore immediately
+kubectl petstore patch pet fluffy --restore
+
+# List all patched resources
+kubectl petstore patch list
+```
+
+**pause/unpause** - Control reconciliation:
+```bash
+kubectl petstore pause pet fluffy --reason="Maintenance window"
+kubectl petstore unpause pet fluffy
+```
+
+**cleanup** - Remove temporary and diagnostic resources:
+```bash
+# Remove one-shot queries/actions
+kubectl petstore cleanup --one-shot
+
+# Restore expired TTL patches (not delete)
+kubectl petstore cleanup --expired
+
+# Dry run
+kubectl petstore cleanup --dry-run
+
+# Cleanup across all namespaces
+kubectl petstore cleanup --all-namespaces --force
+```
+
+### TTL-Based Patches
+
+The patch command supports TTL (time-to-live) based auto-rollback. This is useful for:
+- Temporary configuration changes during maintenance
+- Testing changes that should auto-revert
+- Preventing "forgotten" manual overrides
+
+**How it works:**
+
+1. When you apply a patch with `--ttl`, the plugin:
+   - Saves the original spec values in an annotation
+   - Sets a `patch-expires` annotation with the expiration time
+   - Updates the resource spec
+
+2. The operator automatically restores the original state when TTL expires:
+   - Checked on every reconciliation loop
+   - Original values are restored from annotations
+   - Patch annotations are cleared
+
+3. Manual cleanup also restores (not deletes) expired patches:
+   ```bash
+   kubectl petstore cleanup --expired
+   ```
+
+**Annotations used:**
+- `<api-group>/patch-ttl` - Original TTL duration
+- `<api-group>/patch-expires` - RFC3339 expiration timestamp
+- `<api-group>/patch-original-state` - JSON of original spec values
+- `<api-group>/patched-by` - kubectl-plugin marker
 
 ## Releasing
 

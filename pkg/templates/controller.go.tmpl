@@ -248,6 +248,18 @@ func (r *{{ .Kind }}Reconciler) reconcileInternal(ctx context.Context, req ctrl.
 	}
 {{- end }}
 
+	// Check for expired TTL patches and restore original state
+	if restored, err := r.checkAndRestoreExpiredPatch(ctx, instance); err != nil {
+		logger.Error(err, "Failed to restore expired patch")
+		// Continue with reconciliation even if restore fails
+	} else if restored {
+		logger.Info("Restored original state after TTL expiry")
+		// Re-fetch the instance after restoration
+		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Check if paused - perform drift detection but skip synchronization
 	if instance.Spec.Paused {
 		// Perform drift detection even when paused
@@ -2413,6 +2425,131 @@ func (r *{{ .Kind }}Reconciler) restoreOriginalState(ctx context.Context, instan
 }
 {{- end }}
 {{- end }}
+
+// checkAndRestoreExpiredPatch checks if the resource has an expired TTL patch and restores the original state.
+// This is used for kubectl plugin patches that have a TTL (time-to-live) set.
+// Returns (restored, error) where restored indicates if the original state was restored.
+func (r *{{ .Kind }}Reconciler) checkAndRestoreExpiredPatch(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) (bool, error) {
+	logger := log.FromContext(ctx)
+
+	annotations := instance.GetAnnotations()
+	if annotations == nil {
+		return false, nil
+	}
+
+	// Check for patch-expires annotation
+	expiresStr, hasExpires := annotations["{{ .APIGroup }}/patch-expires"]
+	if !hasExpires {
+		return false, nil
+	}
+
+	// Parse the expiration time
+	expires, err := time.Parse(time.RFC3339, expiresStr)
+	if err != nil {
+		logger.Error(err, "Failed to parse patch-expires annotation", "value", expiresStr)
+		return false, nil // Don't return error, just log and skip
+	}
+
+	// Check if patch has expired
+	if time.Now().Before(expires) {
+		return false, nil // Not expired yet
+	}
+
+	logger.Info("Patch TTL expired, restoring original state", "expires", expiresStr)
+
+	// Get original state from annotation
+	originalStateStr, hasOriginal := annotations["{{ .APIGroup }}/patch-original-state"]
+	if !hasOriginal {
+		// No original state - just clear the annotations
+		logger.Info("No original state annotation found, clearing patch annotations")
+		return r.clearPatchAnnotations(ctx, instance)
+	}
+
+	// Parse the original state
+	var originalSpec map[string]interface{}
+	if err := json.Unmarshal([]byte(originalStateStr), &originalSpec); err != nil {
+		logger.Error(err, "Failed to parse patch-original-state annotation")
+		return false, fmt.Errorf("failed to parse original state: %w", err)
+	}
+
+	// Create a copy of the instance to modify
+	instanceCopy := instance.DeepCopy()
+
+	// Get current spec as map
+	specBytes, err := json.Marshal(instanceCopy.Spec)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal current spec: %w", err)
+	}
+
+	var currentSpec map[string]interface{}
+	if err := json.Unmarshal(specBytes, &currentSpec); err != nil {
+		return false, fmt.Errorf("failed to unmarshal current spec: %w", err)
+	}
+
+	// Restore original values
+	for key, value := range originalSpec {
+		currentSpec[key] = value
+	}
+
+	// Marshal the restored spec back
+	restoredSpecBytes, err := json.Marshal(currentSpec)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal restored spec: %w", err)
+	}
+
+	// Unmarshal into the instance spec
+	if err := json.Unmarshal(restoredSpecBytes, &instanceCopy.Spec); err != nil {
+		return false, fmt.Errorf("failed to apply restored spec: %w", err)
+	}
+
+	// Clear patch annotations
+	delete(annotations, "{{ .APIGroup }}/patch-ttl")
+	delete(annotations, "{{ .APIGroup }}/patch-expires")
+	delete(annotations, "{{ .APIGroup }}/patch-original-state")
+	delete(annotations, "{{ .APIGroup }}/patched-by")
+	instanceCopy.SetAnnotations(annotations)
+
+	// Update the resource
+	if err := r.Update(ctx, instanceCopy); err != nil {
+		return false, fmt.Errorf("failed to update resource with restored spec: %w", err)
+	}
+
+	logger.Info("Successfully restored original state after TTL expiry")
+	return true, nil
+}
+
+// clearPatchAnnotations removes patch-related annotations from the resource
+func (r *{{ .Kind }}Reconciler) clearPatchAnnotations(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) (bool, error) {
+	annotations := instance.GetAnnotations()
+	if annotations == nil {
+		return false, nil
+	}
+
+	// Check if any patch annotations exist
+	_, hasTTL := annotations["{{ .APIGroup }}/patch-ttl"]
+	_, hasExpires := annotations["{{ .APIGroup }}/patch-expires"]
+	_, hasOriginal := annotations["{{ .APIGroup }}/patch-original-state"]
+	_, hasPatched := annotations["{{ .APIGroup }}/patched-by"]
+
+	if !hasTTL && !hasExpires && !hasOriginal && !hasPatched {
+		return false, nil
+	}
+
+	instanceCopy := instance.DeepCopy()
+	newAnnotations := instanceCopy.GetAnnotations()
+
+	delete(newAnnotations, "{{ .APIGroup }}/patch-ttl")
+	delete(newAnnotations, "{{ .APIGroup }}/patch-expires")
+	delete(newAnnotations, "{{ .APIGroup }}/patch-original-state")
+	delete(newAnnotations, "{{ .APIGroup }}/patched-by")
+	instanceCopy.SetAnnotations(newAnnotations)
+
+	if err := r.Update(ctx, instanceCopy); err != nil {
+		return false, fmt.Errorf("failed to clear patch annotations: %w", err)
+	}
+
+	return true, nil
+}
 
 func (r *{{ .Kind }}Reconciler) updateStatus(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}, state, message string) {
 	logger := log.FromContext(ctx)

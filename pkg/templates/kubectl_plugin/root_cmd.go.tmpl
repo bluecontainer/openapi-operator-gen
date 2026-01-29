@@ -40,12 +40,14 @@ var rootCmd = &cobra.Command{
 	Long: `kubectl {{ .PluginName }} is a kubectl plugin for managing {{ .APIName }} operator resources.
 
 It provides commands for:
+  - Creating resources from CLI flags
   - Viewing aggregate health status
   - Listing and describing resources
   - Running diagnostics and comparing across pods
   - Drift detection and reporting
   - Pausing and resuming reconciliation
   - Executing queries and actions
+  - Temporary patches with auto-rollback
 
 Examples:
   # View overall status
@@ -70,7 +72,22 @@ Examples:
   kubectl {{ .PluginName }} pause pet fluffy --reason="Maintenance"
 
   # Resume reconciliation
-  kubectl {{ .PluginName }} unpause pet fluffy`,
+  kubectl {{ .PluginName }} unpause pet fluffy
+
+  # Create a resource from CLI flags
+  kubectl {{ .PluginName }} create pet --name=fluffy --status=available
+
+  # Execute a query
+  kubectl {{ .PluginName }} query storeinventoryquery
+
+  # Execute an action
+  kubectl {{ .PluginName }} action petuploadimageaction --petId=123
+
+  # Make temporary change with TTL
+  kubectl {{ .PluginName }} patch pet fluffy --spec='{"status":"pending"}' --ttl=1h
+
+  # Cleanup one-shot resources
+  kubectl {{ .PluginName }} cleanup --one-shot`,
 	Version: version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip client initialization for help and version commands
@@ -102,9 +119,14 @@ func init() {
 	rootCmd.AddCommand(diagnoseCmd)
 	rootCmd.AddCommand(driftCmd)
 
-	// Phase 3: Management Commands
+	// Phase 3: Interactive/Management Commands
+	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(queryCmd)
+	rootCmd.AddCommand(actionCmd)
+	rootCmd.AddCommand(patchCmd)
 	rootCmd.AddCommand(pauseCmd)
 	rootCmd.AddCommand(unpauseCmd)
+	rootCmd.AddCommand(cleanupCmd)
 }
 
 // initClient initializes the Kubernetes client
