@@ -68,10 +68,12 @@ type TargetSpec struct {
 	HelmRelease string `json:"helmRelease,omitempty"`
 
 	// StatefulSet specifies a StatefulSet name to route requests to.
+	// When combined with HelmRelease, narrows discovery to only this StatefulSet within the release.
 	// +optional
 	StatefulSet string `json:"statefulSet,omitempty"`
 
 	// Deployment specifies a Deployment name to route requests to.
+	// When combined with HelmRelease, narrows discovery to only this Deployment within the release.
 	// +optional
 	Deployment string `json:"deployment,omitempty"`
 
@@ -103,6 +105,12 @@ type TargetSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	PodOrdinal *int32 `json:"podOrdinal,omitempty"`
+
+	// Labels specifies additional labels to match when discovering workloads.
+	// When combined with HelmRelease, narrows discovery to workloads matching these labels
+	// in addition to the Helm release instance label.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 {{- /* Generate nested types first */ -}}

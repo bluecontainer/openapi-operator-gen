@@ -24,6 +24,7 @@ func TestIsTargetingFlag(t *testing.T) {
 		{"target-pod", "target-pod", true},
 		{"target-helm-release", "target-helm-release", true},
 		{"target-namespace", "target-namespace", true},
+		{"target-labels", "target-labels", true},
 
 		// Non-targeting flags (old names without target- prefix should not match)
 		{"pod", "pod", false},
@@ -122,6 +123,51 @@ func TestValidateTargetingFlags(t *testing.T) {
 				targetDeployment = "my-deploy"
 			},
 			true,
+		},
+		{
+			"labels with helm-release is valid",
+			func() {
+				resetTargetingFlags()
+				targetHelmRelease = "my-release"
+				targetLabels = "app=myapp,tier=backend"
+			},
+			false,
+		},
+		{
+			"labels without helm-release is invalid",
+			func() {
+				resetTargetingFlags()
+				targetLabels = "app=myapp"
+			},
+			true,
+		},
+		{
+			"helm-release with statefulset narrowing is valid",
+			func() {
+				resetTargetingFlags()
+				targetHelmRelease = "my-release"
+				targetStatefulSet = "my-sts"
+			},
+			false,
+		},
+		{
+			"helm-release with deployment narrowing is valid",
+			func() {
+				resetTargetingFlags()
+				targetHelmRelease = "my-release"
+				targetDeployment = "my-deploy"
+			},
+			false,
+		},
+		{
+			"helm-release with statefulset and labels is valid",
+			func() {
+				resetTargetingFlags()
+				targetHelmRelease = "my-release"
+				targetStatefulSet = "my-sts"
+				targetLabels = "app=myapp"
+			},
+			false,
 		},
 	}
 
@@ -295,6 +341,86 @@ func TestBuildTargetSpec_MultipleFlags(t *testing.T) {
 }
 
 // =============================================================================
+// parseTargetLabels tests
+// =============================================================================
+
+func TestParseTargetLabels(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		expected  map[string]string
+		wantError bool
+	}{
+		{"empty string", "", nil, false},
+		{"single label", "app=myapp", map[string]string{"app": "myapp"}, false},
+		{"multiple labels", "app=myapp,tier=backend", map[string]string{"app": "myapp", "tier": "backend"}, false},
+		{"labels with spaces", "app = myapp , tier = backend", map[string]string{"app": "myapp", "tier": "backend"}, false},
+		{"missing value", "app", nil, true},
+		{"empty key", "=value", nil, true},
+		{"empty value allowed", "app=", map[string]string{"app": ""}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetLabels = tt.input
+			defer func() { targetLabels = "" }()
+
+			got, err := parseTargetLabels()
+			if (err != nil) != tt.wantError {
+				t.Errorf("parseTargetLabels() error = %v, wantError %v", err, tt.wantError)
+				return
+			}
+			if !tt.wantError && !reflect.DeepEqual(got, tt.expected) {
+				t.Errorf("parseTargetLabels() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuildTargetSpec_Labels(t *testing.T) {
+	resetTargetingFlags()
+	targetHelmRelease = "my-release"
+	targetLabels = "app=myapp,tier=backend"
+	defer resetTargetingFlags()
+
+	target := buildTargetSpec()
+	if target == nil {
+		t.Fatal("buildTargetSpec() = nil, want map with helmRelease and labels")
+	}
+	if target["helmRelease"] != "my-release" {
+		t.Errorf("target[helmRelease] = %v, want %q", target["helmRelease"], "my-release")
+	}
+	labels, ok := target["labels"].(map[string]string)
+	if !ok {
+		t.Fatalf("target[labels] type = %T, want map[string]string", target["labels"])
+	}
+	if labels["app"] != "myapp" {
+		t.Errorf("target[labels][app] = %v, want %q", labels["app"], "myapp")
+	}
+	if labels["tier"] != "backend" {
+		t.Errorf("target[labels][tier] = %v, want %q", labels["tier"], "backend")
+	}
+}
+
+func TestBuildTargetSpec_HelmReleaseWithStatefulSet(t *testing.T) {
+	resetTargetingFlags()
+	targetHelmRelease = "my-release"
+	targetStatefulSet = "my-sts"
+	defer resetTargetingFlags()
+
+	target := buildTargetSpec()
+	if target == nil {
+		t.Fatal("buildTargetSpec() = nil, want map with helmRelease and statefulSet")
+	}
+	if target["helmRelease"] != "my-release" {
+		t.Errorf("target[helmRelease] = %v, want %q", target["helmRelease"], "my-release")
+	}
+	if target["statefulSet"] != "my-sts" {
+		t.Errorf("target[statefulSet] = %v, want %q", target["statefulSet"], "my-sts")
+	}
+}
+
+// =============================================================================
 // resetTargetingFlags tests
 // =============================================================================
 
@@ -308,6 +434,7 @@ func TestResetTargetingFlags(t *testing.T) {
 	targetPod = "pod-0"
 	targetHelmRelease = "release"
 	targetNamespace = "ns"
+	targetLabels = "app=test"
 
 	resetTargetingFlags()
 
@@ -334,5 +461,8 @@ func TestResetTargetingFlags(t *testing.T) {
 	}
 	if targetNamespace != "" {
 		t.Errorf("targetNamespace = %q, want empty", targetNamespace)
+	}
+	if targetLabels != "" {
+		t.Errorf("targetLabels = %q, want empty", targetLabels)
 	}
 }

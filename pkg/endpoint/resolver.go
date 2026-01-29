@@ -733,198 +733,267 @@ type HelmReleaseEndpoint struct {
 	Endpoints       []Endpoint // All discovered pod endpoints
 }
 
+// HelmReleaseDiscoveryOptions provides optional narrowing parameters for Helm release discovery.
+// When set, these filter the discovered workloads within a Helm release.
+type HelmReleaseDiscoveryOptions struct {
+	// StatefulSetName narrows discovery to only the StatefulSet with this name.
+	// When set, skips the "try all StatefulSets" logic and only matches this name.
+	StatefulSetName string
+
+	// DeploymentName narrows discovery to only the Deployment with this name.
+	// When set, skips the "try all Deployments" logic and only matches this name.
+	DeploymentName string
+
+	// Labels are additional labels that discovered workloads must match.
+	// These are ANDed with the Helm release instance label.
+	Labels map[string]string
+}
+
 // DiscoverHelmReleaseEndpoint discovers all endpoints from a Helm release for per-CR targeting.
 // This is used when a CR specifies targetHelmRelease to override global endpoint config.
 // It tries StatefulSet first, then falls back to Deployment.
 // Returns all pod endpoints so the caller can apply the appropriate strategy.
-func (r *Resolver) DiscoverHelmReleaseEndpoint(ctx context.Context, helmRelease, namespace string) (*HelmReleaseEndpoint, error) {
+// Pass nil for opts to discover without narrowing (original behavior).
+func (r *Resolver) DiscoverHelmReleaseEndpoint(ctx context.Context, helmRelease, namespace string, opts *HelmReleaseDiscoveryOptions) (*HelmReleaseEndpoint, error) {
 	logger := log.FromContext(ctx)
 
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
 
-	// Try StatefulSet first
-	stsList := &appsv1.StatefulSetList{}
-	err := r.client.List(ctx, stsList,
-		client.InNamespace(namespace),
-		client.MatchingLabels{
-			"app.kubernetes.io/instance": helmRelease,
-		},
-	)
-	if err == nil && len(stsList.Items) > 0 {
-		// Use the first StatefulSet found (or the one with most replicas if multiple)
-		var selectedSts *appsv1.StatefulSet
-		for i := range stsList.Items {
-			sts := &stsList.Items[i]
-			if selectedSts == nil {
-				selectedSts = sts
-			} else if sts.Spec.Replicas != nil && selectedSts.Spec.Replicas != nil {
-				if *sts.Spec.Replicas > *selectedSts.Spec.Replicas {
-					selectedSts = sts
-				}
-			}
+	// Build label selector: Helm release label + optional extra labels
+	labels := map[string]string{
+		"app.kubernetes.io/instance": helmRelease,
+	}
+	if opts != nil {
+		for k, v := range opts.Labels {
+			labels[k] = v
 		}
-
-		stsName := selectedSts.Name
-		svcName := stsName // Default service name
-
-		// Try to find a headless service for this Helm release
-		svcList := &corev1.ServiceList{}
-		err = r.client.List(ctx, svcList,
-			client.InNamespace(namespace),
-			client.MatchingLabels{
-				"app.kubernetes.io/instance": helmRelease,
-			},
-		)
-		if err == nil {
-			for i := range svcList.Items {
-				svc := &svcList.Items[i]
-				if svc.Spec.ClusterIP == "None" {
-					svcName = svc.Name
-					break
-				}
-			}
-		}
-
-		// Discover all pod endpoints
-		var endpoints []Endpoint
-		switch r.config.DiscoveryMode {
-		case PodIPMode:
-			podList := &corev1.PodList{}
-			err = r.client.List(ctx, podList,
-				client.InNamespace(namespace),
-				client.MatchingLabels(selectedSts.Spec.Selector.MatchLabels),
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to list pods for StatefulSet %s: %w", stsName, err)
-			}
-			for _, pod := range podList.Items {
-				if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
-					continue
-				}
-				url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
-				endpoints = append(endpoints, Endpoint{
-					URL:     url,
-					Healthy: true,
-					PodName: pod.Name,
-					PodIP:   pod.Status.PodIP,
-				})
-			}
-		default: // DNS mode
-			replicas := int32(1)
-			if selectedSts.Spec.Replicas != nil {
-				replicas = *selectedSts.Spec.Replicas
-			}
-			for i := int32(0); i < replicas; i++ {
-				podName := fmt.Sprintf("%s-%d", stsName, i)
-				dnsName := fmt.Sprintf("%s.%s.%s.svc.cluster.local", podName, svcName, namespace)
-				url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, dnsName, r.config.Port)
-				endpoints = append(endpoints, Endpoint{
-					URL:     url,
-					Healthy: true,
-					PodName: podName,
-				})
-			}
-		}
-
-		if len(endpoints) == 0 {
-			return nil, fmt.Errorf("no running pods found for StatefulSet %s", stsName)
-		}
-
-		logger.Info("Discovered StatefulSet endpoints from Helm release",
-			"helmRelease", helmRelease,
-			"statefulset", stsName,
-			"service", svcName,
-			"endpointCount", len(endpoints))
-
-		return &HelmReleaseEndpoint{
-			StatefulSetName: stsName,
-			ServiceName:     svcName,
-			Namespace:       namespace,
-			WorkloadKind:    StatefulSetKind,
-			Endpoints:       endpoints,
-		}, nil
 	}
 
-	// Try Deployment
-	deployList := &appsv1.DeploymentList{}
-	err = r.client.List(ctx, deployList,
-		client.InNamespace(namespace),
-		client.MatchingLabels{
-			"app.kubernetes.io/instance": helmRelease,
-		},
-	)
-	if err == nil && len(deployList.Items) > 0 {
-		// Use the first Deployment found (or the one with most replicas if multiple)
-		var selectedDeploy *appsv1.Deployment
-		for i := range deployList.Items {
-			deploy := &deployList.Items[i]
-			if selectedDeploy == nil {
-				selectedDeploy = deploy
-			} else if deploy.Spec.Replicas != nil && selectedDeploy.Spec.Replicas != nil {
-				if *deploy.Spec.Replicas > *selectedDeploy.Spec.Replicas {
-					selectedDeploy = deploy
-				}
-			}
-		}
+	// Determine whether to skip StatefulSet or Deployment search based on narrowing.
+	// If opts.DeploymentName is set (without StatefulSetName), skip StatefulSet search.
+	// If opts.StatefulSetName is set (without DeploymentName), skip Deployment search.
+	skipStatefulSets := opts != nil && opts.DeploymentName != "" && opts.StatefulSetName == ""
+	skipDeployments := opts != nil && opts.StatefulSetName != "" && opts.DeploymentName == ""
 
-		deployName := selectedDeploy.Name
-
-		// Discover all pod endpoints
-		podList := &corev1.PodList{}
-		err = r.client.List(ctx, podList,
+	// Try StatefulSet first (unless narrowed to Deployment only)
+	if !skipStatefulSets {
+		stsList := &appsv1.StatefulSetList{}
+		err := r.client.List(ctx, stsList,
 			client.InNamespace(namespace),
-			client.MatchingLabels(selectedDeploy.Spec.Selector.MatchLabels),
+			client.MatchingLabels(labels),
 		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list pods for Deployment %s: %w", deployName, err)
-		}
-
-		var endpoints []Endpoint
-		for _, pod := range podList.Items {
-			if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
-				continue
+		if err == nil && len(stsList.Items) > 0 {
+			// Filter by name if narrowing is requested
+			var candidates []appsv1.StatefulSet
+			if opts != nil && opts.StatefulSetName != "" {
+				for i := range stsList.Items {
+					if stsList.Items[i].Name == opts.StatefulSetName {
+						candidates = append(candidates, stsList.Items[i])
+					}
+				}
+			} else {
+				candidates = stsList.Items
 			}
-			url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
-			endpoints = append(endpoints, Endpoint{
-				URL:     url,
-				Healthy: true,
-				PodName: pod.Name,
-				PodIP:   pod.Status.PodIP,
-			})
+
+			if len(candidates) > 0 {
+				// Select the StatefulSet with most replicas
+				var selectedSts *appsv1.StatefulSet
+				for i := range candidates {
+					sts := &candidates[i]
+					if selectedSts == nil {
+						selectedSts = sts
+					} else if sts.Spec.Replicas != nil && selectedSts.Spec.Replicas != nil {
+						if *sts.Spec.Replicas > *selectedSts.Spec.Replicas {
+							selectedSts = sts
+						}
+					}
+				}
+
+				stsName := selectedSts.Name
+				svcName := stsName // Default service name
+
+				// Try to find a headless service for this Helm release
+				svcList := &corev1.ServiceList{}
+				err = r.client.List(ctx, svcList,
+					client.InNamespace(namespace),
+					client.MatchingLabels{
+						"app.kubernetes.io/instance": helmRelease,
+					},
+				)
+				if err == nil {
+					for i := range svcList.Items {
+						svc := &svcList.Items[i]
+						if svc.Spec.ClusterIP == "None" {
+							svcName = svc.Name
+							break
+						}
+					}
+				}
+
+				// Discover all pod endpoints
+				var endpoints []Endpoint
+				switch r.config.DiscoveryMode {
+				case PodIPMode:
+					podList := &corev1.PodList{}
+					err = r.client.List(ctx, podList,
+						client.InNamespace(namespace),
+						client.MatchingLabels(selectedSts.Spec.Selector.MatchLabels),
+					)
+					if err != nil {
+						return nil, fmt.Errorf("failed to list pods for StatefulSet %s: %w", stsName, err)
+					}
+					for _, pod := range podList.Items {
+						if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+							continue
+						}
+						url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
+						endpoints = append(endpoints, Endpoint{
+							URL:     url,
+							Healthy: true,
+							PodName: pod.Name,
+							PodIP:   pod.Status.PodIP,
+						})
+					}
+				default: // DNS mode
+					replicas := int32(1)
+					if selectedSts.Spec.Replicas != nil {
+						replicas = *selectedSts.Spec.Replicas
+					}
+					for i := int32(0); i < replicas; i++ {
+						podName := fmt.Sprintf("%s-%d", stsName, i)
+						dnsName := fmt.Sprintf("%s.%s.%s.svc.cluster.local", podName, svcName, namespace)
+						url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, dnsName, r.config.Port)
+						endpoints = append(endpoints, Endpoint{
+							URL:     url,
+							Healthy: true,
+							PodName: podName,
+						})
+					}
+				}
+
+				if len(endpoints) == 0 {
+					return nil, fmt.Errorf("no running pods found for StatefulSet %s", stsName)
+				}
+
+				logger.Info("Discovered StatefulSet endpoints from Helm release",
+					"helmRelease", helmRelease,
+					"statefulset", stsName,
+					"service", svcName,
+					"endpointCount", len(endpoints))
+
+				return &HelmReleaseEndpoint{
+					StatefulSetName: stsName,
+					ServiceName:     svcName,
+					Namespace:       namespace,
+					WorkloadKind:    StatefulSetKind,
+					Endpoints:       endpoints,
+				}, nil
+			}
 		}
-
-		if len(endpoints) == 0 {
-			return nil, fmt.Errorf("no running pods found for Deployment %s", deployName)
-		}
-
-		logger.Info("Discovered Deployment endpoints from Helm release",
-			"helmRelease", helmRelease,
-			"deployment", deployName,
-			"endpointCount", len(endpoints))
-
-		return &HelmReleaseEndpoint{
-			DeploymentName: deployName,
-			Namespace:      namespace,
-			WorkloadKind:   DeploymentKind,
-			Endpoints:      endpoints,
-		}, nil
 	}
 
+	// Try Deployment (unless narrowed to StatefulSet only)
+	if !skipDeployments {
+		deployList := &appsv1.DeploymentList{}
+		err := r.client.List(ctx, deployList,
+			client.InNamespace(namespace),
+			client.MatchingLabels(labels),
+		)
+		if err == nil && len(deployList.Items) > 0 {
+			// Filter by name if narrowing is requested
+			var candidates []appsv1.Deployment
+			if opts != nil && opts.DeploymentName != "" {
+				for i := range deployList.Items {
+					if deployList.Items[i].Name == opts.DeploymentName {
+						candidates = append(candidates, deployList.Items[i])
+					}
+				}
+			} else {
+				candidates = deployList.Items
+			}
+
+			if len(candidates) > 0 {
+				// Select the Deployment with most replicas
+				var selectedDeploy *appsv1.Deployment
+				for i := range candidates {
+					deploy := &candidates[i]
+					if selectedDeploy == nil {
+						selectedDeploy = deploy
+					} else if deploy.Spec.Replicas != nil && selectedDeploy.Spec.Replicas != nil {
+						if *deploy.Spec.Replicas > *selectedDeploy.Spec.Replicas {
+							selectedDeploy = deploy
+						}
+					}
+				}
+
+				deployName := selectedDeploy.Name
+
+				// Discover all pod endpoints
+				podList := &corev1.PodList{}
+				err = r.client.List(ctx, podList,
+					client.InNamespace(namespace),
+					client.MatchingLabels(selectedDeploy.Spec.Selector.MatchLabels),
+				)
+				if err != nil {
+					return nil, fmt.Errorf("failed to list pods for Deployment %s: %w", deployName, err)
+				}
+
+				var endpoints []Endpoint
+				for _, pod := range podList.Items {
+					if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+						continue
+					}
+					url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
+					endpoints = append(endpoints, Endpoint{
+						URL:     url,
+						Healthy: true,
+						PodName: pod.Name,
+						PodIP:   pod.Status.PodIP,
+					})
+				}
+
+				if len(endpoints) == 0 {
+					return nil, fmt.Errorf("no running pods found for Deployment %s", deployName)
+				}
+
+				logger.Info("Discovered Deployment endpoints from Helm release",
+					"helmRelease", helmRelease,
+					"deployment", deployName,
+					"endpointCount", len(endpoints))
+
+				return &HelmReleaseEndpoint{
+					DeploymentName: deployName,
+					Namespace:      namespace,
+					WorkloadKind:   DeploymentKind,
+					Endpoints:      endpoints,
+				}, nil
+			}
+		}
+	}
+
+	// Build descriptive error message
+	if opts != nil && opts.StatefulSetName != "" {
+		return nil, fmt.Errorf("no StatefulSet %q found for Helm release %s in namespace %s", opts.StatefulSetName, helmRelease, namespace)
+	}
+	if opts != nil && opts.DeploymentName != "" {
+		return nil, fmt.Errorf("no Deployment %q found for Helm release %s in namespace %s", opts.DeploymentName, helmRelease, namespace)
+	}
 	return nil, fmt.Errorf("no StatefulSet or Deployment found for Helm release %s in namespace %s", helmRelease, namespace)
 }
 
 // GetEndpointForHelmRelease returns an endpoint URL for a specific Helm release.
 // This supports per-CR targeting when targetHelmRelease is specified.
 // It applies the configured strategy to select from available endpoints.
-func (r *Resolver) GetEndpointForHelmRelease(ctx context.Context, helmRelease, namespace string, ordinal *int32) (string, error) {
+// Pass nil for opts to discover without narrowing.
+func (r *Resolver) GetEndpointForHelmRelease(ctx context.Context, helmRelease, namespace string, ordinal *int32, opts *HelmReleaseDiscoveryOptions) (string, error) {
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
 
 	// Discover all endpoints from the Helm release
-	result, err := r.DiscoverHelmReleaseEndpoint(ctx, helmRelease, namespace)
+	result, err := r.DiscoverHelmReleaseEndpoint(ctx, helmRelease, namespace, opts)
 	if err != nil {
 		return "", err
 	}
@@ -935,12 +1004,13 @@ func (r *Resolver) GetEndpointForHelmRelease(ctx context.Context, helmRelease, n
 
 // GetAllEndpointsForHelmRelease returns all endpoint URLs for a specific Helm release.
 // Use this with AllHealthy strategy for fan-out/broadcast operations.
-func (r *Resolver) GetAllEndpointsForHelmRelease(ctx context.Context, helmRelease, namespace string) ([]string, error) {
+// Pass nil for opts to discover without narrowing.
+func (r *Resolver) GetAllEndpointsForHelmRelease(ctx context.Context, helmRelease, namespace string, opts *HelmReleaseDiscoveryOptions) ([]string, error) {
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
 
-	result, err := r.DiscoverHelmReleaseEndpoint(ctx, helmRelease, namespace)
+	result, err := r.DiscoverHelmReleaseEndpoint(ctx, helmRelease, namespace, opts)
 	if err != nil {
 		return nil, err
 	}

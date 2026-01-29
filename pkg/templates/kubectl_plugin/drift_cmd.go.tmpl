@@ -306,6 +306,7 @@ func extractDriftedFields(obj *unstructured.Unstructured) []DriftedField {
 func isControlField(field string) bool {
 	controlFields := map[string]bool{
 		"paused":             true,
+		"target":             true,
 		"targetPodOrdinal":   true,
 		"targetHelmRelease":  true,
 		"targetNamespace":    true,

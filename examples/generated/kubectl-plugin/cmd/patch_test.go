@@ -88,6 +88,7 @@ func TestIsPatchCommonFlag(t *testing.T) {
 		{"target-pod", "target-pod", true},
 		{"target-helm-release", "target-helm-release", true},
 		{"target-namespace", "target-namespace", true},
+		{"target-labels", "target-labels", true},
 
 		// Unknown flags (spec fields)
 		{"name", "name", false},

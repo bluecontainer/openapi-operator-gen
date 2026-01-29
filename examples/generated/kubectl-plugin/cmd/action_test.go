@@ -139,6 +139,7 @@ func TestIsActionCommonFlag(t *testing.T) {
 		{"target-pod", "target-pod", true},
 		{"target-helm-release", "target-helm-release", true},
 		{"target-namespace", "target-namespace", true},
+		{"target-labels", "target-labels", true},
 
 		// Unknown flags (action params)
 		{"petId", "petId", false},

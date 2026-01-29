@@ -119,6 +119,7 @@ func TestIsCommonFlag(t *testing.T) {
 		{"target-pod", "target-pod", true},
 		{"target-helm-release", "target-helm-release", true},
 		{"target-namespace", "target-namespace", true},
+		{"target-labels", "target-labels", true},
 
 		// Unknown flags (query params)
 		{"status", "status", false},

@@ -1660,7 +1660,7 @@ func TestDiscoverHelmReleaseEndpoint_StatefulSet(t *testing.T) {
 		},
 	}
 
-	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default")
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1718,7 +1718,7 @@ func TestDiscoverHelmReleaseEndpoint_Deployment(t *testing.T) {
 		},
 	}
 
-	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default")
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1733,6 +1733,217 @@ func TestDiscoverHelmReleaseEndpoint_Deployment(t *testing.T) {
 
 	if len(result.Endpoints) != 1 {
 		t.Errorf("expected 1 endpoint, got %d", len(result.Endpoints))
+	}
+}
+
+func TestDiscoverHelmReleaseEndpoint_NarrowByStatefulSetName(t *testing.T) {
+	// Create two StatefulSets with the same Helm release label
+	sts1 := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-api",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(3),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "api"},
+			},
+		},
+	}
+	sts2 := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-worker",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(5), // More replicas — would be selected without narrowing
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "worker"},
+			},
+		},
+	}
+
+	apiPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "my-release-api-0", Namespace: "default",
+			Labels: map[string]string{"app": "api"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.0.0.1"},
+	}
+
+	client := newFakeClient(sts1, sts2, apiPod).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+			DiscoveryMode: PodIPMode,
+		},
+	}
+
+	// Narrow to the "api" StatefulSet by name
+	opts := &HelmReleaseDiscoveryOptions{
+		StatefulSetName: "my-release-api",
+	}
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default", opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.StatefulSetName != "my-release-api" {
+		t.Errorf("expected StatefulSetName 'my-release-api', got %s", result.StatefulSetName)
+	}
+	if result.WorkloadKind != StatefulSetKind {
+		t.Errorf("expected WorkloadKind StatefulSetKind, got %s", result.WorkloadKind)
+	}
+}
+
+func TestDiscoverHelmReleaseEndpoint_NarrowByDeploymentName(t *testing.T) {
+	// Create a StatefulSet and a Deployment with the same Helm release label
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-sts",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(3),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "sts-app"},
+			},
+		},
+	}
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-web",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(2),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "web"},
+			},
+		},
+	}
+
+	webPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "my-release-web-abc", Namespace: "default",
+			Labels: map[string]string{"app": "web"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.0.0.10"},
+	}
+
+	client := newFakeClient(sts, deploy, webPod).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+			DiscoveryMode: PodIPMode,
+		},
+	}
+
+	// Narrow to just the Deployment — should skip StatefulSet entirely
+	opts := &HelmReleaseDiscoveryOptions{
+		DeploymentName: "my-release-web",
+	}
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default", opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.DeploymentName != "my-release-web" {
+		t.Errorf("expected DeploymentName 'my-release-web', got %s", result.DeploymentName)
+	}
+	if result.WorkloadKind != DeploymentKind {
+		t.Errorf("expected WorkloadKind DeploymentKind, got %s", result.WorkloadKind)
+	}
+}
+
+func TestDiscoverHelmReleaseEndpoint_NarrowByLabels(t *testing.T) {
+	// Two StatefulSets: one with extra label "component=api", one without
+	sts1 := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-api",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance":  "my-release",
+				"app.kubernetes.io/component": "api",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(1),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "api"},
+			},
+		},
+	}
+	sts2 := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-worker",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance":  "my-release",
+				"app.kubernetes.io/component": "worker",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(5), // More replicas, would be selected without label narrowing
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "worker"},
+			},
+		},
+	}
+
+	apiPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "my-release-api-0", Namespace: "default",
+			Labels: map[string]string{"app": "api"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.0.0.1"},
+	}
+
+	client := newFakeClient(sts1, sts2, apiPod).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+			DiscoveryMode: PodIPMode,
+		},
+	}
+
+	// Narrow by label to get only the "api" component
+	opts := &HelmReleaseDiscoveryOptions{
+		Labels: map[string]string{
+			"app.kubernetes.io/component": "api",
+		},
+	}
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "default", opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.StatefulSetName != "my-release-api" {
+		t.Errorf("expected StatefulSetName 'my-release-api', got %s", result.StatefulSetName)
 	}
 }
 
