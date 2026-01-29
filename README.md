@@ -2967,7 +2967,7 @@ The plugin provides commands organized in three phases:
 |-------|----------|-------------|
 | **Phase 1: Core** | `status`, `get`, `describe` | Basic resource viewing |
 | **Phase 2: Diagnostic** | `compare`, `diagnose`, `drift` | Multi-endpoint diagnostics |
-| **Phase 3: Interactive** | `query`, `action`, `patch`, `pause`, `unpause`, `cleanup` | Resource management |
+| **Phase 3: Interactive** | `create`, `query`, `action`, `patch`, `pause`, `unpause`, `cleanup` | Resource management |
 
 ### Phase 1: Core Commands
 
@@ -3021,14 +3021,50 @@ order/12345   Yes     1       2024-01-15T09:15:00Z    1/3: pod-1
 
 ### Phase 3: Interactive Commands
 
-**List available types** - See available query and action types:
+**List available types** - See available resource, query, and action types:
 ```bash
+# List all resource types for create
+kubectl petstore create types
+
 # List all query types
 kubectl petstore query queries
 
 # List all action types
 kubectl petstore action actions
 ```
+
+**create** - Create CRUD resource CRs from CLI flags:
+```bash
+# Create a resource with spec fields as flags
+kubectl petstore create pet --name=fluffy --status=available
+
+# Create with a custom CR name
+kubectl petstore create pet --cr-name=my-pet --name=fluffy
+
+# Create without waiting for sync
+kubectl petstore create pet --name=fluffy --no-wait
+
+# Create from a YAML/JSON spec file
+kubectl petstore create pet --from-file=pet-spec.yaml
+
+# Dry run - output YAML without creating
+kubectl petstore create pet --name=fluffy --dry-run
+
+# Nested objects use JSON syntax
+kubectl petstore create pet --name=fluffy --category='{"id":1,"name":"Dogs"}'
+
+# Arrays use JSON syntax for complex types
+kubectl petstore create pet --name=fluffy --tags='[{"id":1,"name":"cute"}]'
+```
+
+Create command flags:
+| Flag | Description |
+|------|-------------|
+| `--cr-name=NAME` | Name for the CR (auto-generated as `kind-timestamp` if not specified) |
+| `--no-wait` | Don't wait for the resource to sync |
+| `--timeout=DURATION` | Timeout for waiting on sync (default: `60s`) |
+| `--from-file=PATH` | Load spec from a YAML or JSON file |
+| `--dry-run` | Output the CR YAML/JSON without creating it |
 
 **query** - Execute read-only query CRDs:
 ```bash
@@ -3049,6 +3085,9 @@ kubectl petstore query petfindbystatusquery --status=available -q --output=json
 
 # Combine quiet mode with JSON for easy scripting
 kubectl petstore query storeinventoryquery -q | jq '.items[0].name'
+
+# Dry run - output YAML without creating
+kubectl petstore query petfindbystatusquery --status=available --dry-run
 ```
 
 Query command flags:
@@ -3061,6 +3100,7 @@ Query command flags:
 | `--timeout=DURATION` | Timeout for waiting (default: `30s`) |
 | `--get=NAME` | Get results from existing query CR instead of creating new one |
 | `-q, --quiet` | Output only result data, no status messages (defaults to JSON) |
+| `--dry-run` | Output the CR YAML/JSON without creating it |
 
 **action** - Execute write operation CRDs:
 ```bash
@@ -3075,6 +3115,9 @@ kubectl petstore action petuploadimageaction --petId=123 --wait=false
 
 # Custom name for the action CR
 kubectl petstore action petuploadimageaction --petId=123 --name=upload-fluffy-photo
+
+# Dry run - output YAML without creating
+kubectl petstore action petuploadimageaction --petId=123 --dry-run
 ```
 
 Action command flags:
@@ -3085,21 +3128,39 @@ Action command flags:
 | `--wait` | Wait for action to complete (default: `true`) |
 | `--timeout=DURATION` | Timeout for waiting (default: `60s`) |
 | `--file=PATH` | File to upload (for upload actions, base64 encoded) |
+| `--dry-run` | Output the CR YAML/JSON without creating it |
 
 **patch** - Make temporary changes with TTL auto-rollback:
 ```bash
-# Patch with 1 hour TTL
+# Patch with individual flags
+kubectl petstore patch pet fluffy --status=pending --ttl=1h
+
+# Patch with JSON spec
 kubectl petstore patch pet fluffy --spec='{"status":"pending"}' --ttl=1h
 
-# Dry run to preview changes
-kubectl petstore patch pet fluffy --spec='{"status":"pending"}' --ttl=1h --dry-run
+# Mix individual flags and --spec (individual flags take precedence)
+kubectl petstore patch pet fluffy --spec='{"status":"pending"}' --name="Fluffy Updated"
+
+# Dry run - output the merge patch YAML
+kubectl petstore patch pet fluffy --status=pending --dry-run
 
 # Restore immediately
 kubectl petstore patch pet fluffy --restore
 
 # List all patched resources
 kubectl petstore patch list
+
+# Nested objects and arrays use JSON syntax
+kubectl petstore patch pet fluffy --tags='[{"id":1,"name":"cute"}]'
 ```
+
+Patch command flags:
+| Flag | Description |
+|------|-------------|
+| `--spec=JSON` | JSON spec to apply (e.g., `'{"status":"pending"}'`) |
+| `--ttl=DURATION` | Time-to-live for the patch (e.g., `1h`, `30m`) |
+| `--restore` | Restore the original state |
+| `--dry-run` | Output the merge patch YAML/JSON without applying |
 
 **pause/unpause** - Control reconciliation:
 ```bash
@@ -3115,12 +3176,40 @@ kubectl petstore cleanup --one-shot
 # Restore expired TTL patches (not delete)
 kubectl petstore cleanup --expired
 
-# Dry run
+# Dry run - output structured YAML of targets
 kubectl petstore cleanup --dry-run
 
 # Cleanup across all namespaces
 kubectl petstore cleanup --all-namespaces --force
 ```
+
+### Dry Run Support
+
+All mutating commands support `--dry-run` to output YAML (or JSON with `--output=json`) of what would be submitted, without making any changes:
+
+```bash
+kubectl petstore create pet --name=fluffy --dry-run
+kubectl petstore query petfindbystatusquery --status=available --dry-run
+kubectl petstore action petuploadimageaction --petId=123 --dry-run
+kubectl petstore patch pet fluffy --status=pending --dry-run
+kubectl petstore cleanup --dry-run
+```
+
+### Dynamic Parameter Parsing
+
+The `create`, `query`, `action`, and `patch` commands all support dynamic `--key=value` flags that are passed through as spec fields. Values are automatically coerced:
+
+| Syntax | Parsed As |
+|--------|-----------|
+| `--name=fluffy` | String: `"fluffy"` |
+| `--petId=123` | Integer: `123` |
+| `--price=9.99` | Float: `9.99` |
+| `--active=true` | Boolean: `true` |
+| `--category='{"id":1,"name":"Dogs"}'` | JSON object |
+| `--tags='[{"id":1,"name":"cute"}]'` | JSON array |
+| `--tags=cute,fluffy` | String array: `["cute", "fluffy"]` |
+
+> **Note:** For fields that require complex types (objects or arrays of objects), always use JSON syntax. Comma-separated values produce string arrays, which may not match CRD schemas expecting arrays of objects. If a CRD validation error occurs, the CLI provides hints suggesting the correct JSON syntax.
 
 ### TTL-Based Patches
 
