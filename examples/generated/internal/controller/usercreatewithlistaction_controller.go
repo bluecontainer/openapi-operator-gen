@@ -417,7 +417,6 @@ func (r *UserCreatewithlistActionReconciler) buildActionURL(baseURL string, inst
 func (r *UserCreatewithlistActionReconciler) buildRequestBody(instance *v1alpha1.UserCreatewithlistAction) ([]byte, error) {
 	return nil, nil
 }
-
 // parseResult parses the response body into typed result
 func (r *UserCreatewithlistActionReconciler) parseResult(body []byte) (*v1alpha1.UserCreatewithlistActionResult, error) {
 	var result v1alpha1.UserCreatewithlistActionResult

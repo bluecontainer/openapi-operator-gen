@@ -22,7 +22,7 @@ spec:
   id: 101
   petId: 101
   quantity: 101
-  shipDate: "2026-01-30T18:49:50Z"
+  shipDate: "2026-01-30T20:08:50Z"
   status: "placed"
 ---
 # Referenced by "mixed-selection" aggregate (critical resource)
@@ -39,7 +39,7 @@ spec:
   id: 202
   petId: 202
   quantity: 202
-  shipDate: "2026-01-31T18:49:50Z"
+  shipDate: "2026-01-31T20:08:50Z"
   status: "approved"
 ---
 # Matches "^test-.*" pattern in "filtered-by-name" aggregate
@@ -55,7 +55,7 @@ spec:
   id: 101
   petId: 101
   quantity: 101
-  shipDate: "2026-01-30T18:49:50Z"
+  shipDate: "2026-01-30T20:08:50Z"
   status: "placed"
 ---
 # Matches "^test-.*" pattern in "filtered-by-name" aggregate
@@ -71,7 +71,7 @@ spec:
   id: 202
   petId: 202
   quantity: 202
-  shipDate: "2026-01-31T18:49:50Z"
+  shipDate: "2026-01-31T20:08:50Z"
   status: "approved"
 ---
 # Generic numbered resource with production label
@@ -88,7 +88,7 @@ spec:
   id: 101
   petId: 101
   quantity: 101
-  shipDate: "2026-01-30T18:49:50Z"
+  shipDate: "2026-01-30T20:08:50Z"
   status: "placed"
 ---
 # Generic numbered resource
@@ -104,7 +104,7 @@ spec:
   id: 202
   petId: 202
   quantity: 202
-  shipDate: "2026-01-31T18:49:50Z"
+  shipDate: "2026-01-31T20:08:50Z"
   status: "approved"
 ---
 # Referenced by "specific-resources" aggregate (explicit resource reference)

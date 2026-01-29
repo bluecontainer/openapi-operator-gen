@@ -28,10 +28,10 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
-	"github.com/bluecontainer/openapi-operator-gen/pkg/telemetry"
 	v1alpha1 "github.com/bluecontainer/petstore-operator/api/v1alpha1"
 	"github.com/bluecontainer/petstore-operator/internal/controller"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/endpoint"
+	"github.com/bluecontainer/openapi-operator-gen/pkg/telemetry"
 )
 
 var (
@@ -392,6 +392,7 @@ func main() {
 	} else if baseURL != "" {
 		setupLog.Info("Using static base URL", "url", baseURL)
 	}
+
 
 	if err = (&controller.OrderReconciler{
 		Client:           mgr.GetClient(),

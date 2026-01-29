@@ -307,3 +307,8 @@ var KubectlPluginCleanupCmdTemplate string
 //
 //go:embed kubectl_plugin/create_cmd.go.tmpl
 var KubectlPluginCreateCmdTemplate string
+
+// KubectlPluginTargetingTemplate is the template for the kubectl plugin shared targeting helpers
+//
+//go:embed kubectl_plugin/targeting.go.tmpl
+var KubectlPluginTargetingTemplate string

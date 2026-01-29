@@ -19,7 +19,6 @@ import (
 )
 
 var (
-	queryPodOrdinal int
 	queryInterval   string
 	queryName       string
 	queryWait       bool
@@ -70,7 +69,7 @@ Examples:
 }
 
 func init() {
-	queryCmd.Flags().IntVar(&queryPodOrdinal, "pod", -1, "Target specific pod ordinal")
+	addTargetingFlags(queryCmd)
 	queryCmd.Flags().StringVar(&queryInterval, "interval", "", "Execution interval for periodic queries (e.g., 5m, 1h)")
 	queryCmd.Flags().StringVar(&queryName, "name", "", "Name for the query CR (required for periodic queries)")
 	queryCmd.Flags().BoolVar(&queryWait, "wait", false, "Wait for query to complete and show results")
@@ -84,6 +83,10 @@ func init() {
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {
+	if err := validateTargetingFlags(); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	queryType := strings.ToLower(args[0])
 
@@ -238,8 +241,11 @@ func coerceQueryParamValue(s string) interface{} {
 }
 
 func isCommonFlag(name string) bool {
+	if isTargetingFlag(name) {
+		return true
+	}
 	commonFlags := map[string]bool{
-		"pod": true, "interval": true, "name": true,
+		"interval": true, "name": true,
 		"wait": true, "timeout": true, "output": true,
 		"get": true, "quiet": true, "q": true,
 		"dry-run": true,
@@ -257,10 +263,8 @@ func buildQueryCR(kind, name string, params map[string]interface{}, isPeriodic b
 	}
 
 	// Add targeting if specified
-	if queryPodOrdinal >= 0 {
-		spec["target"] = map[string]interface{}{
-			"podOrdinal": queryPodOrdinal,
-		}
+	if target := buildTargetSpec(); target != nil {
+		spec["target"] = target
 	}
 
 	// Add execution interval for periodic queries

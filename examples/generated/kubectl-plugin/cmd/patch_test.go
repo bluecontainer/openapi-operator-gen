@@ -79,6 +79,16 @@ func TestIsPatchCommonFlag(t *testing.T) {
 		{"context", "context", true},
 		{"kubeconfig", "kubeconfig", true},
 
+		// Targeting flags (delegated to isTargetingFlag)
+		{"target-pod-ordinal", "target-pod-ordinal", true},
+		{"target-base-url", "target-base-url", true},
+		{"target-base-urls", "target-base-urls", true},
+		{"target-statefulset", "target-statefulset", true},
+		{"target-deployment", "target-deployment", true},
+		{"target-pod", "target-pod", true},
+		{"target-helm-release", "target-helm-release", true},
+		{"target-namespace", "target-namespace", true},
+
 		// Unknown flags (spec fields)
 		{"name", "name", false},
 		{"status", "status", false},

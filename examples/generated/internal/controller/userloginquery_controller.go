@@ -477,7 +477,6 @@ func (r *UserLoginQueryReconciler) recordQueryMetrics(ctx context.Context, statu
 			attribute.String("status", status),
 		))
 }
-
 // countResults attempts to count results in the response
 func (r *UserLoginQueryReconciler) countResults(body []byte) int {
 	// Try to parse as array

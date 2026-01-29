@@ -464,7 +464,6 @@ func (r *StoreInventoryQueryReconciler) recordQueryMetrics(ctx context.Context, 
 			attribute.String("status", status),
 		))
 }
-
 // countResults attempts to count results in the response
 func (r *StoreInventoryQueryReconciler) countResults(body []byte) int {
 	// Try to parse as array

@@ -404,7 +404,6 @@ func (r *UserReconciler) buildResourceURLForCreate(baseURL string, instance *v1a
 
 	return builder.BuildForCreate(baseURL)
 }
-
 // hasValidPathParams checks if all path parameters have valid (non-zero/non-empty) values.
 // This is used to determine if we can perform GET operations on a resource.
 // The last path parameter can use ExternalID as a fallback (e.g., when POST returns an ID).
@@ -415,7 +414,6 @@ func (r *UserReconciler) hasValidPathParams(instance *v1alpha1.User) bool {
 	}
 	return true
 }
-
 // getExternalID returns the external ID to use for GET/PUT/DELETE operations.
 // It returns ExternalID from status (for resources created by the controller).
 func (r *UserReconciler) getExternalID(instance *v1alpha1.User) string {
@@ -829,7 +827,7 @@ func (r *UserReconciler) observeResource(ctx context.Context, instance *v1alpha1
 	}
 	instance.Status.LastGetTime = &now
 	instance.Status.DriftDetected = false // No drift concept for read-only
-	instance.Status.Responses = nil       // Clear multi-endpoint responses for single endpoint
+	instance.Status.Responses = nil // Clear multi-endpoint responses for single endpoint
 
 	logger.Info("Successfully observed resource", "externalID", externalID)
 	r.updateStatus(ctx, instance, "Observed", "Successfully fetched resource from REST API")
@@ -1592,7 +1590,6 @@ func (r *UserReconciler) syncResource(ctx context.Context, instance *v1alpha1.Us
 	r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
 	return nil
 }
-
 // deleteFromEndpoint deletes from a single endpoint URL
 func (r *UserReconciler) deleteFromEndpoint(ctx context.Context, instance *v1alpha1.User, baseURL string) error {
 	ctx, span := userTracer.Start(ctx, "DELETE",
@@ -1738,7 +1735,6 @@ func (r *UserReconciler) finalizeResource(ctx context.Context, instance *v1alpha
 
 	return r.deleteFromEndpoint(ctx, instance, baseURL)
 }
-
 // restoreOriginalState restores the external resource to its original state captured during adoption.
 // This works for resources adopted via path params (e.g., id: 10) or externalIDRef.
 func (r *UserReconciler) restoreOriginalState(ctx context.Context, instance *v1alpha1.User) error {

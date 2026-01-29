@@ -383,21 +383,21 @@ func TestCELAggregateFunctions(t *testing.T) {
 func TestCELKindSpecificVariables(t *testing.T) {
 	pets := []map[string]interface{}{
 		{
-			"kind":   "Pet",
-			"spec":   map[string]interface{}{"name": "Fluffy"},
+			"kind": "Pet",
+			"spec": map[string]interface{}{"name": "Fluffy"},
 			"status": map[string]interface{}{"state": "Synced"},
 		},
 		{
-			"kind":   "Pet",
-			"spec":   map[string]interface{}{"name": "Buddy"},
+			"kind": "Pet",
+			"spec": map[string]interface{}{"name": "Buddy"},
 			"status": map[string]interface{}{"state": "Synced"},
 		},
 	}
 
 	orders := []map[string]interface{}{
 		{
-			"kind":   "Order",
-			"spec":   map[string]interface{}{"quantity": 5},
+			"kind": "Order",
+			"spec": map[string]interface{}{"quantity": 5},
 			"status": map[string]interface{}{"state": "Synced"},
 		},
 	}

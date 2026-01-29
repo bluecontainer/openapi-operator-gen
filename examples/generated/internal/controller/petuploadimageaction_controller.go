@@ -14,11 +14,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	corev1 "k8s.io/api/core/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"net/http"
 	"os"
 	"time"
+	corev1 "k8s.io/api/core/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -441,7 +441,6 @@ func (r *PetUploadimageActionReconciler) buildRequestBody(instance *v1alpha1.Pet
 	// This endpoint expects binary data - one of the binary data sources must be specified
 	return nil, fmt.Errorf("binary data required: specify one of data (base64), dataFrom (ConfigMap/Secret), dataURL, or dataFromFile")
 }
-
 // resolveBinaryDataFrom resolves binary data from ConfigMap or Secret
 func (r *PetUploadimageActionReconciler) resolveBinaryDataFrom(ctx context.Context, instance *v1alpha1.PetUploadimageAction) ([]byte, error) {
 	dataFrom := instance.Spec.DataFrom
@@ -526,7 +525,6 @@ func (r *PetUploadimageActionReconciler) readDataFromFile(filePath string) ([]by
 	}
 	return data, nil
 }
-
 // parseResult parses the response body into typed result
 func (r *PetUploadimageActionReconciler) parseResult(body []byte) (*v1alpha1.PetUploadimageActionResult, error) {
 	var result v1alpha1.PetUploadimageActionResult

@@ -474,7 +474,6 @@ func (r *PetFindbystatusQueryReconciler) recordQueryMetrics(ctx context.Context,
 			attribute.String("status", status),
 		))
 }
-
 // parseResults parses the response body into typed results
 func (r *PetFindbystatusQueryReconciler) parseResults(body []byte) ([]v1alpha1.PetFindbystatusQueryResult, int, error) {
 	var results []v1alpha1.PetFindbystatusQueryResult

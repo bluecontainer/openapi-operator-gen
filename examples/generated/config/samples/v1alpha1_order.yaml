@@ -10,7 +10,7 @@ spec:
   id: 10
   petId: 10
   quantity: 2
-  shipDate: "2026-01-29T18:49:50Z"
+  shipDate: "2026-01-29T20:08:50Z"
   status: "placed"
   # Endpoint targeting (optional - uncomment if needed)
   # target:

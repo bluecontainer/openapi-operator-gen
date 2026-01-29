@@ -68,6 +68,7 @@ Examples:
 }
 
 func init() {
+	addTargetingFlags(createCmd)
 	createCmd.Flags().StringVar(&createCRName, "cr-name", "", "Name for the CR (auto-generated if not specified)")
 	createCmd.Flags().BoolVar(&createNoWait, "no-wait", false, "Don't wait for the resource to sync")
 	createCmd.Flags().DurationVar(&createTimeout, "timeout", 60*time.Second, "Timeout for waiting on sync")
@@ -79,6 +80,10 @@ func init() {
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
+	if err := validateTargetingFlags(); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	resourceType := strings.ToLower(args[0])
 
@@ -262,6 +267,9 @@ func coerceCreateParamValue(s string) interface{} {
 }
 
 func isCreateCommonFlag(name string) bool {
+	if isTargetingFlag(name) {
+		return true
+	}
 	commonFlags := map[string]bool{
 		"cr-name": true, "no-wait": true, "wait": true,
 		"timeout": true, "output": true, "from-file": true,
@@ -272,6 +280,11 @@ func isCreateCommonFlag(name string) bool {
 }
 
 func buildResourceCR(kind, name string, spec map[string]interface{}) *unstructured.Unstructured {
+	// Add targeting if specified
+	if target := buildTargetSpec(); target != nil {
+		spec["target"] = target
+	}
+
 	annotations := map[string]interface{}{
 		"petstore.example.com/created-by": "kubectl-plugin",
 	}

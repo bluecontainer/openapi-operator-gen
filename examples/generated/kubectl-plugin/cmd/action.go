@@ -20,7 +20,6 @@ import (
 )
 
 var (
-	actionPodOrdinal int
 	actionName       string
 	actionWait       bool
 	actionTimeout    time.Duration
@@ -57,7 +56,7 @@ Examples:
 }
 
 func init() {
-	actionCmd.Flags().IntVar(&actionPodOrdinal, "pod", -1, "Target specific pod ordinal")
+	addTargetingFlags(actionCmd)
 	actionCmd.Flags().StringVar(&actionName, "name", "", "Name for the action CR")
 	actionCmd.Flags().BoolVar(&actionWait, "wait", true, "Wait for action to complete and show results")
 	actionCmd.Flags().DurationVar(&actionTimeout, "timeout", 60*time.Second, "Timeout for waiting on action results")
@@ -69,6 +68,10 @@ func init() {
 }
 
 func runAction(cmd *cobra.Command, args []string) error {
+	if err := validateTargetingFlags(); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	actionType := strings.ToLower(args[0])
 
@@ -191,8 +194,11 @@ func parseActionParams() map[string]interface{} {
 }
 
 func isActionCommonFlag(name string) bool {
+	if isTargetingFlag(name) {
+		return true
+	}
 	commonFlags := map[string]bool{
-		"pod": true, "name": true, "wait": true,
+		"name": true, "wait": true,
 		"timeout": true, "output": true, "file": true,
 		"dry-run": true,
 		"namespace": true, "context": true, "kubeconfig": true,
@@ -238,10 +244,8 @@ func buildActionCR(kind, name string, params map[string]interface{}) *unstructur
 	}
 
 	// Add targeting if specified
-	if actionPodOrdinal >= 0 {
-		spec["target"] = map[string]interface{}{
-			"podOrdinal": actionPodOrdinal,
-		}
+	if target := buildTargetSpec(); target != nil {
+		spec["target"] = target
 	}
 
 	// Mark as one-shot action

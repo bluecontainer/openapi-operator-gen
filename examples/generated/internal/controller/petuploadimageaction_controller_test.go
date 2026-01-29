@@ -900,7 +900,6 @@ func TestPetUploadimageActionReconciler_URLAndResponseConsistency(t *testing.T) 
 	}
 	t.Logf("Final status: State=%s, Message=%s", updated.Status.State, updated.Status.Message)
 }
-
 // TestPetUploadimageActionReconciler_ActionPathParams verifies that action endpoints
 // correctly use path parameters from spec in the URL
 func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
@@ -1049,3 +1048,4 @@ func TestPetUploadimageActionReconciler_ActionPathParams(t *testing.T) {
 		}
 	}
 }
+

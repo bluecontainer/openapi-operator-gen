@@ -77,6 +77,7 @@ Examples:
 }
 
 func init() {
+	addTargetingFlags(patchCmd)
 	patchCmd.Flags().StringVar(&patchSpec, "spec", "", "JSON spec to apply (e.g., '{\"status\":\"pending\"}')")
 	patchCmd.Flags().StringVar(&patchTTL, "ttl", "", "Time-to-live for the patch (e.g., 1h, 30m)")
 	patchCmd.Flags().BoolVar(&patchRestore, "restore", false, "Restore the original state")
@@ -87,6 +88,10 @@ func init() {
 }
 
 func runPatch(cmd *cobra.Command, args []string) error {
+	if err := validateTargetingFlags(); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	kindArg := strings.ToLower(args[0])
 	name := args[1]
@@ -142,6 +147,10 @@ func buildPatchSpec() (map[string]interface{}, error) {
 }
 
 func applyPatch(ctx context.Context, plural, name string, obj *unstructured.Unstructured, specPatch map[string]interface{}) error {
+	// Add targeting if specified
+	if target := buildTargetSpec(); target != nil {
+		specPatch["target"] = target
+	}
 
 	// Get current spec
 	currentSpec, _, _ := unstructured.NestedMap(obj.Object, "spec")
@@ -325,6 +334,9 @@ func coercePatchParamValue(s string) interface{} {
 }
 
 func isPatchCommonFlag(name string) bool {
+	if isTargetingFlag(name) {
+		return true
+	}
 	commonFlags := map[string]bool{
 		"spec": true, "ttl": true, "restore": true, "dry-run": true,
 		"output": true,

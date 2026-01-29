@@ -97,7 +97,6 @@ func TestIsCommonFlag(t *testing.T) {
 		expected bool
 	}{
 		// Known flags
-		{"pod", "pod", true},
 		{"interval", "interval", true},
 		{"name", "name", true},
 		{"wait", "wait", true},
@@ -110,6 +109,16 @@ func TestIsCommonFlag(t *testing.T) {
 		{"namespace", "namespace", true},
 		{"context", "context", true},
 		{"kubeconfig", "kubeconfig", true},
+
+		// Targeting flags (delegated to isTargetingFlag)
+		{"target-pod-ordinal", "target-pod-ordinal", true},
+		{"target-base-url", "target-base-url", true},
+		{"target-base-urls", "target-base-urls", true},
+		{"target-statefulset", "target-statefulset", true},
+		{"target-deployment", "target-deployment", true},
+		{"target-pod", "target-pod", true},
+		{"target-helm-release", "target-helm-release", true},
+		{"target-namespace", "target-namespace", true},
 
 		// Unknown flags (query params)
 		{"status", "status", false},
@@ -170,9 +179,8 @@ func TestBuildQueryCR_OneShot(t *testing.T) {
 	k8sClient.SetNamespace("test-ns")
 	defer func() { k8sClient = origClient }()
 
-	origOrdinal := queryPodOrdinal
-	queryPodOrdinal = -1
-	defer func() { queryPodOrdinal = origOrdinal }()
+	resetTargetingFlags()
+	defer resetTargetingFlags()
 
 	params := map[string]interface{}{
 		"status": "available",
@@ -222,12 +230,11 @@ func TestBuildQueryCR_Periodic(t *testing.T) {
 	k8sClient.SetNamespace("default")
 	defer func() { k8sClient = origClient }()
 
-	origOrdinal := queryPodOrdinal
-	queryPodOrdinal = -1
+	resetTargetingFlags()
 	origInterval := queryInterval
 	queryInterval = "5m"
 	defer func() {
-		queryPodOrdinal = origOrdinal
+		resetTargetingFlags()
 		queryInterval = origInterval
 	}()
 
@@ -253,9 +260,9 @@ func TestBuildQueryCR_WithPodOrdinal(t *testing.T) {
 	k8sClient.SetNamespace("default")
 	defer func() { k8sClient = origClient }()
 
-	origOrdinal := queryPodOrdinal
-	queryPodOrdinal = 1
-	defer func() { queryPodOrdinal = origOrdinal }()
+	resetTargetingFlags()
+	targetPodOrdinal = 1
+	defer resetTargetingFlags()
 
 	params := map[string]interface{}{}
 	cr := buildQueryCR("StoreInventoryQuery", "test-query", params, false)

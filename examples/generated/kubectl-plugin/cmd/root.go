@@ -90,9 +90,14 @@ Examples:
   kubectl petstore cleanup --one-shot`,
 	Version: version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip client initialization for help and version commands
-		if cmd.Name() == "help" || cmd.Name() == "version" {
+		// Skip client initialization for commands that don't need it
+		switch cmd.Name() {
+		case "help", "version", "types", "list":
 			return nil
+		}
+		// For --dry-run, only resolve namespace (no cluster connection needed)
+		if f := cmd.Flags().Lookup("dry-run"); f != nil && f.Value.String() == "true" {
+			return initDryRunClient()
 		}
 		return initClient()
 	},
@@ -138,6 +143,21 @@ func initClient() error {
 	}
 
 	// Set namespace from flag or default from kubeconfig
+	ns, _, err := kubeConfigFlags.ToRawKubeConfigLoader().Namespace()
+	if err != nil || ns == "" {
+		ns = "default"
+	}
+	k8sClient.SetNamespace(ns)
+
+	return nil
+}
+
+// initDryRunClient creates a minimal client for dry-run mode (no cluster connection).
+// Only namespace resolution is needed for rendering the CR preview.
+func initDryRunClient() error {
+	k8sClient = &client.Client{}
+
+	// Resolve namespace from --namespace flag or kubeconfig context
 	ns, _, err := kubeConfigFlags.ToRawKubeConfigLoader().Namespace()
 	if err != nil || ns == "" {
 		ns = "default"

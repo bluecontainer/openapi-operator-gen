@@ -120,7 +120,6 @@ func TestIsActionCommonFlag(t *testing.T) {
 		expected bool
 	}{
 		// Known flags
-		{"pod", "pod", true},
 		{"name", "name", true},
 		{"wait", "wait", true},
 		{"timeout", "timeout", true},
@@ -130,6 +129,16 @@ func TestIsActionCommonFlag(t *testing.T) {
 		{"namespace", "namespace", true},
 		{"context", "context", true},
 		{"kubeconfig", "kubeconfig", true},
+
+		// Targeting flags (delegated to isTargetingFlag)
+		{"target-pod-ordinal", "target-pod-ordinal", true},
+		{"target-base-url", "target-base-url", true},
+		{"target-base-urls", "target-base-urls", true},
+		{"target-statefulset", "target-statefulset", true},
+		{"target-deployment", "target-deployment", true},
+		{"target-pod", "target-pod", true},
+		{"target-helm-release", "target-helm-release", true},
+		{"target-namespace", "target-namespace", true},
 
 		// Unknown flags (action params)
 		{"petId", "petId", false},
@@ -188,10 +197,9 @@ func TestBuildActionCR(t *testing.T) {
 	k8sClient.SetNamespace("test-ns")
 	defer func() { k8sClient = origClient }()
 
-	// Reset pod ordinal
-	origOrdinal := actionPodOrdinal
-	actionPodOrdinal = -1
-	defer func() { actionPodOrdinal = origOrdinal }()
+	// Reset targeting flags
+	resetTargetingFlags()
+	defer resetTargetingFlags()
 
 	params := map[string]interface{}{
 		"petId": int64(123),
@@ -249,9 +257,9 @@ func TestBuildActionCR_WithPodOrdinal(t *testing.T) {
 	k8sClient.SetNamespace("default")
 	defer func() { k8sClient = origClient }()
 
-	origOrdinal := actionPodOrdinal
-	actionPodOrdinal = 2
-	defer func() { actionPodOrdinal = origOrdinal }()
+	resetTargetingFlags()
+	targetPodOrdinal = 2
+	defer resetTargetingFlags()
 
 	params := map[string]interface{}{}
 	cr := buildActionCR("PetUploadimageAction", "test-action", params)
@@ -289,7 +297,7 @@ func TestParseActionParams(t *testing.T) {
 		},
 		{
 			"skips common flags",
-			[]string{"cmd", "action", "test", "--petId=123", "--dry-run", "--timeout=30s", "--pod=0"},
+			[]string{"cmd", "action", "test", "--petId=123", "--dry-run", "--timeout=30s", "--target-pod-ordinal=0"},
 			map[string]interface{}{
 				"petId": int64(123),
 			},

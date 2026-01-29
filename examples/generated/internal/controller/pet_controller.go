@@ -404,7 +404,6 @@ func (r *PetReconciler) buildResourceURLForCreate(baseURL string, instance *v1al
 
 	return builder.BuildForCreate(baseURL)
 }
-
 // hasValidPathParams checks if all path parameters have valid (non-zero/non-empty) values.
 // This is used to determine if we can perform GET operations on a resource.
 // The last path parameter can use ExternalID as a fallback (e.g., when POST returns an ID).
@@ -425,7 +424,6 @@ func (r *PetReconciler) buildResourceURLForPut(baseURL string, instance *v1alpha
 	builder := runtime.NewURLBuilder("/pet")
 	return builder.Build(baseURL)
 }
-
 // getExternalID returns the external ID to use for GET/PUT/DELETE operations.
 // It returns ExternalID from status (for resources created by the controller).
 func (r *PetReconciler) getExternalID(instance *v1alpha1.Pet) string {
@@ -839,7 +837,7 @@ func (r *PetReconciler) observeResource(ctx context.Context, instance *v1alpha1.
 	}
 	instance.Status.LastGetTime = &now
 	instance.Status.DriftDetected = false // No drift concept for read-only
-	instance.Status.Responses = nil       // Clear multi-endpoint responses for single endpoint
+	instance.Status.Responses = nil // Clear multi-endpoint responses for single endpoint
 
 	logger.Info("Successfully observed resource", "externalID", externalID)
 	r.updateStatus(ctx, instance, "Observed", "Successfully fetched resource from REST API")
@@ -1602,7 +1600,6 @@ func (r *PetReconciler) syncResource(ctx context.Context, instance *v1alpha1.Pet
 	r.updateStatus(ctx, instance, "Synced", "Successfully synced with REST API")
 	return nil
 }
-
 // deleteFromEndpoint deletes from a single endpoint URL
 func (r *PetReconciler) deleteFromEndpoint(ctx context.Context, instance *v1alpha1.Pet, baseURL string) error {
 	ctx, span := petTracer.Start(ctx, "DELETE",
@@ -1748,7 +1745,6 @@ func (r *PetReconciler) finalizeResource(ctx context.Context, instance *v1alpha1
 
 	return r.deleteFromEndpoint(ctx, instance, baseURL)
 }
-
 // restoreOriginalState restores the external resource to its original state captured during adoption.
 // This works for resources adopted via path params (e.g., id: 10) or externalIDRef.
 func (r *PetReconciler) restoreOriginalState(ctx context.Context, instance *v1alpha1.Pet) error {

@@ -155,6 +155,16 @@ func TestIsCreateCommonFlag(t *testing.T) {
 		{"context", "context", true},
 		{"kubeconfig", "kubeconfig", true},
 
+		// Targeting flags (delegated to isTargetingFlag)
+		{"target-pod-ordinal", "target-pod-ordinal", true},
+		{"target-base-url", "target-base-url", true},
+		{"target-base-urls", "target-base-urls", true},
+		{"target-statefulset", "target-statefulset", true},
+		{"target-deployment", "target-deployment", true},
+		{"target-pod", "target-pod", true},
+		{"target-helm-release", "target-helm-release", true},
+		{"target-namespace", "target-namespace", true},
+
 		// Unknown flags (spec fields)
 		{"name", "name", false},
 		{"status", "status", false},
@@ -258,6 +268,40 @@ func TestBuildResourceCR(t *testing.T) {
 	}
 	if specVal["status"] != "available" {
 		t.Errorf("spec.status = %v, want %q", specVal["status"], "available")
+	}
+}
+
+func TestBuildResourceCR_WithTarget(t *testing.T) {
+	origClient := k8sClient
+	k8sClient = &client.Client{}
+	k8sClient.SetNamespace("test-ns")
+	defer func() { k8sClient = origClient }()
+
+	resetTargetingFlags()
+	targetBaseURL = "http://localhost:8080"
+	targetPodOrdinal = 2
+	defer resetTargetingFlags()
+
+	spec := map[string]interface{}{
+		"name": "fluffy",
+	}
+
+	cr := buildResourceCR("Pet", "my-pet", spec)
+
+	// Verify target is set in spec
+	specVal, ok := cr.Object["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatal("spec should be a map")
+	}
+	target, ok := specVal["target"].(map[string]interface{})
+	if !ok {
+		t.Fatal("spec.target should be a map")
+	}
+	if target["baseURL"] != "http://localhost:8080" {
+		t.Errorf("spec.target.baseURL = %v, want %q", target["baseURL"], "http://localhost:8080")
+	}
+	if target["podOrdinal"] != 2 {
+		t.Errorf("spec.target.podOrdinal = %v, want 2", target["podOrdinal"])
 	}
 }
 
