@@ -71,6 +71,7 @@ func main() {
 	var urlScheme string
 	var strategy string
 	var discoveryMode string
+	var basePath string
 	var healthPath string
 	var workloadKind string
 
@@ -93,6 +94,7 @@ func main() {
 	flag.StringVar(&namespace, "namespace", "", "Namespace of the workload (defaults to operator namespace)")
 	flag.StringVar(&stsServiceName, "service", "", "Headless service name for DNS discovery (StatefulSet only)")
 	flag.IntVar(&port, "port", 8080, "Port number for REST API on pods")
+	flag.StringVar(&basePath, "base-path", "", "Base path prefix for REST API on pods (e.g. /api/v3)")
 	flag.StringVar(&urlScheme, "scheme", "http", "URL scheme (http or https)")
 	flag.StringVar(&strategy, "strategy", "round-robin", "Endpoint selection strategy: round-robin, leader-only, any-healthy, all-healthy, by-ordinal")
 	flag.StringVar(&discoveryMode, "discovery-mode", "", "Discovery mode: dns or pod-ip (defaults to dns for StatefulSet, pod-ip for Deployment)")
@@ -174,7 +176,7 @@ func main() {
 		deployName = os.Getenv("DEPLOYMENT_NAME")
 	}
 	if podName == "" {
-		podName = os.Getenv("POD_NAME")
+		podName = os.Getenv("TARGET_POD_NAME")
 	}
 	if helmRelease == "" {
 		helmRelease = os.Getenv("HELM_RELEASE")
@@ -327,6 +329,7 @@ func main() {
 		WorkloadKind:    endpoint.WorkloadKind(workloadKind),
 		ServiceName:     stsServiceName,
 		Port:            port,
+		BasePath:        basePath,
 		Scheme:          urlScheme,
 		Strategy:        endpoint.Strategy(strategy),
 		DiscoveryMode:   endpoint.DiscoveryMode(discoveryMode),
