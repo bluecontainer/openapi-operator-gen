@@ -1031,6 +1031,18 @@ func (g *ControllerGenerator) generateDeploymentManifests() error {
 		return fmt.Errorf("failed to generate role_binding.yaml: %w", err)
 	}
 
+	// Generate config/rbac/leader_election_role.yaml
+	if err := g.executeTemplate(templates.LeaderElectionRoleTemplate, data,
+		filepath.Join(rbacDir, "leader_election_role.yaml")); err != nil {
+		return fmt.Errorf("failed to generate leader_election_role.yaml: %w", err)
+	}
+
+	// Generate config/rbac/leader_election_role_binding.yaml
+	if err := g.executeTemplate(templates.LeaderElectionRoleBindingTemplate, data,
+		filepath.Join(rbacDir, "leader_election_role_binding.yaml")); err != nil {
+		return fmt.Errorf("failed to generate leader_election_role_binding.yaml: %w", err)
+	}
+
 	// Generate config/manager/manager.yaml (Deployment)
 	if err := g.executeTemplate(templates.ManagerYAMLTemplate, data,
 		filepath.Join(managerDir, "manager.yaml")); err != nil {

@@ -22,6 +22,10 @@
 #   # Run with two petstore instances (multi-endpoint fan-out testing)
 #   docker compose --profile multi-endpoint up -d
 #
+#   # Deploy petstore + operator inside k3s as Kubernetes workloads
+#   docker compose --profile k3s-deploy up -d
+#   KUBECONFIG=./k3s-deploy-output/kubeconfig.yaml kubectl get pods -n petstore-system
+#
 #   # For local development without Docker:
 #   cd examples/generated
 #   go run ./cmd/manager --base-url=http://localhost:8080/api/v3
@@ -29,6 +33,7 @@
 # Note: The 'k3s' profile provides a lightweight Kubernetes cluster in Docker.
 # For connecting to an existing cluster, use 'with-k8s' with kind or minikube.
 # The 'multi-endpoint' profile runs two petstore instances for testing baseURLs fan-out.
+# The 'k3s-deploy' profile deploys both petstore and the operator inside k3s as Kubernetes workloads.
 
 services:
   petstore:
@@ -263,8 +268,171 @@ services:
       k3s-multi-init:
         condition: service_started
 
+  # ============================================================================
+  # k3s-deploy profile: Deploy petstore + operator INSIDE k3s as K8s workloads
+  # ============================================================================
+  # Unlike the 'k3s' profile where petstore and the operator run as Docker
+  # containers alongside k3s, this profile deploys both as Kubernetes
+  # Deployments inside the k3s cluster.
+
+  # k3s cluster for in-cluster deployment
+  k3s-deploy:
+    image: rancher/k3s:v1.29.0-k3s1
+    command: server --disable traefik --disable servicelb --disable metrics-server --tls-san k3s-deploy
+    privileged: true
+    profiles:
+      - k3s-deploy
+    ports:
+      - "6445:6443"
+    environment:
+      - K3S_KUBECONFIG_OUTPUT=/output/kubeconfig.yaml
+      - K3S_KUBECONFIG_MODE=666
+    volumes:
+      - k3s-deploy-data:/var/lib/rancher/k3s
+      - k3s-deploy-kubeconfig:/output
+      - k3s-deploy-images:/images
+      - k3s-deploy-run:/run/k3s
+    healthcheck:
+      test: ["CMD", "kubectl", "get", "nodes"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Build operator image and save as tarball for k3s import
+  k3s-deploy-image-save:
+    image: docker:cli
+    profiles:
+      - k3s-deploy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - k3s-deploy-images:/images
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Saving petstore-operator:local image as tarball..."
+        until docker image inspect petstore-operator:local >/dev/null 2>&1; do
+          echo "Waiting for petstore-operator:local image to be built..."
+          sleep 2
+        done
+        docker save petstore-operator:local -o /images/petstore-operator.tar
+        echo "Saving swaggerapi/petstore3:unstable image as tarball..."
+        docker pull swaggerapi/petstore3:unstable
+        docker save swaggerapi/petstore3:unstable -o /images/petstore3.tar
+        echo "Images saved successfully"
+    depends_on:
+      k3s-deploy-operator-build:
+        condition: service_completed_successfully
+
+  # Build the operator image (same as other profiles)
+  # Runs --version to exit immediately after build, since the operator
+  # image is distroless and has no shell.
+  k3s-deploy-operator-build:
+    build:
+      context: ..
+      dockerfile: examples/Dockerfile.operator
+    image: petstore-operator:local
+    profiles:
+      - k3s-deploy
+    entrypoint: ["/manager", "--version"]
+
+  # Import images into k3s and deploy all workloads
+  k3s-deploy-init:
+    image: rancher/k3s:v1.29.0-k3s1
+    profiles:
+      - k3s-deploy
+    network_mode: "service:k3s-deploy"
+    volumes:
+      - k3s-deploy-kubeconfig:/kubeconfig
+      - k3s-deploy-images:/images:ro
+      - k3s-deploy-run:/run/k3s:ro
+      - ./generated/config/crd/bases:/crds:ro
+      - ./generated/config/rbac:/rbac:ro
+      - ./generated/config/namespace.yaml:/manifests/namespace.yaml:ro
+      - ./k3s-deploy/petstore.yaml:/manifests/petstore.yaml:ro
+      - ./k3s-deploy/operator.yaml:/manifests/operator.yaml:ro
+      - ./k3s-deploy-output:/host-output
+    environment:
+      - KUBECONFIG=/kubeconfig/kubeconfig-fixed.yaml
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "=== k3s-deploy-init: Setting up in-cluster deployment ==="
+
+        echo "Waiting for kubeconfig..."
+        until [ -f /kubeconfig/kubeconfig.yaml ]; do sleep 1; done
+
+        echo "Fixing kubeconfig for container access..."
+        # Use localhost since we share network namespace with k3s-deploy
+        cp /kubeconfig/kubeconfig.yaml /kubeconfig/kubeconfig-fixed.yaml
+        chmod 644 /kubeconfig/kubeconfig-fixed.yaml
+
+        echo "Copying kubeconfig for host access (port 6445)..."
+        sed 's/6443/6445/g' /kubeconfig/kubeconfig.yaml > /host-output/kubeconfig.yaml
+        chmod 644 /host-output/kubeconfig.yaml
+
+        echo "Waiting for k3s API..."
+        until kubectl get nodes; do sleep 2; done
+
+        echo "--- Importing container images into k3s ---"
+        until [ -f /images/petstore-operator.tar ] && [ -f /images/petstore3.tar ]; do
+          echo "Waiting for image tarballs..."
+          sleep 2
+        done
+        echo "Waiting for containerd socket..."
+        until [ -S /run/k3s/containerd/containerd.sock ]; do
+          echo "  socket not ready yet..."
+          sleep 2
+        done
+        echo "Importing petstore-operator image..."
+        ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io images import /images/petstore-operator.tar
+        echo "Importing petstore3 image..."
+        ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io images import /images/petstore3.tar
+        echo "Images imported successfully"
+
+        echo "--- Applying CRDs ---"
+        kubectl apply -f /crds/
+        echo "Waiting for CRDs to be established..."
+        kubectl wait --for=condition=established --timeout=60s crd --all
+
+        echo "--- Creating namespace ---"
+        kubectl apply -f /manifests/namespace.yaml
+
+        echo "--- Deploying petstore API ---"
+        kubectl apply -f /manifests/petstore.yaml
+
+        echo "--- Deploying operator RBAC ---"
+        kubectl apply -f /rbac/service_account.yaml
+        kubectl apply -f /rbac/role.yaml
+        kubectl apply -f /rbac/role_binding.yaml
+        kubectl apply -f /rbac/leader_election_role.yaml
+        kubectl apply -f /rbac/leader_election_role_binding.yaml
+
+        echo "--- Deploying operator ---"
+        kubectl apply -f /manifests/operator.yaml
+
+        echo "--- Waiting for petstore to be ready ---"
+        kubectl rollout status deployment/petstore -n petstore-system --timeout=120s
+
+        echo "--- Waiting for operator to be ready ---"
+        kubectl rollout status deployment/controller-manager -n petstore-system --timeout=120s
+
+        echo "=== All workloads deployed successfully ==="
+        echo "Access the cluster:"
+        echo "  KUBECONFIG=./k3s-deploy-output/kubeconfig.yaml kubectl get pods -n petstore-system"
+        sleep infinity
+    depends_on:
+      k3s-deploy:
+        condition: service_healthy
+      k3s-deploy-image-save:
+        condition: service_completed_successfully
+
 volumes:
   k3s-data:
   k3s-kubeconfig:
   k3s-multi-data:
   k3s-multi-kubeconfig:
+  k3s-deploy-data:
+  k3s-deploy-kubeconfig:
+  k3s-deploy-images:
+  k3s-deploy-run:

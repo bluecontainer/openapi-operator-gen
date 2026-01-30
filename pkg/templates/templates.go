@@ -59,6 +59,16 @@ var ServiceAccountYAMLTemplate string
 //go:embed role_binding.yaml.tmpl
 var RoleBindingYAMLTemplate string
 
+// LeaderElectionRoleTemplate is the template for generating leader_election_role.yaml
+//
+//go:embed leader_election_role.yaml.tmpl
+var LeaderElectionRoleTemplate string
+
+// LeaderElectionRoleBindingTemplate is the template for generating leader_election_role_binding.yaml
+//
+//go:embed leader_election_role_binding.yaml.tmpl
+var LeaderElectionRoleBindingTemplate string
+
 // ManagerYAMLTemplate is the template for generating manager.yaml (Deployment)
 //
 //go:embed manager.yaml.tmpl

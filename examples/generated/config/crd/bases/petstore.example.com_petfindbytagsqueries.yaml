@@ -88,14 +88,23 @@ spec:
                       type: string
                     type: array
                   deployment:
-                    description: Deployment specifies a Deployment name to route requests
-                      to.
+                    description: |-
+                      Deployment specifies a Deployment name to route requests to.
+                      When combined with HelmRelease, narrows discovery to only this Deployment within the release.
                     type: string
                   helmRelease:
                     description: |-
                       HelmRelease specifies a Helm release to discover the workload from.
                       The operator will find StatefulSets or Deployments with label app.kubernetes.io/instance=<HelmRelease>.
                     type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Labels specifies additional labels to match when discovering workloads.
+                      When combined with HelmRelease, narrows discovery to workloads matching these labels
+                      in addition to the Helm release instance label.
+                    type: object
                   namespace:
                     description: |-
                       Namespace specifies the namespace to look for the target workload.
@@ -112,8 +121,9 @@ spec:
                     minimum: 0
                     type: integer
                   statefulSet:
-                    description: StatefulSet specifies a StatefulSet name to route
-                      requests to.
+                    description: |-
+                      StatefulSet specifies a StatefulSet name to route requests to.
+                      When combined with HelmRelease, narrows discovery to only this StatefulSet within the release.
                     type: string
                 type: object
             required:
