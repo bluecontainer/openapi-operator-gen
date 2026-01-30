@@ -57,7 +57,9 @@ example: build
 		--bundle \
 		--exclude-operations="updatePetWithForm" \
 		--update-with-post="/store/order" \
-		--kubectl-plugin
+		--kubectl-plugin 
+# 		\
+# 		--target-api-image=docker.io/swaggerapi/petstore3:unstable
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
 

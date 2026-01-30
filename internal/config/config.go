@@ -100,6 +100,19 @@ type Config struct {
 	// Format: "pathParam=bodyField" (e.g., "orderId=id", "petId=id")
 	// This overrides auto-detection for specific parameters.
 	IDFieldMap map[string]string
+
+	// TargetAPIImage is the container image for the target REST API.
+	// When set, generates a Deployment+Service manifest for the target API.
+	TargetAPIImage string
+
+	// TargetAPIPort is the container port for the target REST API.
+	// When set, overrides the port extracted from the OpenAPI spec's servers URL.
+	// Default: 0 (use spec URL port, or 8080 if not specified).
+	TargetAPIPort int
+
+	// SpecBaseURL is the base URL extracted from the OpenAPI spec's servers field.
+	// Set programmatically after parsing, not from CLI flags.
+	SpecBaseURL string
 }
 
 // Validate checks if the configuration is valid

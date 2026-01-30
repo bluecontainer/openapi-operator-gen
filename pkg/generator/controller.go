@@ -1076,6 +1076,78 @@ func (g *ControllerGenerator) generateDeploymentManifests() error {
 	return nil
 }
 
+// targetAPITemplateData holds shared template data for target API generation.
+type targetAPITemplateData struct {
+	GeneratorVersion string
+	AppName          string
+	Namespace        string
+	TargetAPIImage   string
+	HasTargetAPI     bool
+	ContainerPort    int
+	BasePath         string
+}
+
+// resolveTargetAPIData computes the shared template data used by both
+// GenerateTargetAPIDeployment and GenerateDockerCompose.
+func (g *ControllerGenerator) resolveTargetAPIData() targetAPITemplateData {
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+	namespace := appName + "-system"
+
+	// Extract base path and port from spec's server URL
+	basePath := ""
+	containerPort := 8080
+	if g.config.SpecBaseURL != "" {
+		if parsed, err := url.Parse(g.config.SpecBaseURL); err == nil {
+			if parsed.Path != "" && parsed.Path != "/" {
+				basePath = strings.TrimSuffix(parsed.Path, "/")
+			}
+			if parsed.Port() != "" {
+				if p, err := fmt.Sscanf(parsed.Port(), "%d", &containerPort); p != 1 || err != nil {
+					containerPort = 8080
+				}
+			}
+		}
+	}
+
+	// --target-api-port overrides the spec URL port and the default
+	if g.config.TargetAPIPort > 0 {
+		containerPort = g.config.TargetAPIPort
+	}
+
+	return targetAPITemplateData{
+		GeneratorVersion: g.config.GeneratorVersion,
+		AppName:          appName,
+		Namespace:        namespace,
+		TargetAPIImage:   g.config.TargetAPIImage,
+		HasTargetAPI:     g.config.TargetAPIImage != "",
+		ContainerPort:    containerPort,
+		BasePath:         basePath,
+	}
+}
+
+// GenerateTargetAPIDeployment generates a Deployment+Service manifest for the target REST API.
+// This is only called when --target-api-image is provided.
+func (g *ControllerGenerator) GenerateTargetAPIDeployment() error {
+	data := g.resolveTargetAPIData()
+
+	targetAPIDir := filepath.Join(g.config.OutputDir, "config", "target-api")
+	if err := os.MkdirAll(targetAPIDir, 0755); err != nil {
+		return fmt.Errorf("failed to create target-api directory: %w", err)
+	}
+
+	return g.executeTemplate(templates.TargetAPIDeploymentTemplate, data,
+		filepath.Join(targetAPIDir, "deployment.yaml"))
+}
+
+// GenerateDockerCompose generates a docker-compose.yaml for local development and testing.
+// Always generated; target API services are conditionally included when --target-api-image is set.
+func (g *ControllerGenerator) GenerateDockerCompose() error {
+	data := g.resolveTargetAPIData()
+
+	return g.executeTemplate(templates.DockerComposeTemplate, data,
+		filepath.Join(g.config.OutputDir, "docker-compose.yaml"))
+}
+
 func (g *ControllerGenerator) executeTemplate(tmplContent string, data interface{}, outputPath string) error {
 	tmpl, err := template.New("yaml").Parse(tmplContent)
 	if err != nil {

@@ -322,3 +322,13 @@ var KubectlPluginCreateCmdTemplate string
 //
 //go:embed kubectl_plugin/targeting.go.tmpl
 var KubectlPluginTargetingTemplate string
+
+// TargetAPIDeploymentTemplate is the template for the target API Deployment+Service
+//
+//go:embed target_api_deployment.yaml.tmpl
+var TargetAPIDeploymentTemplate string
+
+// DockerComposeTemplate is the template for docker-compose.yaml development environment
+//
+//go:embed docker_compose.yaml.tmpl
+var DockerComposeTemplate string

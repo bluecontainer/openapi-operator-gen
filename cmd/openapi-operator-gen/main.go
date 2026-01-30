@@ -154,6 +154,10 @@ func init() {
 	generateCmd.Flags().BoolVar(&cfg.NoIDMerge, "no-id-merge", false, "Disable automatic merging of path ID parameters with body 'id' fields")
 	generateCmd.Flags().StringVar(&idFieldMap, "id-field-map", "", "Explicit path param to body field mappings (comma-separated: orderId=id,petId=id)")
 
+	// Target API deployment generation
+	generateCmd.Flags().StringVar(&cfg.TargetAPIImage, "target-api-image", "", "Container image for target REST API (generates Deployment+Service manifest)")
+	generateCmd.Flags().IntVar(&cfg.TargetAPIPort, "target-api-port", 0, "Container port for target REST API (overrides port from spec URL, default: 8080)")
+
 	// Note: spec and group are no longer marked as required since they can come from config file
 }
 
@@ -308,6 +312,9 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	// Store spec base URL for target API deployment generation
+	cfg.SpecBaseURL = spec.BaseURL
+
 	// Map resources to CRDs
 	fmt.Println("Mapping resources to CRD definitions...")
 	m := mapper.NewMapper(cfg)
@@ -390,6 +397,16 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Println("  Generated Dockerfile")
 	fmt.Println("  Generated Makefile")
 	fmt.Println("  Copied OpenAPI spec file")
+	if cfg.TargetAPIImage != "" {
+		if err := controllerGen.GenerateTargetAPIDeployment(); err != nil {
+			return fmt.Errorf("failed to generate target API deployment: %w", err)
+		}
+		fmt.Println("  Generated config/target-api/deployment.yaml")
+	}
+	if err := controllerGen.GenerateDockerCompose(); err != nil {
+		return fmt.Errorf("failed to generate docker-compose.yaml: %w", err)
+	}
+	fmt.Println("  Generated docker-compose.yaml")
 	fmt.Println()
 
 	// Generate aggregate controller if enabled

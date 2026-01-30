@@ -50,6 +50,14 @@ type ConfigFile struct {
 	// UpdateWithPost specifies which resources should use POST for updates when PUT is not available
 	// Can be: ["*"] for all, or specific paths like ["/store/order", "/users/*"]
 	UpdateWithPost []string `yaml:"updateWithPost,omitempty"`
+
+	// TargetAPIImage is the container image for the target REST API
+	// When set, generates a Deployment+Service manifest for the target API
+	TargetAPIImage string `yaml:"targetAPIImage,omitempty"`
+
+	// TargetAPIPort is the container port for the target REST API
+	// Overrides the port extracted from the OpenAPI spec's servers URL
+	TargetAPIPort *int `yaml:"targetAPIPort,omitempty"`
 }
 
 // FilterConfig contains filtering options for paths, tags, and operations
@@ -184,6 +192,16 @@ func MergeConfigFile(cfg *Config, file *ConfigFile) {
 		cfg.UpdateWithPost = file.UpdateWithPost
 	}
 
+	// Merge TargetAPIImage (only if CLI didn't set it)
+	if cfg.TargetAPIImage == "" && file.TargetAPIImage != "" {
+		cfg.TargetAPIImage = file.TargetAPIImage
+	}
+
+	// Merge TargetAPIPort (only if CLI didn't set it)
+	if cfg.TargetAPIPort == 0 && file.TargetAPIPort != nil {
+		cfg.TargetAPIPort = *file.TargetAPIPort
+	}
+
 	// Merge filter options
 	if file.Filters != nil {
 		if len(cfg.IncludePaths) == 0 && len(file.Filters.IncludePaths) > 0 {
@@ -251,6 +269,12 @@ aggregate: true
 
 # Generate an Inline Composition Bundle CRD for creating multiple resources
 bundle: true
+
+# Container image for the target REST API (generates a Deployment+Service manifest)
+# targetAPIImage: myregistry/myapi:latest
+
+# Container port for the target REST API (overrides port from spec URL, default: 8080)
+# targetAPIPort: 8080
 
 # Use POST for updates when PUT is not available
 # Can be ["*"] for all, or specific paths
