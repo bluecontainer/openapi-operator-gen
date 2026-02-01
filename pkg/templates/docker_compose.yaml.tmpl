@@ -17,6 +17,11 @@
 #   # Deploy operator inside k3s as Kubernetes workloads
 #   docker compose --profile k3s-deploy up -d
 #   KUBECONFIG=./k3s-deploy-output/kubeconfig.yaml kubectl get pods -n {{ .Namespace }}
+{{- if .HasRundeckProject }}
+#
+#   # Rundeck is included in k3s-deploy profile (port 4440)
+#   open http://localhost:4440   # Login: admin / admin
+{{- end }}
 
 services:
 {{- if .HasTargetAPI }}
@@ -299,6 +304,145 @@ services:
         condition: service_healthy
       k3s-deploy-image-save:
         condition: service_completed_successfully
+{{- if .HasRundeckProject }}
+
+  # ============================================================================
+  # Rundeck: Run operator jobs via web UI (k3s-deploy profile)
+  # ============================================================================
+
+  # Rundeck server with API token for automated setup
+  rundeck:
+    image: rundeck/rundeck:5.8.0
+    profiles:
+      - k3s-deploy
+    ports:
+      - "4440:4440"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mkdir -p /tmp/remco-partials/framework
+        echo "rundeck.tokens.file=/home/rundeck/etc/tokens.properties" > /tmp/remco-partials/framework/tokens.properties
+        export PATH="/home/rundeck/server/data:$PATH"
+        export KUBECONFIG="/home/rundeck/server/data/kube/config"
+        exec /home/rundeck/docker-lib/entry.sh
+    environment:
+      - PATH=/home/rundeck/server/data:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - KUBECONFIG=/home/rundeck/server/data/kube/config
+      - RUNDECK_GRAILS_URL=http://localhost:4440
+      - RUNDECK_DATABASE_DRIVER=org.h2.Driver
+      - RUNDECK_DATABASE_URL=jdbc:h2:file:/home/rundeck/server/data/grailsdb;DB_CLOSE_ON_EXIT=FALSE;NON_KEYWORDS=MONTH,HOUR,MINUTE,YEAR
+    volumes:
+      - rundeck-data:/home/rundeck/server/data
+      - ./rundeck-project/tokens.properties:/home/rundeck/etc/tokens.properties:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4440"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      k3s-deploy-init:
+        condition: service_completed_successfully
+
+  # Build the kubectl plugin binary for linux/amd64
+  rundeck-kubectl-build:
+    image: golang:1.25
+    profiles:
+      - k3s-deploy
+    volumes:
+      - ./kubectl-plugin:/src:ro
+      - rundeck-plugin-bin:/output
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Building kubectl plugin..."
+        cp -r /src /build
+        cd /build
+        go mod tidy
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /output/kubectl-{{ .AppName }} .
+        chmod +x /output/kubectl-{{ .AppName }}
+        echo "kubectl plugin built successfully"
+
+  # Configure Rundeck: install kubectl + plugin, create project, import jobs
+  rundeck-init:
+    image: bitnami/kubectl:latest
+    user: root
+    profiles:
+      - k3s-deploy
+    volumes:
+      - k3s-deploy-kubeconfig:/kubeconfig:ro
+      - rundeck-plugin-bin:/plugin-bin:ro
+      - ./rundeck-project:/rundeck-project:ro
+      - rundeck-data:/rundeck-data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "=== rundeck-init: Configuring Rundeck ==="
+
+        RUNDECK_URL="http://rundeck:4440"
+        TOKEN="letmein99"
+
+        echo "--- Waiting for Rundeck API ---"
+        until curl -sf -H "Accept: application/json" \
+          -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+          "$${RUNDECK_URL}/api/14/system/info" 2>/dev/null | grep -q '"system"'; do
+          echo "  Rundeck not ready yet..."
+          sleep 5
+        done
+        echo "Rundeck API is ready"
+
+        echo "--- Creating project: {{ .AppName }}-operator ---"
+        curl -sf -X POST \
+          -H "Accept: application/json" \
+          -H "Content-Type: application/json" \
+          -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+          -d '{"name":"{{ .AppName }}-operator","description":"Manage {{ .AppName }} resources via Kubernetes operator","config":{"project.name":"{{ .AppName }}-operator"}}' \
+          "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
+
+        echo "--- Importing job definitions ---"
+        for jobfile in /rundeck-project/jobs/resources/*.yaml \
+                       /rundeck-project/jobs/queries/*.yaml \
+                       /rundeck-project/jobs/actions/*.yaml \
+                       /rundeck-project/jobs/operations/*.yaml; do
+          if [ -f "$$jobfile" ]; then
+            jobname=$$(basename "$$jobfile")
+            echo "  Importing $${jobname}..."
+            curl -sf -X POST \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/yaml" \
+              -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+              --data-binary @"$$jobfile" \
+              "$${RUNDECK_URL}/api/14/project/{{ .AppName }}-operator/jobs/import?format=yaml&dupeOption=update" || echo "  Warning: failed to import $${jobname}"
+          fi
+        done
+
+        echo "--- Installing kubectl and plugin into Rundeck ---"
+        cp $$(which kubectl) /rundeck-data/kubectl
+        chmod +x /rundeck-data/kubectl
+        echo "kubectl binary staged"
+        if [ -f /plugin-bin/kubectl-{{ .AppName }} ]; then
+          cp /plugin-bin/kubectl-{{ .AppName }} /rundeck-data/kubectl-{{ .AppName }}
+          chmod +x /rundeck-data/kubectl-{{ .AppName }}
+          echo "Plugin binary staged"
+        else
+          echo "Warning: kubectl plugin binary not found"
+        fi
+
+        echo "--- Preparing kubeconfig for Rundeck ---"
+        mkdir -p /rundeck-data/kube
+        sed 's/127.0.0.1/k3s-deploy/g' /kubeconfig/kubeconfig.yaml > /rundeck-data/kube/config
+        chmod 644 /rundeck-data/kube/config
+        echo "Kubeconfig written to /rundeck-data/kube/config"
+
+        echo "=== Rundeck setup complete ==="
+        echo "Access Rundeck at: http://localhost:4440"
+        echo "Default credentials: admin / admin"
+    depends_on:
+      rundeck:
+        condition: service_healthy
+      rundeck-kubectl-build:
+        condition: service_completed_successfully
+{{- end }}
 
 volumes:
   k3s-data:
@@ -307,3 +451,7 @@ volumes:
   k3s-deploy-kubeconfig:
   k3s-deploy-images:
   k3s-deploy-run:
+{{- if .HasRundeckProject }}
+  rundeck-data:
+  rundeck-plugin-bin:
+{{- end }}

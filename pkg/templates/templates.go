@@ -332,3 +332,50 @@ var TargetAPIDeploymentTemplate string
 //
 //go:embed docker_compose.yaml.tmpl
 var DockerComposeTemplate string
+
+// Rundeck Project Templates
+
+// RundeckProjectPropertiesTemplate is the template for Rundeck project.properties
+//
+//go:embed rundeck/project_properties.tmpl
+var RundeckProjectPropertiesTemplate string
+
+// RundeckResourceCreateJobTemplate is the template for per-resource create jobs
+//
+//go:embed rundeck/resource_create_job.yaml.tmpl
+var RundeckResourceCreateJobTemplate string
+
+// RundeckResourceGetJobTemplate is the template for per-resource list/get jobs
+//
+//go:embed rundeck/resource_get_job.yaml.tmpl
+var RundeckResourceGetJobTemplate string
+
+// RundeckResourceDescribeJobTemplate is the template for per-resource describe jobs
+//
+//go:embed rundeck/resource_describe_job.yaml.tmpl
+var RundeckResourceDescribeJobTemplate string
+
+// RundeckQueryJobTemplate is the template for per-query jobs
+//
+//go:embed rundeck/query_job.yaml.tmpl
+var RundeckQueryJobTemplate string
+
+// RundeckActionJobTemplate is the template for per-action jobs
+//
+//go:embed rundeck/action_job.yaml.tmpl
+var RundeckActionJobTemplate string
+
+// RundeckStatusJobTemplate is the template for the operator status job
+//
+//go:embed rundeck/status_job.yaml.tmpl
+var RundeckStatusJobTemplate string
+
+// RundeckDriftJobTemplate is the template for the drift detection job
+//
+//go:embed rundeck/drift_job.yaml.tmpl
+var RundeckDriftJobTemplate string
+
+// RundeckCleanupJobTemplate is the template for the cleanup job
+//
+//go:embed rundeck/cleanup_job.yaml.tmpl
+var RundeckCleanupJobTemplate string

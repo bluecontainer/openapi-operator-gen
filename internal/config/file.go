@@ -51,6 +51,13 @@ type ConfigFile struct {
 	// Can be: ["*"] for all, or specific paths like ["/store/order", "/users/*"]
 	UpdateWithPost []string `yaml:"updateWithPost,omitempty"`
 
+	// KubectlPlugin controls whether to generate a kubectl plugin
+	KubectlPlugin *bool `yaml:"kubectlPlugin,omitempty"`
+
+	// RundeckProject controls whether to generate a Rundeck project with job definitions
+	// Requires kubectlPlugin to be true
+	RundeckProject *bool `yaml:"rundeckProject,omitempty"`
+
 	// TargetAPIImage is the container image for the target REST API
 	// When set, generates a Deployment+Service manifest for the target API
 	TargetAPIImage string `yaml:"targetAPIImage,omitempty"`
@@ -185,6 +192,12 @@ func MergeConfigFile(cfg *Config, file *ConfigFile) {
 	}
 	if file.Bundle != nil && !cfg.GenerateBundle {
 		cfg.GenerateBundle = *file.Bundle
+	}
+	if file.KubectlPlugin != nil && !cfg.GenerateKubectlPlugin {
+		cfg.GenerateKubectlPlugin = *file.KubectlPlugin
+	}
+	if file.RundeckProject != nil && !cfg.GenerateRundeckProject {
+		cfg.GenerateRundeckProject = *file.RundeckProject
 	}
 
 	// Merge UpdateWithPost (only if CLI didn't set it)

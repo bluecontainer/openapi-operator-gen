@@ -55,6 +55,11 @@ type Config struct {
 	// When true, generates a kubectl plugin for managing and diagnosing operator resources.
 	GenerateKubectlPlugin bool
 
+	// GenerateRundeckProject controls whether to generate a Rundeck project with job definitions.
+	// When true, generates Rundeck job YAML files that use the kubectl plugin commands.
+	// Requires GenerateKubectlPlugin to be true.
+	GenerateRundeckProject bool
+
 	// UpdateWithPost specifies which resources should use POST for updates when PUT is not available.
 	// Can be:
 	// - Empty: disabled (default)

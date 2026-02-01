@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"{{ .ModuleName }}/pkg/output"
@@ -143,7 +144,32 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	created, err := k8sClient.Create(ctx, plural, queryCR)
-	if err != nil {
+	if apierrors.IsAlreadyExists(err) {
+		// Query already exists - delete and recreate to re-trigger execution
+		if !queryQuiet {
+			fmt.Printf("Query %s/%s already exists, re-executing...\n", plural, name)
+		}
+
+		deleteErr := k8sClient.Delete(ctx, plural, name)
+		if deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+			return fmt.Errorf("failed to delete existing query for re-execution: %w", deleteErr)
+		}
+
+		// Wait for deletion to complete before recreating
+		deleteDeadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deleteDeadline) {
+			_, getErr := k8sClient.Get(ctx, plural, name)
+			if apierrors.IsNotFound(getErr) {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+
+		created, err = k8sClient.Create(ctx, plural, queryCR)
+		if err != nil {
+			return fmt.Errorf("failed to recreate query: %w", err)
+		}
+	} else if err != nil {
 		return fmt.Errorf("failed to create query: %w", err)
 	}
 

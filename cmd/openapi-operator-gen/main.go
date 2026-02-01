@@ -140,6 +140,7 @@ func init() {
 	generateCmd.Flags().BoolVar(&cfg.GenerateAggregate, "aggregate", false, "Generate a Status Aggregator CRD for observing multiple resource types")
 	generateCmd.Flags().BoolVar(&cfg.GenerateBundle, "bundle", false, "Generate an Inline Composition Bundle CRD for creating multiple resources")
 	generateCmd.Flags().BoolVar(&cfg.GenerateKubectlPlugin, "kubectl-plugin", false, "Generate a kubectl plugin for managing and diagnosing operator resources")
+	generateCmd.Flags().BoolVar(&cfg.GenerateRundeckProject, "rundeck-project", false, "Generate a Rundeck project with jobs using the kubectl plugin (requires --kubectl-plugin)")
 	generateCmd.Flags().StringVar(&updateWithPost, "update-with-post", "", "Use POST for updates when PUT is not available. Value: '*' for all, or comma-separated paths (e.g., /store/order,/users/*)")
 
 	// Resource filtering flags
@@ -494,6 +495,20 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		fmt.Println("    Generated kubectl-plugin/pkg/output/output.go")
 		fmt.Println("  Generated kubectl-plugin/go.mod")
 		fmt.Println("  Generated kubectl-plugin/Makefile")
+		fmt.Println()
+	}
+
+	// Generate Rundeck project if enabled
+	if cfg.GenerateRundeckProject {
+		if !cfg.GenerateKubectlPlugin {
+			return fmt.Errorf("--rundeck-project requires --kubectl-plugin")
+		}
+		fmt.Println("Generating Rundeck project...")
+		rundeckGen := generator.NewRundeckProjectGenerator(cfg)
+		if err := rundeckGen.Generate(crds); err != nil {
+			return fmt.Errorf("failed to generate Rundeck project: %w", err)
+		}
+		fmt.Println("  Generated rundeck-project/")
 		fmt.Println()
 	}
 

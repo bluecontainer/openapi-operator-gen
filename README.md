@@ -115,6 +115,10 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Phase 3: Interactive Commands](#phase-3-interactive-commands)
   - [Endpoint Targeting Flags](#endpoint-targeting-flags)
   - [TTL-Based Patches](#ttl-based-patches)
+- [Rundeck Project](#rundeck-project)
+  - [Generated Structure](#generated-structure)
+  - [Job Types](#job-types)
+  - [Docker Compose Integration](#docker-compose-integration)
 - [Releasing](#releasing)
 - [License](#license)
 
@@ -135,6 +139,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - Helm chart generation via [helmify](https://github.com/arttor/helmify)
 - OpenTelemetry instrumentation for observability
 - Generated kubectl plugin for operator management with endpoint targeting flags
+- Generated Rundeck project with job definitions for web-based operator management
 - Generated Docker Compose for local development (k3s, with-k8s, k3s-deploy profiles)
 - Optional target API deployment manifest generation (`--target-api-image`)
 - Leader election RBAC for kustomize and Helm chart deployments
@@ -480,6 +485,7 @@ idMerge:
 | `--aggregate` | Generate a Status Aggregator CRD (see [Status Aggregator CRD](#status-aggregator-crd)) | `false` |
 | `--bundle` | Generate an Inline Composition Bundle CRD (see [Bundle CRD](#bundle-crd)) | `false` |
 | `--kubectl-plugin` | Generate a kubectl plugin for operator management (see [Kubectl Plugin](#kubectl-plugin)) | `false` |
+| `--rundeck-project` | Generate a Rundeck project with jobs using the kubectl plugin (requires `--kubectl-plugin`; see [Rundeck Project](#rundeck-project)) | `false` |
 | `--target-api-image` | Container image for target REST API (generates Deployment+Service manifest and Docker Compose target API sections) | None |
 | `--target-api-port` | Container port for target REST API (overrides port from spec URL) | `8080` |
 
@@ -3160,8 +3166,8 @@ kubectl petstore query petfindbystatusquery --status=available
 # Periodic query (creates persistent CR)
 kubectl petstore query storeinventoryquery --interval=5m --name=inventory-monitor
 
-# Target specific pod in multi-endpoint mode
-kubectl petstore query storeinventoryquery --pod=0
+# Re-run a named query (automatically deletes and recreates the CR)
+kubectl petstore query petfindbystatusquery --status=available --name=my-status-query
 
 # Get results from an existing query CR (without creating a new one)
 kubectl petstore query petfindbystatusquery --get=my-status-query
@@ -3179,7 +3185,6 @@ kubectl petstore query petfindbystatusquery --status=available --dry-run
 Query command flags:
 | Flag | Description |
 |------|-------------|
-| `--pod=N` | Target specific pod ordinal in multi-endpoint mode |
 | `--interval=DURATION` | Create periodic query (e.g., `5m`, `1h`) |
 | `--name=NAME` | Name for the query CR (required for periodic queries) |
 | `--wait` | Wait for query to complete (default for one-shot queries) |
@@ -3193,13 +3198,10 @@ Query command flags:
 # Execute an action with parameters
 kubectl petstore action petuploadimageaction --petId=123 --file=./photo.jpg
 
-# Target specific pod in multi-endpoint mode
-kubectl petstore action usercreatewithlistaction --pod=0
-
 # Execute without waiting for result
 kubectl petstore action petuploadimageaction --petId=123 --wait=false
 
-# Custom name for the action CR
+# Custom name for the action CR (re-runs automatically if name exists)
 kubectl petstore action petuploadimageaction --petId=123 --name=upload-fluffy-photo
 
 # Dry run - output YAML without creating
@@ -3209,7 +3211,6 @@ kubectl petstore action petuploadimageaction --petId=123 --dry-run
 Action command flags:
 | Flag | Description |
 |------|-------------|
-| `--pod=N` | Target specific pod ordinal in multi-endpoint mode |
 | `--name=NAME` | Name for the action CR (auto-generated if not specified) |
 | `--wait` | Wait for action to complete (default: `true`) |
 | `--timeout=DURATION` | Timeout for waiting (default: `60s`) |
@@ -3315,6 +3316,32 @@ kubectl petstore patch pet fluffy --status=pending --dry-run
 kubectl petstore cleanup --dry-run
 ```
 
+### Idempotent CR Reuse
+
+When a CR name is specified via `--cr-name` (create) or `--name` (query/action) and a CR with that name already exists, the plugin handles it gracefully instead of failing. This enables repeatable execution from automation tools like Rundeck.
+
+**Create commands** use upsert semantics — the existing CR's spec is updated in place while preserving metadata, annotations, labels, and finalizers:
+
+```bash
+# First run creates the CR
+kubectl petstore create pet --cr-name=my-pet --name=fluffy --status=available
+
+# Subsequent runs update the existing CR's spec
+kubectl petstore create pet --cr-name=my-pet --name=fluffy --status=sold
+```
+
+**Query and action commands** use delete-and-recreate semantics — the existing CR is deleted and a fresh one is created to re-trigger execution:
+
+```bash
+# First run creates the query CR and returns results
+kubectl petstore query petfindbystatusquery --name=my-query --status=available
+
+# Subsequent runs delete the old CR and create a new one
+kubectl petstore query petfindbystatusquery --name=my-query --status=sold
+```
+
+The delete-and-recreate flow waits up to 10 seconds for the old CR to be fully removed before creating the replacement. This is automatic and requires no additional flags.
+
 ### Dynamic Parameter Parsing
 
 The `create`, `query`, `action`, and `patch` commands all support dynamic `--key=value` flags that are passed through as spec fields. Values are automatically coerced:
@@ -3360,6 +3387,112 @@ The patch command supports TTL (time-to-live) based auto-rollback. This is usefu
 - `<api-group>/patch-expires` - RFC3339 expiration timestamp
 - `<api-group>/patch-original-state` - JSON of original spec values
 - `<api-group>/patched-by` - kubectl-plugin marker
+
+## Rundeck Project
+
+When the `--rundeck-project` flag is used (requires `--kubectl-plugin`), the generator creates a [Rundeck](https://www.rundeck.com/) project with job definitions that wrap the kubectl plugin commands. This provides a web UI for executing operator management tasks with audit trails, scheduling, and role-based access.
+
+### Enabling Rundeck Generation
+
+```bash
+openapi-operator-gen generate \
+  --spec petstore.yaml \
+  --output ./generated \
+  --group petstore.example.com \
+  --version v1alpha1 \
+  --module github.com/example/petstore-operator \
+  --kubectl-plugin \
+  --rundeck-project
+```
+
+Or in a config file:
+
+```yaml
+kubectl-plugin: true
+rundeck-project: true
+```
+
+### Generated Structure
+
+```
+rundeck-project/
+├── project.properties          # Project metadata (name, description)
+├── tokens.properties           # API token for automated setup
+└── jobs/
+    ├── resources/              # CRUD resource jobs (3 per resource)
+    │   ├── create-pet.yaml
+    │   ├── get-pets.yaml
+    │   ├── describe-pet.yaml
+    │   ├── create-order.yaml
+    │   └── ...
+    ├── queries/                # Query endpoint jobs (1 per query)
+    │   ├── petfindbystatusquery.yaml
+    │   ├── storeinventoryquery.yaml
+    │   └── ...
+    ├── actions/                # Action endpoint jobs (1 per action)
+    │   ├── petuploadimageaction.yaml
+    │   └── ...
+    └── operations/             # Cluster-wide operations (always 3)
+        ├── status.yaml
+        ├── drift.yaml
+        └── cleanup.yaml
+```
+
+### Job Types
+
+Jobs are generated based on how the OpenAPI endpoints are classified:
+
+| CRD Classification | Jobs Generated | Rundeck Group |
+|---|---|---|
+| CRUD Resource (GET + write methods) | `create-{kind}`, `get-{plural}`, `describe-{kind}` | `resources/{kind}` |
+| Query Endpoint (GET only) | One job per query kind | `queries` |
+| Action Endpoint (POST/PUT only) | One job per action kind | `actions` |
+| Operations (all operators) | `status`, `drift`, `cleanup` | `operations` |
+
+Each job exposes the CRD's spec fields as Rundeck options. Fields with enum constraints in the OpenAPI spec become enforced dropdown selections. Nested object fields are annotated with "(JSON format)" to indicate they accept JSON input.
+
+### Job Options
+
+Every job includes common operational options alongside the resource-specific parameters:
+
+| Option | Available In | Description |
+|---|---|---|
+| `resource_name` | create, query, action | CR name (auto-generated if empty) |
+| `namespace` | All jobs | Kubernetes namespace override |
+| `dry_run` | create, query, action, cleanup | Preview without executing |
+| `timeout` | create, query, action | Wait timeout (default: `60s`) |
+| `no_wait` | create | Skip waiting for sync |
+| `wait` | query, action | Wait for results (default: `true`) |
+| `output` | get | Output format (`table`, `wide`, `json`, `yaml`) |
+
+When `resource_name` is specified and a CR with that name already exists, the kubectl plugin handles it idempotently (see [Idempotent CR Reuse](#idempotent-cr-reuse)). This allows Rundeck jobs to be re-executed safely.
+
+### Docker Compose Integration
+
+When Rundeck generation is enabled, the `k3s-deploy` Docker Compose profile includes three additional services:
+
+**rundeck** - The Rundeck server (port 4440):
+```bash
+# Start the full stack including Rundeck
+docker compose --profile k3s-deploy up -d
+
+# Access Rundeck at http://localhost:4440
+# Default credentials: admin / admin
+```
+
+**rundeck-kubectl-build** - Builds the kubectl plugin binary (linux/amd64) from the generated source. The binary is stored in a shared volume.
+
+**rundeck-init** - Runs after Rundeck is healthy. It creates the project, imports all job definitions via the Rundeck API, copies the kubectl and plugin binaries into the Rundeck container, and configures kubeconfig for cluster access.
+
+To update the plugin after code changes:
+
+```bash
+# Rebuild the plugin binary
+docker compose --profile k3s-deploy up -d rundeck-kubectl-build --force-recreate
+
+# Wait for build, then restage binaries and reimport jobs
+docker compose --profile k3s-deploy up -d rundeck-init --force-recreate
+```
 
 ## Releasing
 
