@@ -219,14 +219,13 @@ func parseActionParams() map[string]interface{} {
 }
 
 func isActionCommonFlag(name string) bool {
-	if isTargetingFlag(name) {
+	if isTargetingFlag(name) || isClientGoFlag(name) {
 		return true
 	}
 	commonFlags := map[string]bool{
 		"name": true, "wait": true,
 		"timeout": true, "output": true, "file": true,
 		"dry-run": true,
-		"namespace": true, "context": true, "kubeconfig": true,
 	}
 	return commonFlags[name]
 }

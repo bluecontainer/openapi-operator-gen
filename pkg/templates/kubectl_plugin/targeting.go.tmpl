@@ -38,6 +38,31 @@ func addTargetingFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&targetLabels, "target-labels", "", "Additional labels for workload discovery (key=value,key=value)")
 }
 
+// isClientGoFlag returns true if the flag name is a standard client-go
+// persistent flag (e.g., --server, --token, --insecure-skip-tls-verify).
+// Used by parameter parsers to exclude connection flags from spec parameters.
+func isClientGoFlag(name string) bool {
+	clientGoFlags := map[string]bool{
+		"server": true, "s": true,
+		"token": true,
+		"insecure-skip-tls-verify": true,
+		"certificate-authority":    true,
+		"client-certificate":       true,
+		"client-key":               true,
+		"cluster":                  true,
+		"user":                     true,
+		"context":                  true,
+		"kubeconfig":               true,
+		"namespace":                true, "n": true,
+		"as": true, "as-group": true, "as-uid": true,
+		"cache-dir":           true,
+		"disable-compression": true,
+		"request-timeout":     true,
+		"tls-server-name":     true,
+	}
+	return clientGoFlags[name]
+}
+
 // isTargetingFlag returns true if the flag name is a targeting flag.
 // Used by parameter parsers to exclude targeting flags from spec parameters.
 func isTargetingFlag(name string) bool {

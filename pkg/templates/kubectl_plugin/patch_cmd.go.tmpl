@@ -334,13 +334,12 @@ func coercePatchParamValue(s string) interface{} {
 }
 
 func isPatchCommonFlag(name string) bool {
-	if isTargetingFlag(name) {
+	if isTargetingFlag(name) || isClientGoFlag(name) {
 		return true
 	}
 	commonFlags := map[string]bool{
 		"spec": true, "ttl": true, "restore": true, "dry-run": true,
 		"output": true,
-		"namespace": true, "context": true, "kubeconfig": true,
 	}
 	return commonFlags[name]
 }

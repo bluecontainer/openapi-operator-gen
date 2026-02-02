@@ -1055,6 +1055,18 @@ func (g *ControllerGenerator) generateDeploymentManifests() error {
 		return fmt.Errorf("failed to generate plugin_role_binding.yaml: %w", err)
 	}
 
+	// Generate config/rbac/plugin_runner_role.yaml (pod management permissions for kubectl run)
+	if err := g.executeTemplate(templates.PluginRunnerRoleTemplate, data,
+		filepath.Join(rbacDir, "plugin_runner_role.yaml")); err != nil {
+		return fmt.Errorf("failed to generate plugin_runner_role.yaml: %w", err)
+	}
+
+	// Generate config/rbac/plugin_runner_role_binding.yaml
+	if err := g.executeTemplate(templates.PluginRunnerRoleBindingTemplate, data,
+		filepath.Join(rbacDir, "plugin_runner_role_binding.yaml")); err != nil {
+		return fmt.Errorf("failed to generate plugin_runner_role_binding.yaml: %w", err)
+	}
+
 	// Generate config/manager/manager.yaml (Deployment)
 	if err := g.executeTemplate(templates.ManagerYAMLTemplate, data,
 		filepath.Join(managerDir, "manager.yaml")); err != nil {

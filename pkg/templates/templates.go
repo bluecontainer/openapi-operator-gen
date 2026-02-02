@@ -439,6 +439,16 @@ var PluginServiceAccountTemplate string
 //go:embed plugin_role_binding.yaml.tmpl
 var PluginRoleBindingTemplate string
 
+// PluginRunnerRoleTemplate is the template for the plugin-runner ClusterRole (pod management permissions)
+//
+//go:embed plugin_runner_role.yaml.tmpl
+var PluginRunnerRoleTemplate string
+
+// PluginRunnerRoleBindingTemplate is the template for the plugin-runner extra ClusterRoleBinding
+//
+//go:embed plugin_runner_role_binding.yaml.tmpl
+var PluginRunnerRoleBindingTemplate string
+
 // Rundeck Kubernetes Execution Project Templates (kubectl run execution)
 
 // RundeckK8sProjectPropertiesTemplate is the template for K8s Rundeck project.properties

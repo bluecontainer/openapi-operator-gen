@@ -259,7 +259,7 @@ func coerceQueryParamValue(s string) interface{} {
 }
 
 func isCommonFlag(name string) bool {
-	if isTargetingFlag(name) {
+	if isTargetingFlag(name) || isClientGoFlag(name) {
 		return true
 	}
 	commonFlags := map[string]bool{
@@ -267,7 +267,6 @@ func isCommonFlag(name string) bool {
 		"wait": true, "timeout": true, "output": true,
 		"get": true, "quiet": true, "q": true,
 		"dry-run": true,
-		"namespace": true, "context": true, "kubeconfig": true,
 	}
 	return commonFlags[name]
 }

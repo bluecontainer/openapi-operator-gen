@@ -296,14 +296,13 @@ func coerceCreateParamValue(s string) interface{} {
 }
 
 func isCreateCommonFlag(name string) bool {
-	if isTargetingFlag(name) {
+	if isTargetingFlag(name) || isClientGoFlag(name) {
 		return true
 	}
 	commonFlags := map[string]bool{
 		"cr-name": true, "no-wait": true, "wait": true,
 		"timeout": true, "output": true, "from-file": true,
 		"dry-run": true,
-		"namespace": true, "context": true, "kubeconfig": true,
 	}
 	return commonFlags[name]
 }

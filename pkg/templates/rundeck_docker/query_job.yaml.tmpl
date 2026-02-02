@@ -28,7 +28,7 @@
 {{- end }}
 {{- end }}
   - name: namespace
-    description: "Kubernetes namespace (default: from kubeconfig)"
+    description: "Kubernetes namespace"
   - name: dry_run
     description: "Preview the query resource without creating it"
     enforced: true
@@ -46,6 +46,16 @@
   - name: timeout
     description: "Timeout for --wait (e.g., 60s, 5m)"
     value: '60s'
+  - name: k8s_token
+    secure: true
+    valueExposed: true
+    storagePath: keys/project/{{ .PluginName }}-operator-docker/k8s-token
+    hidden: true
+  - name: k8s_url
+    secure: true
+    valueExposed: true
+    storagePath: keys/project/{{ .PluginName }}-operator-docker/k8s-url
+    hidden: true
   scheduleEnabled: true
   sequence:
     commands:
@@ -55,20 +65,14 @@
         set -e
         IMAGE="${PLUGIN_RUNNER_IMAGE:-{{ .PluginName }}-kubectl-plugin:latest}"
         NET="${DOCKER_NETWORK:-host}"
-        KUBE_VOL="${DOCKER_KUBE_VOLUME:-}"
-        KUBE="${KUBECONFIG:-/root/.kube/config}"
-        if [ -n "$KUBE_VOL" ]; then
-          VOL_ARGS="-v $KUBE_VOL:/kube:ro -e KUBECONFIG=/kube/kube/config"
-        else
-          VOL_ARGS="-v $KUBE:/root/.kube/config:ro"
-        fi
-        cmd="docker run --rm --network $NET $VOL_ARGS $IMAGE {{ .PluginName }} query {{ .KindLower }}"
+        cmd="docker run --rm --network $NET $IMAGE {{ .PluginName }} query {{ .KindLower }}"
         [ -n "$RD_OPTION_RESOURCE_NAME" ] && cmd="$cmd --name=$RD_OPTION_RESOURCE_NAME"
 {{- range .Params }}
         cmd="$cmd --{{ .Name }}=\"$RD_OPTION_{{ upper .Name }}\""
 {{- end }}
         [ -n "$RD_OPTION_NAMESPACE" ] && cmd="$cmd -n $RD_OPTION_NAMESPACE"
         cmd="$cmd --dry-run=$RD_OPTION_DRY_RUN --wait=$RD_OPTION_WAIT --timeout=$RD_OPTION_TIMEOUT"
+        cmd="$cmd --server=\"$RD_OPTION_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
     keepgoing: false
     strategy: node-first

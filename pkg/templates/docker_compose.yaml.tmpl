@@ -341,17 +341,14 @@ services:
         mkdir -p /tmp/remco-partials/framework
         echo "rundeck.tokens.file=/home/rundeck/etc/tokens.properties" > /tmp/remco-partials/framework/tokens.properties
         export PATH="/home/rundeck/server/data:$PATH"
-        export KUBECONFIG="/home/rundeck/server/data/kube/config"
         exec /home/rundeck/docker-lib/entry.sh
     environment:
       - PATH=/home/rundeck/server/data:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      - KUBECONFIG=/home/rundeck/server/data/kube/config
       - RUNDECK_GRAILS_URL=http://localhost:4440
       - RUNDECK_DATABASE_DRIVER=org.h2.Driver
       - RUNDECK_DATABASE_URL=jdbc:h2:file:/home/rundeck/server/data/grailsdb;DB_CLOSE_ON_EXIT=FALSE;NON_KEYWORDS=MONTH,HOUR,MINUTE,YEAR
       # Docker-based job configuration (used by rundeck-docker-project jobs)
       - DOCKER_NETWORK={{ .AppName }}-operator-net
-      - DOCKER_KUBE_VOLUME={{ .AppName }}-rundeck-data
     volumes:
       - rundeck-data:/home/rundeck/server/data
       - ./rundeck-project/tokens.properties:/home/rundeck/etc/tokens.properties:ro
@@ -526,11 +523,25 @@ services:
           echo "Warning: kubectl plugin binary not found"
         fi
 
-        echo "--- Preparing kubeconfig for Rundeck ---"
-        mkdir -p /rundeck-data/kube
-        sed 's/127.0.0.1/k3s-deploy/g' /kubeconfig/kubeconfig.yaml > /rundeck-data/kube/config
-        chmod 644 /rundeck-data/kube/config
-        echo "Kubeconfig written to /rundeck-data/kube/config"
+        echo "--- Uploading Kubernetes credentials to Rundeck Key Storage ---"
+        sed 's/127.0.0.1/k3s-deploy/g' /kubeconfig/kubeconfig.yaml > /tmp/kubeconfig.yaml
+        export KUBECONFIG=/tmp/kubeconfig.yaml
+        K8S_TOKEN=$$(kubectl create token {{ .AppName }}-plugin-runner -n {{ .Namespace }} --duration=8760h)
+        K8S_URL="https://k3s-deploy:6443"
+        for PROJECT in {{ .AppName }}-operator {{ .AppName }}-operator-docker {{ .AppName }}-operator-k8s; do
+          echo "  Uploading credentials for project: $${PROJECT}"
+          curl -sf -X POST \
+            -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+            -H "Content-Type: application/x-rundeck-data-password" \
+            --data-binary "$${K8S_TOKEN}" \
+            "$${RUNDECK_URL}/api/14/storage/keys/project/$${PROJECT}/k8s-token" || echo "  Warning: failed to upload k8s-token for $${PROJECT}"
+          curl -sf -X POST \
+            -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+            -H "Content-Type: application/x-rundeck-data-password" \
+            --data-binary "$${K8S_URL}" \
+            "$${RUNDECK_URL}/api/14/storage/keys/project/$${PROJECT}/k8s-url" || echo "  Warning: failed to upload k8s-url for $${PROJECT}"
+        done
+        echo "Kubernetes credentials uploaded to Key Storage"
 
         echo "=== Rundeck setup complete ==="
         echo "Access Rundeck at: http://localhost:4440"
