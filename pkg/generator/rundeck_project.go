@@ -111,6 +111,21 @@ func dockerTemplates() rundeckTemplateSet {
 	}
 }
 
+// k8sTemplates returns the template set for Kubernetes pod-based execution.
+func k8sTemplates() rundeckTemplateSet {
+	return rundeckTemplateSet{
+		ProjectProperties: templates.RundeckK8sProjectPropertiesTemplate,
+		ResourceCreate:    templates.RundeckK8sResourceCreateJobTemplate,
+		ResourceGet:       templates.RundeckK8sResourceGetJobTemplate,
+		ResourceDescribe:  templates.RundeckK8sResourceDescribeJobTemplate,
+		Query:             templates.RundeckK8sQueryJobTemplate,
+		Action:            templates.RundeckK8sActionJobTemplate,
+		Status:            templates.RundeckK8sStatusJobTemplate,
+		Drift:             templates.RundeckK8sDriftJobTemplate,
+		Cleanup:           templates.RundeckK8sCleanupJobTemplate,
+	}
+}
+
 // Generate generates the script-based Rundeck project files.
 func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 	return g.generateProject(crds, "rundeck-project", nativeTemplates())
@@ -119,6 +134,11 @@ func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 // GenerateDockerProject generates the Docker-based Rundeck project files.
 func (g *RundeckProjectGenerator) GenerateDockerProject(crds []*mapper.CRDDefinition) error {
 	return g.generateProject(crds, "rundeck-docker-project", dockerTemplates())
+}
+
+// GenerateK8sProject generates the Kubernetes pod-based Rundeck project files.
+func (g *RundeckProjectGenerator) GenerateK8sProject(crds []*mapper.CRDDefinition) error {
+	return g.generateProject(crds, "rundeck-k8s-project", k8sTemplates())
 }
 
 // GeneratePluginDockerfile generates the kubectl plugin Dockerfile.

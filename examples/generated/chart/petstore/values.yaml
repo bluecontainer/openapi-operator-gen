@@ -26,3 +26,6 @@ controllerManager:
   serviceAccount:
     annotations: {}
 kubernetesClusterDomain: cluster.local
+pluginRunner:
+  serviceAccount:
+    annotations: {}

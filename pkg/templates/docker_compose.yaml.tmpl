@@ -194,6 +194,14 @@ services:
         docker pull {{ .TargetAPIImage }}
         docker save {{ .TargetAPIImage }} -o /images/target-api.tar
 {{- end }}
+{{- if .HasKubectlPlugin }}
+        echo "Saving {{ .AppName }}-kubectl-plugin:latest image as tarball..."
+        until docker image inspect {{ .AppName }}-kubectl-plugin:latest >/dev/null 2>&1; do
+          echo "Waiting for {{ .AppName }}-kubectl-plugin:latest image to be built..."
+          sleep 2
+        done
+        docker save {{ .AppName }}-kubectl-plugin:latest -o /images/kubectl-plugin.tar
+{{- end }}
         echo "Downloading helm binary..."
         wget -q https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz -O /tmp/helm.tar.gz
         tar -xzf /tmp/helm.tar.gz -C /tmp
@@ -203,6 +211,10 @@ services:
     depends_on:
       k3s-deploy-operator-build:
         condition: service_completed_successfully
+{{- if .HasKubectlPlugin }}
+      rundeck-docker-plugin-build:
+        condition: service_completed_successfully
+{{- end }}
 
   # Build the operator image
   k3s-deploy-operator-build:
@@ -265,6 +277,10 @@ services:
 {{- if .HasTargetAPI }}
         echo "Importing target API image..."
         ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io images import /images/target-api.tar
+{{- end }}
+{{- if .HasKubectlPlugin }}
+        echo "Importing kubectl plugin image..."
+        ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io images import /images/kubectl-plugin.tar
 {{- end }}
         echo "Images imported successfully"
 
@@ -404,6 +420,7 @@ services:
       - rundeck-plugin-bin:/plugin-bin:ro
       - ./rundeck-project:/rundeck-project:ro
       - ./rundeck-docker-project:/rundeck-docker-project:ro
+      - ./rundeck-k8s-project:/rundeck-k8s-project:ro
       - rundeck-data:/rundeck-data
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -472,6 +489,31 @@ services:
           fi
         done
 
+        echo "--- Creating project: {{ .AppName }}-operator-k8s ---"
+        curl -sf -X POST \
+          -H "Accept: application/json" \
+          -H "Content-Type: application/json" \
+          -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+          -d '{"name":"{{ .AppName }}-operator-k8s","description":"Manage {{ .AppName }} resources via Kubernetes operator (Kubernetes pod execution)","config":{"project.name":"{{ .AppName }}-operator-k8s"}}' \
+          "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
+
+        echo "--- Importing job definitions (Kubernetes pod-based) ---"
+        for jobfile in /rundeck-k8s-project/jobs/resources/*.yaml \
+                       /rundeck-k8s-project/jobs/queries/*.yaml \
+                       /rundeck-k8s-project/jobs/actions/*.yaml \
+                       /rundeck-k8s-project/jobs/operations/*.yaml; do
+          if [ -f "$$jobfile" ]; then
+            jobname=$$(basename "$$jobfile")
+            echo "  Importing $${jobname}..."
+            curl -sf -X POST \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/yaml" \
+              -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+              --data-binary @"$$jobfile" \
+              "$${RUNDECK_URL}/api/14/project/{{ .AppName }}-operator-k8s/jobs/import?format=yaml&dupeOption=update" || echo "  Warning: failed to import $${jobname}"
+          fi
+        done
+
         echo "--- Installing kubectl and plugin into Rundeck ---"
         cp $$(which kubectl) /rundeck-data/kubectl
         chmod +x /rundeck-data/kubectl
@@ -493,7 +535,7 @@ services:
         echo "=== Rundeck setup complete ==="
         echo "Access Rundeck at: http://localhost:4440"
         echo "Default credentials: admin / admin"
-        echo "Projects: {{ .AppName }}-operator (script), {{ .AppName }}-operator-docker (Docker)"
+        echo "Projects: {{ .AppName }}-operator (script), {{ .AppName }}-operator-docker (Docker), {{ .AppName }}-operator-k8s (Kubernetes)"
     depends_on:
       rundeck:
         condition: service_healthy

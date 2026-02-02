@@ -427,6 +427,65 @@ var RundeckDockerDriftJobTemplate string
 //go:embed rundeck_docker/cleanup_job.yaml.tmpl
 var RundeckDockerCleanupJobTemplate string
 
+// Plugin RBAC Templates (for kubectl plugin ephemeral pod execution)
+
+// PluginServiceAccountTemplate is the template for the plugin-runner ServiceAccount
+//
+//go:embed plugin_service_account.yaml.tmpl
+var PluginServiceAccountTemplate string
+
+// PluginRoleBindingTemplate is the template for the plugin-runner ClusterRoleBinding
+//
+//go:embed plugin_role_binding.yaml.tmpl
+var PluginRoleBindingTemplate string
+
+// Rundeck Kubernetes Execution Project Templates (kubectl run execution)
+
+// RundeckK8sProjectPropertiesTemplate is the template for K8s Rundeck project.properties
+//
+//go:embed rundeck_k8s/project_properties.tmpl
+var RundeckK8sProjectPropertiesTemplate string
+
+// RundeckK8sResourceCreateJobTemplate is the template for per-resource create jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/resource_create_job.yaml.tmpl
+var RundeckK8sResourceCreateJobTemplate string
+
+// RundeckK8sResourceGetJobTemplate is the template for per-resource list/get jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/resource_get_job.yaml.tmpl
+var RundeckK8sResourceGetJobTemplate string
+
+// RundeckK8sResourceDescribeJobTemplate is the template for per-resource describe jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/resource_describe_job.yaml.tmpl
+var RundeckK8sResourceDescribeJobTemplate string
+
+// RundeckK8sQueryJobTemplate is the template for per-query jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/query_job.yaml.tmpl
+var RundeckK8sQueryJobTemplate string
+
+// RundeckK8sActionJobTemplate is the template for per-action jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/action_job.yaml.tmpl
+var RundeckK8sActionJobTemplate string
+
+// RundeckK8sStatusJobTemplate is the template for the operator status job (K8s pod execution)
+//
+//go:embed rundeck_k8s/status_job.yaml.tmpl
+var RundeckK8sStatusJobTemplate string
+
+// RundeckK8sDriftJobTemplate is the template for the drift detection job (K8s pod execution)
+//
+//go:embed rundeck_k8s/drift_job.yaml.tmpl
+var RundeckK8sDriftJobTemplate string
+
+// RundeckK8sCleanupJobTemplate is the template for the cleanup job (K8s pod execution)
+//
+//go:embed rundeck_k8s/cleanup_job.yaml.tmpl
+var RundeckK8sCleanupJobTemplate string
+
 // Kubectl Plugin Dockerfile Template
 
 // KubectlPluginDockerfileTemplate is the template for the kubectl plugin Docker image

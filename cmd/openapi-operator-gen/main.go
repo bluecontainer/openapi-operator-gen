@@ -513,6 +513,10 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to generate Rundeck Docker project: %w", err)
 		}
 		fmt.Println("  Generated rundeck-docker-project/")
+		if err := rundeckGen.GenerateK8sProject(crds); err != nil {
+			return fmt.Errorf("failed to generate Rundeck K8s project: %w", err)
+		}
+		fmt.Println("  Generated rundeck-k8s-project/")
 		if err := rundeckGen.GeneratePluginDockerfile(); err != nil {
 			return fmt.Errorf("failed to generate kubectl plugin Dockerfile: %w", err)
 		}

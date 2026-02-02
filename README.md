@@ -119,6 +119,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Generated Structure](#generated-structure)
   - [Job Types](#job-types)
   - [Docker Execution Project](#docker-execution-project)
+  - [Kubernetes Execution Project](#kubernetes-execution-project)
   - [Docker Compose Integration](#docker-compose-integration)
 - [Releasing](#releasing)
 - [License](#license)
@@ -140,7 +141,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 - Helm chart generation via [helmify](https://github.com/arttor/helmify)
 - OpenTelemetry instrumentation for observability
 - Generated kubectl plugin for operator management with endpoint targeting flags
-- Generated Rundeck projects with job definitions for web-based operator management (script-based and Docker execution variants)
+- Generated Rundeck projects with job definitions for web-based operator management (script-based, Docker, and Kubernetes execution variants)
 - Generated Docker Compose for local development (k3s, with-k8s, k3s-deploy profiles)
 - Optional target API deployment manifest generation (`--target-api-image`)
 - Leader election RBAC for kustomize and Helm chart deployments
@@ -3391,10 +3392,11 @@ The patch command supports TTL (time-to-live) based auto-rollback. This is usefu
 
 ## Rundeck Project
 
-When the `--rundeck-project` flag is used (requires `--kubectl-plugin`), the generator creates two [Rundeck](https://www.rundeck.com/) projects with job definitions that wrap the kubectl plugin commands. This provides a web UI for executing operator management tasks with audit trails, scheduling, and role-based access.
+When the `--rundeck-project` flag is used (requires `--kubectl-plugin`), the generator creates three [Rundeck](https://www.rundeck.com/) projects with job definitions that wrap the kubectl plugin commands. This provides a web UI for executing operator management tasks with audit trails, scheduling, and role-based access.
 
 - **Script-based project** (`rundeck-project/`) — Jobs execute the kubectl plugin binary directly on the Rundeck server. Requires the plugin binary to be installed in Rundeck's PATH.
 - **Docker execution project** (`rundeck-docker-project/`) — Jobs run the kubectl plugin inside a Docker container via `docker run`. Requires Docker to be available on the Rundeck server. See [Docker Execution Project](#docker-execution-project).
+- **Kubernetes execution project** (`rundeck-k8s-project/`) — Jobs run the kubectl plugin inside an ephemeral Kubernetes pod via `kubectl run`. Requires `kubectl` configured on the Rundeck server and the plugin image available in the cluster. See [Kubernetes Execution Project](#kubernetes-execution-project).
 
 ### Enabling Rundeck Generation
 
@@ -3418,7 +3420,7 @@ rundeck-project: true
 
 ### Generated Structure
 
-Both projects share the same directory layout and job definitions — only the execution method differs:
+All three projects share the same directory layout and job definitions — only the execution method differs:
 
 ```
 rundeck-project/                    # Script-based execution
@@ -3446,6 +3448,16 @@ rundeck-docker-project/             # Docker execution (same structure)
 ├── tokens.properties
 └── jobs/
     └── ...                         # Same jobs, using docker run
+
+rundeck-k8s-project/                # Kubernetes pod execution (same structure)
+├── project.properties
+├── tokens.properties
+└── jobs/
+    └── ...                         # Same jobs, using kubectl run
+
+config/rbac/
+├── plugin_service_account.yaml     # ServiceAccount for plugin pods
+└── plugin_role_binding.yaml        # ClusterRoleBinding to manager-role
 
 kubectl-plugin/
 └── Dockerfile                      # Multi-stage build for plugin image
@@ -3521,9 +3533,42 @@ docker build -t petstore-kubectl-plugin:latest .
 - **Standalone mode** (default): When `DOCKER_KUBE_VOLUME` is not set, the kubeconfig is mounted from a host path via `-v $KUBECONFIG:/root/.kube/config:ro`. This works when Rundeck runs directly on the host.
 - **Compose mode**: When `DOCKER_KUBE_VOLUME` is set, a named Docker volume is mounted instead via `-v $DOCKER_KUBE_VOLUME:/kube:ro`. This is necessary when Rundeck itself runs in Docker, since `-v` always mounts from the host filesystem, not from within the calling container. The Docker Compose integration sets this automatically.
 
+### Kubernetes Execution Project
+
+The Kubernetes execution project (`rundeck-k8s-project/`) runs kubectl plugin commands inside ephemeral Kubernetes pods via `kubectl run`. This is useful when Rundeck has `kubectl` access to the cluster but you want to avoid installing the plugin binary or Docker on the Rundeck server.
+
+Each job script follows this pattern:
+
+```bash
+set -e
+IMAGE="${PLUGIN_RUNNER_IMAGE:-petstore-kubectl-plugin:latest}"
+PLUGIN_NS="${PLUGIN_NAMESPACE:-petstore-system}"
+SA="${PLUGIN_SERVICE_ACCOUNT:-plugin-runner}"
+POD="plugin-run-$(date +%s)-$RANDOM"
+
+cmd="kubectl run $POD --image=$IMAGE --restart=Never --rm -i --quiet"
+cmd="$cmd -n $PLUGIN_NS"
+cmd="$cmd --overrides='{\"spec\":{\"serviceAccountName\":\"$SA\"}}'"
+cmd="$cmd -- petstore status"
+[ -n "$RD_OPTION_NAMESPACE" ] && cmd="$cmd -n $RD_OPTION_NAMESPACE"
+eval $cmd
+```
+
+The pod uses in-cluster ServiceAccount authentication — no kubeconfig mounting is needed.
+
+**Configuration via environment variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `PLUGIN_RUNNER_IMAGE` | `{app}-kubectl-plugin:latest` | Docker image containing the kubectl plugin |
+| `PLUGIN_NAMESPACE` | `{app}-system` | Namespace to run the ephemeral pod in |
+| `PLUGIN_SERVICE_ACCOUNT` | `plugin-runner` | ServiceAccount for the pod (needs CRD RBAC) |
+
+**Plugin RBAC**: The generator creates a `plugin-runner` ServiceAccount and a ClusterRoleBinding that grants it the same CRD permissions as the operator (via the `manager-role` ClusterRole). These are generated in `config/rbac/` and included in the kustomization, so they are also available in the Helm chart via `helmify`. The plugin image must be available in the cluster (pushed to a registry or loaded into nodes).
+
 ### Docker Compose Integration
 
-When Rundeck generation is enabled, the `k3s-deploy` Docker Compose profile includes additional services for both Rundeck projects:
+When Rundeck generation is enabled, the `k3s-deploy` Docker Compose profile includes additional services for all three Rundeck projects:
 
 **rundeck** - The Rundeck server (port 4440), configured with Docker socket access for the Docker execution project:
 ```bash
@@ -3540,7 +3585,7 @@ docker compose --profile k3s-deploy up -d
 
 **rundeck-docker-cli-stage** - Copies the Docker CLI binary into a shared volume so it's available inside the Rundeck container for executing `docker run` commands.
 
-**rundeck-init** - Runs after Rundeck is healthy. It creates both Rundeck projects (script-based and Docker execution), imports all job definitions via the Rundeck API, copies binaries into the Rundeck container, and configures kubeconfig for cluster access.
+**rundeck-init** - Runs after Rundeck is healthy. It creates all three Rundeck projects (script-based, Docker execution, and Kubernetes execution), imports all job definitions via the Rundeck API, copies binaries into the Rundeck container, and configures kubeconfig for cluster access.
 
 The Docker Compose configuration uses named resources so Docker execution jobs can reference them:
 - **Network**: `{app}-operator-net` — shared between Rundeck and plugin containers

@@ -1043,6 +1043,18 @@ func (g *ControllerGenerator) generateDeploymentManifests() error {
 		return fmt.Errorf("failed to generate leader_election_role_binding.yaml: %w", err)
 	}
 
+	// Generate config/rbac/plugin_service_account.yaml (for kubectl plugin ephemeral pods)
+	if err := g.executeTemplate(templates.PluginServiceAccountTemplate, data,
+		filepath.Join(rbacDir, "plugin_service_account.yaml")); err != nil {
+		return fmt.Errorf("failed to generate plugin_service_account.yaml: %w", err)
+	}
+
+	// Generate config/rbac/plugin_role_binding.yaml
+	if err := g.executeTemplate(templates.PluginRoleBindingTemplate, data,
+		filepath.Join(rbacDir, "plugin_role_binding.yaml")); err != nil {
+		return fmt.Errorf("failed to generate plugin_role_binding.yaml: %w", err)
+	}
+
 	// Generate config/manager/manager.yaml (Deployment)
 	if err := g.executeTemplate(templates.ManagerYAMLTemplate, data,
 		filepath.Join(managerDir, "manager.yaml")); err != nil {
