@@ -379,3 +379,57 @@ var RundeckDriftJobTemplate string
 //
 //go:embed rundeck/cleanup_job.yaml.tmpl
 var RundeckCleanupJobTemplate string
+
+// Rundeck Docker Project Templates (docker run execution)
+
+// RundeckDockerProjectPropertiesTemplate is the template for Docker Rundeck project.properties
+//
+//go:embed rundeck_docker/project_properties.tmpl
+var RundeckDockerProjectPropertiesTemplate string
+
+// RundeckDockerResourceCreateJobTemplate is the template for per-resource create jobs (Docker execution)
+//
+//go:embed rundeck_docker/resource_create_job.yaml.tmpl
+var RundeckDockerResourceCreateJobTemplate string
+
+// RundeckDockerResourceGetJobTemplate is the template for per-resource list/get jobs (Docker execution)
+//
+//go:embed rundeck_docker/resource_get_job.yaml.tmpl
+var RundeckDockerResourceGetJobTemplate string
+
+// RundeckDockerResourceDescribeJobTemplate is the template for per-resource describe jobs (Docker execution)
+//
+//go:embed rundeck_docker/resource_describe_job.yaml.tmpl
+var RundeckDockerResourceDescribeJobTemplate string
+
+// RundeckDockerQueryJobTemplate is the template for per-query jobs (Docker execution)
+//
+//go:embed rundeck_docker/query_job.yaml.tmpl
+var RundeckDockerQueryJobTemplate string
+
+// RundeckDockerActionJobTemplate is the template for per-action jobs (Docker execution)
+//
+//go:embed rundeck_docker/action_job.yaml.tmpl
+var RundeckDockerActionJobTemplate string
+
+// RundeckDockerStatusJobTemplate is the template for the operator status job (Docker execution)
+//
+//go:embed rundeck_docker/status_job.yaml.tmpl
+var RundeckDockerStatusJobTemplate string
+
+// RundeckDockerDriftJobTemplate is the template for the drift detection job (Docker execution)
+//
+//go:embed rundeck_docker/drift_job.yaml.tmpl
+var RundeckDockerDriftJobTemplate string
+
+// RundeckDockerCleanupJobTemplate is the template for the cleanup job (Docker execution)
+//
+//go:embed rundeck_docker/cleanup_job.yaml.tmpl
+var RundeckDockerCleanupJobTemplate string
+
+// Kubectl Plugin Dockerfile Template
+
+// KubectlPluginDockerfileTemplate is the template for the kubectl plugin Docker image
+//
+//go:embed kubectl_plugin/dockerfile.tmpl
+var KubectlPluginDockerfileTemplate string

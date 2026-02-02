@@ -68,10 +68,78 @@ type RundeckFieldInfo struct {
 	IsNested    bool     // true for objects/arrays (use JSON input)
 }
 
-// Generate generates the Rundeck project files
+// rundeckTemplateSet holds the template strings for a Rundeck project variant.
+type rundeckTemplateSet struct {
+	ProjectProperties string
+	ResourceCreate    string
+	ResourceGet       string
+	ResourceDescribe  string
+	Query             string
+	Action            string
+	Status            string
+	Drift             string
+	Cleanup           string
+}
+
+// nativeTemplates returns the template set for script-based execution.
+func nativeTemplates() rundeckTemplateSet {
+	return rundeckTemplateSet{
+		ProjectProperties: templates.RundeckProjectPropertiesTemplate,
+		ResourceCreate:    templates.RundeckResourceCreateJobTemplate,
+		ResourceGet:       templates.RundeckResourceGetJobTemplate,
+		ResourceDescribe:  templates.RundeckResourceDescribeJobTemplate,
+		Query:             templates.RundeckQueryJobTemplate,
+		Action:            templates.RundeckActionJobTemplate,
+		Status:            templates.RundeckStatusJobTemplate,
+		Drift:             templates.RundeckDriftJobTemplate,
+		Cleanup:           templates.RundeckCleanupJobTemplate,
+	}
+}
+
+// dockerTemplates returns the template set for Docker-based execution.
+func dockerTemplates() rundeckTemplateSet {
+	return rundeckTemplateSet{
+		ProjectProperties: templates.RundeckDockerProjectPropertiesTemplate,
+		ResourceCreate:    templates.RundeckDockerResourceCreateJobTemplate,
+		ResourceGet:       templates.RundeckDockerResourceGetJobTemplate,
+		ResourceDescribe:  templates.RundeckDockerResourceDescribeJobTemplate,
+		Query:             templates.RundeckDockerQueryJobTemplate,
+		Action:            templates.RundeckDockerActionJobTemplate,
+		Status:            templates.RundeckDockerStatusJobTemplate,
+		Drift:             templates.RundeckDockerDriftJobTemplate,
+		Cleanup:           templates.RundeckDockerCleanupJobTemplate,
+	}
+}
+
+// Generate generates the script-based Rundeck project files.
 func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
+	return g.generateProject(crds, "rundeck-project", nativeTemplates())
+}
+
+// GenerateDockerProject generates the Docker-based Rundeck project files.
+func (g *RundeckProjectGenerator) GenerateDockerProject(crds []*mapper.CRDDefinition) error {
+	return g.generateProject(crds, "rundeck-docker-project", dockerTemplates())
+}
+
+// GeneratePluginDockerfile generates the kubectl plugin Dockerfile.
+func (g *RundeckProjectGenerator) GeneratePluginDockerfile() error {
+	apiName := strings.Split(g.config.APIGroup, ".")[0]
+	data := struct {
+		GeneratorVersion string
+		AppName          string
+	}{
+		GeneratorVersion: g.config.GeneratorVersion,
+		AppName:          apiName,
+	}
+
+	outputPath := filepath.Join(g.config.OutputDir, "kubectl-plugin", "Dockerfile")
+	return g.executeTemplate(templates.KubectlPluginDockerfileTemplate, data, outputPath)
+}
+
+// generateProject generates a Rundeck project using the given template set.
+func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, dirName string, tmplSet rundeckTemplateSet) error {
 	// Create directory structure
-	rundeckDir := filepath.Join(g.config.OutputDir, "rundeck-project")
+	rundeckDir := filepath.Join(g.config.OutputDir, dirName)
 	dirs := []string{
 		rundeckDir,
 		filepath.Join(rundeckDir, "jobs", "resources"),
@@ -98,7 +166,7 @@ func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 
 	// Generate project.properties
 	if err := g.executeTemplate(
-		templates.RundeckProjectPropertiesTemplate,
+		tmplSet.ProjectProperties,
 		baseData,
 		filepath.Join(rundeckDir, "project.properties"),
 	); err != nil {
@@ -122,7 +190,7 @@ func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 				Params:              g.mapQueryParams(crd),
 			}
 			if err := g.executeTemplate(
-				templates.RundeckQueryJobTemplate,
+				tmplSet.Query,
 				queryInfo,
 				filepath.Join(rundeckDir, "jobs", "queries", strings.ToLower(crd.Kind)+".yaml"),
 			); err != nil {
@@ -136,7 +204,7 @@ func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 				Fields:              g.mapFields(crd.Spec),
 			}
 			if err := g.executeTemplate(
-				templates.RundeckActionJobTemplate,
+				tmplSet.Action,
 				actionInfo,
 				filepath.Join(rundeckDir, "jobs", "actions", strings.ToLower(crd.Kind)+".yaml"),
 			); err != nil {
@@ -156,9 +224,9 @@ func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 				tmpl     string
 				filename string
 			}{
-				{templates.RundeckResourceCreateJobTemplate, "create-" + strings.ToLower(crd.Kind) + ".yaml"},
-				{templates.RundeckResourceGetJobTemplate, "get-" + crd.Plural + ".yaml"},
-				{templates.RundeckResourceDescribeJobTemplate, "describe-" + strings.ToLower(crd.Kind) + ".yaml"},
+				{tmplSet.ResourceCreate, "create-" + strings.ToLower(crd.Kind) + ".yaml"},
+				{tmplSet.ResourceGet, "get-" + crd.Plural + ".yaml"},
+				{tmplSet.ResourceDescribe, "describe-" + strings.ToLower(crd.Kind) + ".yaml"},
 			}
 			for _, jt := range jobTemplates {
 				if err := g.executeTemplate(
@@ -177,9 +245,9 @@ func (g *RundeckProjectGenerator) Generate(crds []*mapper.CRDDefinition) error {
 		tmpl     string
 		filename string
 	}{
-		{templates.RundeckStatusJobTemplate, "status.yaml"},
-		{templates.RundeckDriftJobTemplate, "drift.yaml"},
-		{templates.RundeckCleanupJobTemplate, "cleanup.yaml"},
+		{tmplSet.Status, "status.yaml"},
+		{tmplSet.Drift, "drift.yaml"},
+		{tmplSet.Cleanup, "cleanup.yaml"},
 	}
 	for _, ot := range operationsTemplates {
 		if err := g.executeTemplate(

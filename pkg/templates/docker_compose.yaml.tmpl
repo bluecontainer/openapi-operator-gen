@@ -311,8 +311,10 @@ services:
   # ============================================================================
 
   # Rundeck server with API token for automated setup
+  # Runs as root so job scripts can access the Docker socket for docker-based jobs
   rundeck:
     image: rundeck/rundeck:5.8.0
+    user: root
     profiles:
       - k3s-deploy
     ports:
@@ -331,9 +333,13 @@ services:
       - RUNDECK_GRAILS_URL=http://localhost:4440
       - RUNDECK_DATABASE_DRIVER=org.h2.Driver
       - RUNDECK_DATABASE_URL=jdbc:h2:file:/home/rundeck/server/data/grailsdb;DB_CLOSE_ON_EXIT=FALSE;NON_KEYWORDS=MONTH,HOUR,MINUTE,YEAR
+      # Docker-based job configuration (used by rundeck-docker-project jobs)
+      - DOCKER_NETWORK={{ .AppName }}-operator-net
+      - DOCKER_KUBE_VOLUME={{ .AppName }}-rundeck-data
     volumes:
       - rundeck-data:/home/rundeck/server/data
       - ./rundeck-project/tokens.properties:/home/rundeck/etc/tokens.properties:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:4440"]
       interval: 10s
@@ -363,7 +369,31 @@ services:
         chmod +x /output/kubectl-{{ .AppName }}
         echo "kubectl plugin built successfully"
 
-  # Configure Rundeck: install kubectl + plugin, create project, import jobs
+  # Build kubectl plugin Docker image for docker-based Rundeck jobs
+  rundeck-docker-plugin-build:
+    build:
+      context: ./kubectl-plugin
+      dockerfile: Dockerfile
+    image: {{ .AppName }}-kubectl-plugin:latest
+    profiles:
+      - k3s-deploy
+    entrypoint: ["kubectl-{{ .AppName }}", "--help"]
+
+  # Stage Docker CLI binary for Rundeck docker-based jobs
+  rundeck-docker-cli-stage:
+    image: docker:cli
+    profiles:
+      - k3s-deploy
+    volumes:
+      - rundeck-data:/rundeck-data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cp /usr/local/bin/docker /rundeck-data/docker
+        chmod +x /rundeck-data/docker
+        echo "Docker CLI staged to /rundeck-data/docker"
+
+  # Configure Rundeck: install kubectl + plugin, create projects, import jobs
   rundeck-init:
     image: bitnami/kubectl:latest
     user: root
@@ -373,6 +403,7 @@ services:
       - k3s-deploy-kubeconfig:/kubeconfig:ro
       - rundeck-plugin-bin:/plugin-bin:ro
       - ./rundeck-project:/rundeck-project:ro
+      - ./rundeck-docker-project:/rundeck-docker-project:ro
       - rundeck-data:/rundeck-data
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -399,7 +430,7 @@ services:
           -d '{"name":"{{ .AppName }}-operator","description":"Manage {{ .AppName }} resources via Kubernetes operator","config":{"project.name":"{{ .AppName }}-operator"}}' \
           "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
 
-        echo "--- Importing job definitions ---"
+        echo "--- Importing job definitions (script-based) ---"
         for jobfile in /rundeck-project/jobs/resources/*.yaml \
                        /rundeck-project/jobs/queries/*.yaml \
                        /rundeck-project/jobs/actions/*.yaml \
@@ -413,6 +444,31 @@ services:
               -H "X-Rundeck-Auth-Token: $${TOKEN}" \
               --data-binary @"$$jobfile" \
               "$${RUNDECK_URL}/api/14/project/{{ .AppName }}-operator/jobs/import?format=yaml&dupeOption=update" || echo "  Warning: failed to import $${jobname}"
+          fi
+        done
+
+        echo "--- Creating project: {{ .AppName }}-operator-docker ---"
+        curl -sf -X POST \
+          -H "Accept: application/json" \
+          -H "Content-Type: application/json" \
+          -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+          -d '{"name":"{{ .AppName }}-operator-docker","description":"Manage {{ .AppName }} resources via Kubernetes operator (Docker execution)","config":{"project.name":"{{ .AppName }}-operator-docker"}}' \
+          "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
+
+        echo "--- Importing job definitions (Docker-based) ---"
+        for jobfile in /rundeck-docker-project/jobs/resources/*.yaml \
+                       /rundeck-docker-project/jobs/queries/*.yaml \
+                       /rundeck-docker-project/jobs/actions/*.yaml \
+                       /rundeck-docker-project/jobs/operations/*.yaml; do
+          if [ -f "$$jobfile" ]; then
+            jobname=$$(basename "$$jobfile")
+            echo "  Importing $${jobname}..."
+            curl -sf -X POST \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/yaml" \
+              -H "X-Rundeck-Auth-Token: $${TOKEN}" \
+              --data-binary @"$$jobfile" \
+              "$${RUNDECK_URL}/api/14/project/{{ .AppName }}-operator-docker/jobs/import?format=yaml&dupeOption=update" || echo "  Warning: failed to import $${jobname}"
           fi
         done
 
@@ -437,10 +493,13 @@ services:
         echo "=== Rundeck setup complete ==="
         echo "Access Rundeck at: http://localhost:4440"
         echo "Default credentials: admin / admin"
+        echo "Projects: {{ .AppName }}-operator (script), {{ .AppName }}-operator-docker (Docker)"
     depends_on:
       rundeck:
         condition: service_healthy
       rundeck-kubectl-build:
+        condition: service_completed_successfully
+      rundeck-docker-cli-stage:
         condition: service_completed_successfully
 {{- end }}
 
@@ -453,5 +512,10 @@ volumes:
   k3s-deploy-run:
 {{- if .HasRundeckProject }}
   rundeck-data:
+    name: {{ .AppName }}-rundeck-data
   rundeck-plugin-bin:
 {{- end }}
+
+networks:
+  default:
+    name: {{ .AppName }}-operator-net
