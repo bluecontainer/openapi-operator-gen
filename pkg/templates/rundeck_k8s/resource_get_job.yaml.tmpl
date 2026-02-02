@@ -27,11 +27,6 @@
     valueExposed: true
     storagePath: keys/project/{{ .PluginName }}-operator-k8s/k8s-token
     hidden: true
-  - name: k8s_url
-    secure: true
-    valueExposed: true
-    storagePath: keys/project/{{ .PluginName }}-operator-k8s/k8s-url
-    hidden: true
   scheduleEnabled: true
   sequence:
     commands:
@@ -43,7 +38,7 @@
         PLUGIN_NS="${PLUGIN_NAMESPACE:-{{ .Namespace }}}"
         SA="${PLUGIN_SERVICE_ACCOUNT:-{{ .PluginName }}-plugin-runner}"
         POD="plugin-run-$(date +%s)-$RANDOM"
-        cmd="kubectl --server=\"$RD_OPTION_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
+        cmd="kubectl --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         cmd="$cmd run $POD --image=$IMAGE --restart=Never --rm -i --quiet --image-pull-policy=Never"
         cmd="$cmd -n $PLUGIN_NS"
         cmd="$cmd --overrides='{\"spec\":{\"serviceAccountName\":\"$SA\"}}'"

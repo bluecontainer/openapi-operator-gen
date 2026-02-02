@@ -441,7 +441,7 @@ services:
           -H "Accept: application/json" \
           -H "Content-Type: application/json" \
           -H "X-Rundeck-Auth-Token: $${TOKEN}" \
-          -d '{"name":"{{ .AppName }}-operator","description":"Manage {{ .AppName }} resources via Kubernetes operator","config":{"project.name":"{{ .AppName }}-operator"}}' \
+          -d '{"name":"{{ .AppName }}-operator","description":"Manage {{ .AppName }} resources via Kubernetes operator","config":{"project.name":"{{ .AppName }}-operator","project.globals.k8s_url":"https://k3s-deploy:6443"}}' \
           "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
 
         echo "--- Importing job definitions (script-based) ---"
@@ -466,7 +466,7 @@ services:
           -H "Accept: application/json" \
           -H "Content-Type: application/json" \
           -H "X-Rundeck-Auth-Token: $${TOKEN}" \
-          -d '{"name":"{{ .AppName }}-operator-docker","description":"Manage {{ .AppName }} resources via Kubernetes operator (Docker execution)","config":{"project.name":"{{ .AppName }}-operator-docker"}}' \
+          -d '{"name":"{{ .AppName }}-operator-docker","description":"Manage {{ .AppName }} resources via Kubernetes operator (Docker execution)","config":{"project.name":"{{ .AppName }}-operator-docker","project.globals.k8s_url":"https://k3s-deploy:6443"}}' \
           "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
 
         echo "--- Importing job definitions (Docker-based) ---"
@@ -491,7 +491,7 @@ services:
           -H "Accept: application/json" \
           -H "Content-Type: application/json" \
           -H "X-Rundeck-Auth-Token: $${TOKEN}" \
-          -d '{"name":"{{ .AppName }}-operator-k8s","description":"Manage {{ .AppName }} resources via Kubernetes operator (Kubernetes pod execution)","config":{"project.name":"{{ .AppName }}-operator-k8s"}}' \
+          -d '{"name":"{{ .AppName }}-operator-k8s","description":"Manage {{ .AppName }} resources via Kubernetes operator (Kubernetes pod execution)","config":{"project.name":"{{ .AppName }}-operator-k8s","project.globals.k8s_url":"https://k3s-deploy:6443"}}' \
           "$${RUNDECK_URL}/api/14/projects" || echo "Project may already exist"
 
         echo "--- Importing job definitions (Kubernetes pod-based) ---"
@@ -523,25 +523,19 @@ services:
           echo "Warning: kubectl plugin binary not found"
         fi
 
-        echo "--- Uploading Kubernetes credentials to Rundeck Key Storage ---"
+        echo "--- Uploading Kubernetes credentials to Key Storage ---"
         sed 's/127.0.0.1/k3s-deploy/g' /kubeconfig/kubeconfig.yaml > /tmp/kubeconfig.yaml
         export KUBECONFIG=/tmp/kubeconfig.yaml
         K8S_TOKEN=$$(kubectl create token {{ .AppName }}-plugin-runner -n {{ .Namespace }} --duration=8760h)
-        K8S_URL="https://k3s-deploy:6443"
         for PROJECT in {{ .AppName }}-operator {{ .AppName }}-operator-docker {{ .AppName }}-operator-k8s; do
-          echo "  Uploading credentials for project: $${PROJECT}"
+          echo "  Uploading k8s-token for project: $${PROJECT}"
           curl -sf -X POST \
             -H "X-Rundeck-Auth-Token: $${TOKEN}" \
             -H "Content-Type: application/x-rundeck-data-password" \
             --data-binary "$${K8S_TOKEN}" \
             "$${RUNDECK_URL}/api/14/storage/keys/project/$${PROJECT}/k8s-token" || echo "  Warning: failed to upload k8s-token for $${PROJECT}"
-          curl -sf -X POST \
-            -H "X-Rundeck-Auth-Token: $${TOKEN}" \
-            -H "Content-Type: application/x-rundeck-data-password" \
-            --data-binary "$${K8S_URL}" \
-            "$${RUNDECK_URL}/api/14/storage/keys/project/$${PROJECT}/k8s-url" || echo "  Warning: failed to upload k8s-url for $${PROJECT}"
         done
-        echo "Kubernetes credentials uploaded to Key Storage"
+        echo "Kubernetes credentials uploaded"
 
         echo "=== Rundeck setup complete ==="
         echo "Access Rundeck at: http://localhost:4440"

@@ -26,11 +26,6 @@
     valueExposed: true
     storagePath: keys/project/{{ .PluginName }}-operator/k8s-token
     hidden: true
-  - name: k8s_url
-    secure: true
-    valueExposed: true
-    storagePath: keys/project/{{ .PluginName }}-operator/k8s-url
-    hidden: true
   scheduleEnabled: true
   sequence:
     commands:
@@ -41,7 +36,7 @@
         cmd="kubectl {{ .PluginName }} get {{ .Plural }}"
         [ -n "$RD_OPTION_NAMESPACE" ] && cmd="$cmd -n $RD_OPTION_NAMESPACE"
         [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
-        cmd="$cmd --server=\"$RD_OPTION_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
+        cmd="$cmd --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
     keepgoing: false
     strategy: node-first
