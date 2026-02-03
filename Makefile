@@ -59,7 +59,8 @@ example: build
 		--update-with-post="/store/order" \
 		--kubectl-plugin \
  		--target-api-image=docker.io/swaggerapi/petstore3:unstable \
-		--rundeck-project
+		--rundeck-project \
+		--managed-crs=examples/managed-crs
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
 

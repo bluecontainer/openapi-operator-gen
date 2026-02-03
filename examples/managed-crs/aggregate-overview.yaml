@@ -1,0 +1,10 @@
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreAggregate
+metadata:
+  name: overview
+spec:
+  resourceSelectors:
+    - kind: Order
+    - kind: Pet
+    - kind: User
+  aggregationStrategy: AllHealthy

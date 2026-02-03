@@ -12,7 +12,8 @@
   nodeFilterEditable: false
   options:
   - name: namespace
-    description: "Kubernetes namespace"
+    description: "Kubernetes namespace (defaults to project setting)"
+    value: '${globals.namespace}'
   - name: output
     description: "Output format"
     enforced: true
@@ -22,6 +23,29 @@
     - 'json'
     - 'yaml'
     value: 'table'
+  - name: state
+    description: "Filter by resource state"
+    enforced: true
+    values:
+    - 'Synced'
+    - 'Failed'
+    - 'Pending'
+  - name: drift
+    description: "Show only resources with drift"
+    enforced: true
+    values:
+    - 'true'
+    - 'false'
+    value: 'false'
+  - name: selector
+    description: "Label selector (e.g., app=myapp,env=prod)"
+  - name: all_namespaces
+    description: "List across all namespaces"
+    enforced: true
+    values:
+    - 'true'
+    - 'false'
+    value: 'false'
   - name: k8s_token
     secure: true
     valueExposed: true
@@ -37,8 +61,13 @@
         IMAGE="${PLUGIN_RUNNER_IMAGE:-{{ .PluginName }}-kubectl-plugin:latest}"
         NET="${DOCKER_NETWORK:-host}"
         cmd="docker run --rm --network $NET $IMAGE {{ .PluginName }} get {{ .Plural }}"
-        [ -n "$RD_OPTION_NAMESPACE" ] && cmd="$cmd -n $RD_OPTION_NAMESPACE"
+        _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
+        [ -n "$_NS" ] && cmd="$cmd -n $_NS"
         [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_STATE" ] && cmd="$cmd --state=$RD_OPTION_STATE"
+        [ "$RD_OPTION_DRIFT" = "true" ] && cmd="$cmd --drift"
+        [ -n "$RD_OPTION_SELECTOR" ] && cmd="$cmd --selector=\"$RD_OPTION_SELECTOR\""
+        [ "$RD_OPTION_ALL_NAMESPACES" = "true" ] && cmd="$cmd --all-namespaces"
         cmd="$cmd --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
     keepgoing: false

@@ -13,7 +13,16 @@
   nodeFilterEditable: false
   options:
   - name: namespace
-    description: "Kubernetes namespace"
+    description: "Kubernetes namespace (defaults to project setting)"
+    value: '${globals.namespace}'
+  - name: output
+    description: "Output format"
+    enforced: true
+    values:
+    - 'table'
+    - 'json'
+    - 'yaml'
+    value: 'table'
   - name: k8s_token
     secure: true
     valueExposed: true
@@ -35,7 +44,9 @@
         cmd="$cmd -n $PLUGIN_NS"
         cmd="$cmd --overrides='{\"spec\":{\"serviceAccountName\":\"$SA\"}}'"
         cmd="$cmd -- {{ .PluginName }} status"
-        [ -n "$RD_OPTION_NAMESPACE" ] && cmd="$cmd -n $RD_OPTION_NAMESPACE"
+        _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
+        [ -n "$_NS" ] && cmd="$cmd -n $_NS"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
         eval $cmd
     keepgoing: false
     strategy: node-first

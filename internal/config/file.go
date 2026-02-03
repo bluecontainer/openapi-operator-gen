@@ -65,6 +65,9 @@ type ConfigFile struct {
 	// TargetAPIPort is the container port for the target REST API
 	// Overrides the port extracted from the OpenAPI spec's servers URL
 	TargetAPIPort *int `yaml:"targetAPIPort,omitempty"`
+
+	// ManagedCRs is the directory containing CR YAML files for managed Rundeck lifecycle jobs
+	ManagedCRs string `yaml:"managedCRs,omitempty"`
 }
 
 // FilterConfig contains filtering options for paths, tags, and operations
@@ -235,6 +238,11 @@ func MergeConfigFile(cfg *Config, file *ConfigFile) {
 		if len(cfg.ExcludeOperations) == 0 && len(file.Filters.ExcludeOperations) > 0 {
 			cfg.ExcludeOperations = file.Filters.ExcludeOperations
 		}
+	}
+
+	// Merge ManagedCRs (only if CLI didn't set it)
+	if cfg.ManagedCRsDir == "" && file.ManagedCRs != "" {
+		cfg.ManagedCRsDir = file.ManagedCRs
 	}
 
 	// Merge ID merge options

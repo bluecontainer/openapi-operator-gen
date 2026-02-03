@@ -115,6 +115,10 @@ type Config struct {
 	// Default: 0 (use spec URL port, or 8080 if not specified).
 	TargetAPIPort int
 
+	// ManagedCRsDir is the directory containing CR YAML files for managed Rundeck lifecycle jobs.
+	// When set, generates per-CR apply/get/patch/delete/status jobs.
+	ManagedCRsDir string
+
 	// SpecBaseURL is the base URL extracted from the OpenAPI spec's servers field.
 	// Set programmatically after parsing, not from CLI flags.
 	SpecBaseURL string

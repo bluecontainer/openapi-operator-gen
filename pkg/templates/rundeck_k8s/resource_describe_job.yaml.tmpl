@@ -15,7 +15,8 @@
     description: "Name of the {{ .Kind }} custom resource"
     required: true
   - name: namespace
-    description: "Kubernetes namespace"
+    description: "Kubernetes namespace (defaults to project setting)"
+    value: '${globals.namespace}'
   - name: k8s_token
     secure: true
     valueExposed: true
@@ -37,7 +38,8 @@
         cmd="$cmd -n $PLUGIN_NS"
         cmd="$cmd --overrides='{\"spec\":{\"serviceAccountName\":\"$SA\"}}'"
         cmd="$cmd -- {{ .PluginName }} describe {{ .KindLower }} $RD_OPTION_RESOURCE_NAME"
-        [ -n "$RD_OPTION_NAMESPACE" ] && cmd="$cmd -n $RD_OPTION_NAMESPACE"
+        _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
+        [ -n "$_NS" ] && cmd="$cmd -n $_NS"
         eval $cmd
     keepgoing: false
     strategy: node-first

@@ -496,6 +496,168 @@ var RundeckK8sDriftJobTemplate string
 //go:embed rundeck_k8s/cleanup_job.yaml.tmpl
 var RundeckK8sCleanupJobTemplate string
 
+// Rundeck Diagnostic/Operational Job Templates (native script execution)
+
+// RundeckDiagnoseJobTemplate is the template for the diagnose job
+//
+//go:embed rundeck/diagnose_job.yaml.tmpl
+var RundeckDiagnoseJobTemplate string
+
+// RundeckCompareJobTemplate is the template for the compare job
+//
+//go:embed rundeck/compare_job.yaml.tmpl
+var RundeckCompareJobTemplate string
+
+// RundeckPauseJobTemplate is the template for the pause job
+//
+//go:embed rundeck/pause_job.yaml.tmpl
+var RundeckPauseJobTemplate string
+
+// RundeckUnpauseJobTemplate is the template for the unpause job
+//
+//go:embed rundeck/unpause_job.yaml.tmpl
+var RundeckUnpauseJobTemplate string
+
+// RundeckPatchJobTemplate is the template for the patch job
+//
+//go:embed rundeck/patch_job.yaml.tmpl
+var RundeckPatchJobTemplate string
+
+// Rundeck Diagnostic/Operational Job Templates (Docker execution)
+
+// RundeckDockerDiagnoseJobTemplate is the template for the diagnose job (Docker execution)
+//
+//go:embed rundeck_docker/diagnose_job.yaml.tmpl
+var RundeckDockerDiagnoseJobTemplate string
+
+// RundeckDockerCompareJobTemplate is the template for the compare job (Docker execution)
+//
+//go:embed rundeck_docker/compare_job.yaml.tmpl
+var RundeckDockerCompareJobTemplate string
+
+// RundeckDockerPauseJobTemplate is the template for the pause job (Docker execution)
+//
+//go:embed rundeck_docker/pause_job.yaml.tmpl
+var RundeckDockerPauseJobTemplate string
+
+// RundeckDockerUnpauseJobTemplate is the template for the unpause job (Docker execution)
+//
+//go:embed rundeck_docker/unpause_job.yaml.tmpl
+var RundeckDockerUnpauseJobTemplate string
+
+// RundeckDockerPatchJobTemplate is the template for the patch job (Docker execution)
+//
+//go:embed rundeck_docker/patch_job.yaml.tmpl
+var RundeckDockerPatchJobTemplate string
+
+// Rundeck Diagnostic/Operational Job Templates (K8s pod execution)
+
+// RundeckK8sDiagnoseJobTemplate is the template for the diagnose job (K8s pod execution)
+//
+//go:embed rundeck_k8s/diagnose_job.yaml.tmpl
+var RundeckK8sDiagnoseJobTemplate string
+
+// RundeckK8sCompareJobTemplate is the template for the compare job (K8s pod execution)
+//
+//go:embed rundeck_k8s/compare_job.yaml.tmpl
+var RundeckK8sCompareJobTemplate string
+
+// RundeckK8sPauseJobTemplate is the template for the pause job (K8s pod execution)
+//
+//go:embed rundeck_k8s/pause_job.yaml.tmpl
+var RundeckK8sPauseJobTemplate string
+
+// RundeckK8sUnpauseJobTemplate is the template for the unpause job (K8s pod execution)
+//
+//go:embed rundeck_k8s/unpause_job.yaml.tmpl
+var RundeckK8sUnpauseJobTemplate string
+
+// RundeckK8sPatchJobTemplate is the template for the patch job (K8s pod execution)
+//
+//go:embed rundeck_k8s/patch_job.yaml.tmpl
+var RundeckK8sPatchJobTemplate string
+
+// Rundeck Managed CR Lifecycle Job Templates (native script execution)
+
+// RundeckManagedApplyJobTemplate is the template for managed CR apply jobs
+//
+//go:embed rundeck/managed_apply_job.yaml.tmpl
+var RundeckManagedApplyJobTemplate string
+
+// RundeckManagedGetJobTemplate is the template for managed CR get jobs
+//
+//go:embed rundeck/managed_get_job.yaml.tmpl
+var RundeckManagedGetJobTemplate string
+
+// RundeckManagedPatchJobTemplate is the template for managed CR patch jobs
+//
+//go:embed rundeck/managed_patch_job.yaml.tmpl
+var RundeckManagedPatchJobTemplate string
+
+// RundeckManagedDeleteJobTemplate is the template for managed CR delete jobs
+//
+//go:embed rundeck/managed_delete_job.yaml.tmpl
+var RundeckManagedDeleteJobTemplate string
+
+// RundeckManagedStatusJobTemplate is the template for managed CR status jobs
+//
+//go:embed rundeck/managed_status_job.yaml.tmpl
+var RundeckManagedStatusJobTemplate string
+
+// Rundeck Managed CR Lifecycle Job Templates (Docker execution)
+
+// RundeckDockerManagedApplyJobTemplate is the template for managed CR apply jobs (Docker execution)
+//
+//go:embed rundeck_docker/managed_apply_job.yaml.tmpl
+var RundeckDockerManagedApplyJobTemplate string
+
+// RundeckDockerManagedGetJobTemplate is the template for managed CR get jobs (Docker execution)
+//
+//go:embed rundeck_docker/managed_get_job.yaml.tmpl
+var RundeckDockerManagedGetJobTemplate string
+
+// RundeckDockerManagedPatchJobTemplate is the template for managed CR patch jobs (Docker execution)
+//
+//go:embed rundeck_docker/managed_patch_job.yaml.tmpl
+var RundeckDockerManagedPatchJobTemplate string
+
+// RundeckDockerManagedDeleteJobTemplate is the template for managed CR delete jobs (Docker execution)
+//
+//go:embed rundeck_docker/managed_delete_job.yaml.tmpl
+var RundeckDockerManagedDeleteJobTemplate string
+
+// RundeckDockerManagedStatusJobTemplate is the template for managed CR status jobs (Docker execution)
+//
+//go:embed rundeck_docker/managed_status_job.yaml.tmpl
+var RundeckDockerManagedStatusJobTemplate string
+
+// Rundeck Managed CR Lifecycle Job Templates (K8s pod execution)
+
+// RundeckK8sManagedApplyJobTemplate is the template for managed CR apply jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/managed_apply_job.yaml.tmpl
+var RundeckK8sManagedApplyJobTemplate string
+
+// RundeckK8sManagedGetJobTemplate is the template for managed CR get jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/managed_get_job.yaml.tmpl
+var RundeckK8sManagedGetJobTemplate string
+
+// RundeckK8sManagedPatchJobTemplate is the template for managed CR patch jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/managed_patch_job.yaml.tmpl
+var RundeckK8sManagedPatchJobTemplate string
+
+// RundeckK8sManagedDeleteJobTemplate is the template for managed CR delete jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/managed_delete_job.yaml.tmpl
+var RundeckK8sManagedDeleteJobTemplate string
+
+// RundeckK8sManagedStatusJobTemplate is the template for managed CR status jobs (K8s pod execution)
+//
+//go:embed rundeck_k8s/managed_status_job.yaml.tmpl
+var RundeckK8sManagedStatusJobTemplate string
+
 // Kubectl Plugin Dockerfile Template
 
 // KubectlPluginDockerfileTemplate is the template for the kubectl plugin Docker image

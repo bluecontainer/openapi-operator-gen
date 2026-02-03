@@ -1,0 +1,20 @@
+apiVersion: petstore.example.com/v1alpha1
+kind: PetstoreBundle
+metadata:
+  name: simple-bundle
+spec:
+  resources:
+    - id: pet-0
+      kind: Pet
+      spec:
+        category: {"id": 1, "name": "Dogs"}
+        name: "Fluffy"
+        photoUrls: ["https://example.com/photos/fluffy.jpg"]
+        status: "available"
+    - id: order-1
+      kind: Order
+      spec:
+        complete: false
+        petId: ${resources.pet-0.status.externalID}
+        quantity: 2
+        status: "placed"

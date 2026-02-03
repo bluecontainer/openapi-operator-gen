@@ -68,6 +68,15 @@ type RundeckFieldInfo struct {
 	IsNested    bool     // true for objects/arrays (use JSON input)
 }
 
+// RundeckManagedCRInfo holds data for a managed CR lifecycle job
+type RundeckManagedCRInfo struct {
+	RundeckTemplateData
+	Kind      string // e.g., "PetstoreBundle"
+	KindLower string // e.g., "petstorebundle"
+	CRName    string // e.g., "simple-bundle" (from metadata.name)
+	CRYaml    string // Full CR YAML, pre-indented for script heredoc embedding
+}
+
 // rundeckTemplateSet holds the template strings for a Rundeck project variant.
 type rundeckTemplateSet struct {
 	ProjectProperties string
@@ -79,6 +88,16 @@ type rundeckTemplateSet struct {
 	Status            string
 	Drift             string
 	Cleanup           string
+	Diagnose          string
+	Compare           string
+	Pause             string
+	Unpause           string
+	Patch             string
+	ManagedApply      string
+	ManagedGet        string
+	ManagedPatch      string
+	ManagedDelete     string
+	ManagedStatus     string
 }
 
 // nativeTemplates returns the template set for script-based execution.
@@ -93,6 +112,16 @@ func nativeTemplates() rundeckTemplateSet {
 		Status:            templates.RundeckStatusJobTemplate,
 		Drift:             templates.RundeckDriftJobTemplate,
 		Cleanup:           templates.RundeckCleanupJobTemplate,
+		Diagnose:          templates.RundeckDiagnoseJobTemplate,
+		Compare:           templates.RundeckCompareJobTemplate,
+		Pause:             templates.RundeckPauseJobTemplate,
+		Unpause:           templates.RundeckUnpauseJobTemplate,
+		Patch:             templates.RundeckPatchJobTemplate,
+		ManagedApply:      templates.RundeckManagedApplyJobTemplate,
+		ManagedGet:        templates.RundeckManagedGetJobTemplate,
+		ManagedPatch:      templates.RundeckManagedPatchJobTemplate,
+		ManagedDelete:     templates.RundeckManagedDeleteJobTemplate,
+		ManagedStatus:     templates.RundeckManagedStatusJobTemplate,
 	}
 }
 
@@ -108,6 +137,16 @@ func dockerTemplates() rundeckTemplateSet {
 		Status:            templates.RundeckDockerStatusJobTemplate,
 		Drift:             templates.RundeckDockerDriftJobTemplate,
 		Cleanup:           templates.RundeckDockerCleanupJobTemplate,
+		Diagnose:          templates.RundeckDockerDiagnoseJobTemplate,
+		Compare:           templates.RundeckDockerCompareJobTemplate,
+		Pause:             templates.RundeckDockerPauseJobTemplate,
+		Unpause:           templates.RundeckDockerUnpauseJobTemplate,
+		Patch:             templates.RundeckDockerPatchJobTemplate,
+		ManagedApply:      templates.RundeckDockerManagedApplyJobTemplate,
+		ManagedGet:        templates.RundeckDockerManagedGetJobTemplate,
+		ManagedPatch:      templates.RundeckDockerManagedPatchJobTemplate,
+		ManagedDelete:     templates.RundeckDockerManagedDeleteJobTemplate,
+		ManagedStatus:     templates.RundeckDockerManagedStatusJobTemplate,
 	}
 }
 
@@ -123,6 +162,16 @@ func k8sTemplates() rundeckTemplateSet {
 		Status:            templates.RundeckK8sStatusJobTemplate,
 		Drift:             templates.RundeckK8sDriftJobTemplate,
 		Cleanup:           templates.RundeckK8sCleanupJobTemplate,
+		Diagnose:          templates.RundeckK8sDiagnoseJobTemplate,
+		Compare:           templates.RundeckK8sCompareJobTemplate,
+		Pause:             templates.RundeckK8sPauseJobTemplate,
+		Unpause:           templates.RundeckK8sUnpauseJobTemplate,
+		Patch:             templates.RundeckK8sPatchJobTemplate,
+		ManagedApply:      templates.RundeckK8sManagedApplyJobTemplate,
+		ManagedGet:        templates.RundeckK8sManagedGetJobTemplate,
+		ManagedPatch:      templates.RundeckK8sManagedPatchJobTemplate,
+		ManagedDelete:     templates.RundeckK8sManagedDeleteJobTemplate,
+		ManagedStatus:     templates.RundeckK8sManagedStatusJobTemplate,
 	}
 }
 
@@ -279,6 +328,27 @@ func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, 
 		}
 	}
 
+	// Generate diagnostic/operational jobs (diagnose, compare, pause, unpause, patch)
+	diagnosticTemplates := []struct {
+		tmpl     string
+		filename string
+	}{
+		{tmplSet.Diagnose, "diagnose.yaml"},
+		{tmplSet.Compare, "compare.yaml"},
+		{tmplSet.Pause, "pause.yaml"},
+		{tmplSet.Unpause, "unpause.yaml"},
+		{tmplSet.Patch, "patch.yaml"},
+	}
+	for _, dt := range diagnosticTemplates {
+		if err := g.executeTemplate(
+			dt.tmpl,
+			baseData,
+			filepath.Join(rundeckDir, "jobs", "operations", dt.filename),
+		); err != nil {
+			return fmt.Errorf("failed to generate %s: %w", dt.filename, err)
+		}
+	}
+
 	return nil
 }
 
@@ -367,6 +437,168 @@ func isOperatorInternalField(jsonName string) bool {
 		"retryPolicy":       true,
 	}
 	return internalFields[jsonName]
+}
+
+// GenerateManagedJobs generates managed CR lifecycle jobs for all 3 execution modes.
+func (g *RundeckProjectGenerator) GenerateManagedJobs(managedCRsDir string) error {
+	managedCRs, err := g.parseManagedCRs(managedCRsDir)
+	if err != nil {
+		return fmt.Errorf("failed to parse managed CRs from %s: %w", managedCRsDir, err)
+	}
+	if len(managedCRs) == 0 {
+		return nil
+	}
+
+	modes := []struct {
+		dirName string
+		tmplSet rundeckTemplateSet
+	}{
+		{"rundeck-project", nativeTemplates()},
+		{"rundeck-docker-project", dockerTemplates()},
+		{"rundeck-k8s-project", k8sTemplates()},
+	}
+
+	for _, mode := range modes {
+		for _, cr := range managedCRs {
+			crDir := filepath.Join(g.config.OutputDir, mode.dirName, "jobs", "managed", cr.KindLower+"-"+cr.CRName)
+			if err := os.MkdirAll(crDir, 0755); err != nil {
+				return fmt.Errorf("failed to create managed jobs directory %s: %w", crDir, err)
+			}
+
+			jobs := []struct {
+				tmpl     string
+				filename string
+			}{
+				{mode.tmplSet.ManagedApply, "apply.yaml"},
+				{mode.tmplSet.ManagedGet, "get.yaml"},
+				{mode.tmplSet.ManagedPatch, "patch.yaml"},
+				{mode.tmplSet.ManagedDelete, "delete.yaml"},
+				{mode.tmplSet.ManagedStatus, "status.yaml"},
+			}
+			for _, j := range jobs {
+				if err := g.executeTemplate(j.tmpl, cr, filepath.Join(crDir, j.filename)); err != nil {
+					return fmt.Errorf("failed to generate %s: %w", j.filename, err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// parseManagedCRs reads CR YAML files from a directory and returns managed CR info.
+// Supports multi-document YAML (split on ---). Skips documents missing kind or metadata.name.
+func (g *RundeckProjectGenerator) parseManagedCRs(dir string) ([]RundeckManagedCRInfo, error) {
+	// Glob for YAML files
+	var files []string
+	for _, pattern := range []string{"*.yaml", "*.yml"} {
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			return nil, fmt.Errorf("failed to glob %s: %w", pattern, err)
+		}
+		files = append(files, matches...)
+	}
+
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	apiName := strings.Split(g.config.APIGroup, ".")[0]
+	baseData := RundeckTemplateData{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		APIName:          apiName,
+		PluginName:       apiName,
+		Namespace:        apiName + "-system",
+	}
+
+	var managedCRs []RundeckManagedCRInfo
+
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", file, err)
+		}
+
+		// Split multi-document YAML
+		docs := strings.Split(string(data), "\n---")
+		for _, doc := range docs {
+			doc = strings.TrimSpace(doc)
+			if doc == "" {
+				continue
+			}
+
+			// Minimal YAML parsing to extract kind and metadata.name
+			kind := extractYAMLField(doc, "kind")
+			name := extractYAMLMetadataName(doc)
+
+			if kind == "" || name == "" {
+				continue
+			}
+
+			managedCRs = append(managedCRs, RundeckManagedCRInfo{
+				RundeckTemplateData: baseData,
+				Kind:                kind,
+				KindLower:           strings.ToLower(kind),
+				CRName:              name,
+				CRYaml:              indentString(doc, 8),
+			})
+		}
+	}
+
+	return managedCRs, nil
+}
+
+// extractYAMLField extracts a top-level scalar field from YAML text.
+func extractYAMLField(yamlText string, field string) string {
+	prefix := field + ":"
+	for _, line := range strings.Split(yamlText, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prefix) {
+			value := strings.TrimPrefix(trimmed, prefix)
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// extractYAMLMetadataName extracts metadata.name from YAML text.
+func extractYAMLMetadataName(yamlText string) string {
+	lines := strings.Split(yamlText, "\n")
+	inMetadata := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Check for top-level "metadata:" section
+		if trimmed == "metadata:" {
+			inMetadata = true
+			continue
+		}
+		// If in metadata section, look for "name:" with indentation
+		if inMetadata {
+			// Stop if we hit another top-level key (no leading whitespace)
+			if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+				break
+			}
+			if strings.HasPrefix(trimmed, "name:") {
+				value := strings.TrimPrefix(trimmed, "name:")
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
+}
+
+// indentString indents every line of s by the given number of spaces.
+func indentString(s string, spaces int) string {
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // executeTemplate parses and executes a template, writing the result to outputPath.
