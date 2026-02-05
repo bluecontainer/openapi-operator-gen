@@ -69,7 +69,7 @@
         cmd="$cmd -- {{ .PluginName }} get {{ .Plural }}"
         _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
         [ -n "$_NS" ] && cmd="$cmd -n $_NS"
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
         [ -n "$RD_OPTION_STATE" ] && cmd="$cmd --state=$RD_OPTION_STATE"
         [ "$RD_OPTION_DRIFT" = "true" ] && cmd="$cmd --drift"
         [ -n "$RD_OPTION_SELECTOR" ] && cmd="$cmd --selector=\"$RD_OPTION_SELECTOR\""

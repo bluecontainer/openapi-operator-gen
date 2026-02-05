@@ -56,7 +56,7 @@
         [ -n "$RD_OPTION_KIND" ] && cmd="$cmd --kind=$RD_OPTION_KIND"
         [ "$RD_OPTION_SHOW_DIFF" = "true" ] && cmd="$cmd --show-diff"
         [ "$RD_OPTION_ALL_NAMESPACES" = "true" ] && cmd="$cmd --all-namespaces"
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
         cmd="$cmd --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
     keepgoing: false

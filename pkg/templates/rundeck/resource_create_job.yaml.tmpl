@@ -93,7 +93,8 @@
         [ -n "$_NS" ] && cmd="$cmd -n $_NS"
         cmd="$cmd --dry-run=$RD_OPTION_DRY_RUN --timeout=$RD_OPTION_TIMEOUT"
         [ "$RD_OPTION_NO_WAIT" = "true" ] && cmd="$cmd --no-wait"
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
+        [ "$RD_OPTION_OUTPUT" = "json" ] && cmd="$cmd --compact"
         [ -n "$RD_OPTION_TARGET_POD_ORDINAL" ] && cmd="$cmd --target-pod-ordinal=$RD_OPTION_TARGET_POD_ORDINAL"
         [ -n "$RD_OPTION_TARGET_BASE_URL" ] && cmd="$cmd --target-base-url=\"$RD_OPTION_TARGET_BASE_URL\""
         [ -n "$RD_OPTION_TARGET_BASE_URLS" ] && cmd="$cmd --target-base-urls=\"$RD_OPTION_TARGET_BASE_URLS\""
@@ -105,5 +106,23 @@
         [ -n "$RD_OPTION_TARGET_LABELS" ] && cmd="$cmd --target-labels=\"$RD_OPTION_TARGET_LABELS\""
         cmd="$cmd --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
+      plugins:
+        LogFilter:
+        - type: json-mapper
+          config:
+            filter: .name
+            prefix: resource_name
+            logData: 'true'
+            extraQuotes: 'false'
+    - configuration:
+        export: resource_name
+        group: export
+        value: ${data.resource_name*}
+      description: "Export resource name for workflow chaining"
+      nodeStep: false
+      type: export-var
+      errorhandler:
+        exec: 'echo "Note: resource name export requires JSON output"'
+        keepgoingOnSuccess: true
     keepgoing: false
     strategy: node-first

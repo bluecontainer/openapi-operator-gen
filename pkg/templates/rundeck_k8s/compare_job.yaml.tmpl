@@ -53,7 +53,7 @@
         cmd="$cmd --overrides='{\"spec\":{\"serviceAccountName\":\"$SA\"}}'"
         cmd="$cmd -- {{ .PluginName }} compare $RD_OPTION_RESOURCE_KIND $RD_OPTION_RESOURCE_NAME"
         [ -n "$RD_OPTION_FIELD" ] && cmd="$cmd --field=\"$RD_OPTION_FIELD\""
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
         _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
         [ -n "$_NS" ] && cmd="$cmd -n $_NS"
         eval $cmd

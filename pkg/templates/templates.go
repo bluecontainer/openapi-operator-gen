@@ -658,6 +658,40 @@ var RundeckK8sManagedDeleteJobTemplate string
 //go:embed rundeck_k8s/managed_status_job.yaml.tmpl
 var RundeckK8sManagedStatusJobTemplate string
 
+// Rundeck Workflow Templates (shared across all execution modes)
+// Workflow jobs use jobref to chain existing atomic jobs by name/group.
+// Since jobrefs are execution-mode agnostic, one template serves all modes.
+
+// RundeckHousekeepingWorkflowTemplate is the template for the housekeeping workflow job
+//
+//go:embed rundeck_workflows/housekeeping_workflow.yaml.tmpl
+var RundeckHousekeepingWorkflowTemplate string
+
+// RundeckDriftRemediationWorkflowTemplate is the template for the drift remediation workflow job
+//
+//go:embed rundeck_workflows/drift_remediation_workflow.yaml.tmpl
+var RundeckDriftRemediationWorkflowTemplate string
+
+// RundeckStartMaintenanceWorkflowTemplate is the template for the start maintenance workflow job
+//
+//go:embed rundeck_workflows/start_maintenance_workflow.yaml.tmpl
+var RundeckStartMaintenanceWorkflowTemplate string
+
+// RundeckEndMaintenanceWorkflowTemplate is the template for the end maintenance workflow job
+//
+//go:embed rundeck_workflows/end_maintenance_workflow.yaml.tmpl
+var RundeckEndMaintenanceWorkflowTemplate string
+
+// RundeckCreateAndVerifyWorkflowTemplate is the template for the per-resource create-and-verify workflow job
+//
+//go:embed rundeck_workflows/create_and_verify_workflow.yaml.tmpl
+var RundeckCreateAndVerifyWorkflowTemplate string
+
+// RundeckManagedDeployWorkflowTemplate is the template for the managed CR deploy-and-verify workflow job
+//
+//go:embed rundeck_workflows/managed_deploy_workflow.yaml.tmpl
+var RundeckManagedDeployWorkflowTemplate string
+
 // Kubectl Plugin Dockerfile Template
 
 // KubectlPluginDockerfileTemplate is the template for the kubectl plugin Docker image

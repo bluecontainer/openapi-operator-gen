@@ -340,6 +340,12 @@ services:
       - |
         mkdir -p /tmp/remco-partials/framework
         echo "rundeck.tokens.file=/home/rundeck/etc/tokens.properties" > /tmp/remco-partials/framework/tokens.properties
+        # Install jq-json-logfilter plugin (provides json-mapper log filter)
+        JQ_PLUGIN_VERSION="1.0.8"
+        JQ_PLUGIN_URL="https://github.com/rundeck-plugins/jq-json-logfilter/releases/download/$${JQ_PLUGIN_VERSION}/jq-json-logfilter-$${JQ_PLUGIN_VERSION}.jar"
+        curl -sfL -o /home/rundeck/libext/jq-json-logfilter-$${JQ_PLUGIN_VERSION}.jar "$${JQ_PLUGIN_URL}" \
+          && echo "Plugin installed: jq-json-logfilter $${JQ_PLUGIN_VERSION}" \
+          || echo "WARNING: Failed to download jq-json-logfilter plugin"
         export PATH="/home/rundeck/server/data:$PATH"
         exec /home/rundeck/docker-lib/entry.sh
     environment:
@@ -449,6 +455,8 @@ services:
                        /rundeck-project/jobs/queries/*.yaml \
                        /rundeck-project/jobs/actions/*.yaml \
                        /rundeck-project/jobs/operations/*.yaml \
+                       /rundeck-project/jobs/workflows/*.yaml \
+                       /rundeck-project/jobs/workflows/managed/*.yaml \
                        /rundeck-project/jobs/managed/*/*.yaml; do
           if [ -f "$$jobfile" ]; then
             jobname=$$(basename "$$jobfile")
@@ -475,6 +483,8 @@ services:
                        /rundeck-docker-project/jobs/queries/*.yaml \
                        /rundeck-docker-project/jobs/actions/*.yaml \
                        /rundeck-docker-project/jobs/operations/*.yaml \
+                       /rundeck-docker-project/jobs/workflows/*.yaml \
+                       /rundeck-docker-project/jobs/workflows/managed/*.yaml \
                        /rundeck-docker-project/jobs/managed/*/*.yaml; do
           if [ -f "$$jobfile" ]; then
             jobname=$$(basename "$$jobfile")
@@ -501,6 +511,8 @@ services:
                        /rundeck-k8s-project/jobs/queries/*.yaml \
                        /rundeck-k8s-project/jobs/actions/*.yaml \
                        /rundeck-k8s-project/jobs/operations/*.yaml \
+                       /rundeck-k8s-project/jobs/workflows/*.yaml \
+                       /rundeck-k8s-project/jobs/workflows/managed/*.yaml \
                        /rundeck-k8s-project/jobs/managed/*/*.yaml; do
           if [ -f "$$jobfile" ]; then
             jobname=$$(basename "$$jobfile")

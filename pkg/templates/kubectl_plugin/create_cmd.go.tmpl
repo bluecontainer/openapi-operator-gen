@@ -132,12 +132,17 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create the CR
-	fmt.Printf("Creating %s: %s\n", resourceKind, name)
+	isStructuredOutput := outputFormat == "json" || outputFormat == "yaml"
+	if !isStructuredOutput {
+		fmt.Printf("Creating %s: %s\n", resourceKind, name)
+	}
 
 	_, err := k8sClient.Create(ctx, plural, cr)
 	if apierrors.IsAlreadyExists(err) {
 		// Resource already exists - update its spec instead
-		fmt.Printf("Resource %s/%s already exists, updating spec...\n", plural, name)
+		if !isStructuredOutput {
+			fmt.Printf("Resource %s/%s already exists, updating spec...\n", plural, name)
+		}
 
 		existing, getErr := k8sClient.Get(ctx, plural, name)
 		if getErr != nil {
@@ -166,7 +171,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if updateErr != nil {
 			return fmt.Errorf("failed to update existing resource: %w", updateErr)
 		}
-		fmt.Printf("Resource updated: %s/%s\n", plural, name)
+		if !isStructuredOutput {
+			fmt.Printf("Resource updated: %s/%s\n", plural, name)
+		}
 	} else if err != nil {
 		errMsg := err.Error()
 		// Detect type mismatch errors from CRD validation and provide helpful hints
@@ -188,12 +195,28 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("failed to create resource: %w", err)
 	} else {
-		fmt.Printf("Resource created: %s/%s\n", plural, name)
+		if !isStructuredOutput {
+			fmt.Printf("Resource created: %s/%s\n", plural, name)
+		}
 	}
 
 	// Wait for sync unless --no-wait
 	if !createNoWait {
-		return waitForCreateResult(ctx, plural, name)
+		return waitForCreateResult(ctx, plural, name, isStructuredOutput)
+	}
+
+	// No-wait: output result immediately
+	if isStructuredOutput {
+		result := map[string]interface{}{
+			"name":      name,
+			"namespace": k8sClient.GetNamespace(),
+			"kind":      resourceKind,
+			"state":     "Pending",
+		}
+		if outputFormat == "json" {
+			return output.PrintJSON(result)
+		}
+		return output.PrintYAML(result)
 	}
 
 	fmt.Println("Resource submitted. Use 'kubectl {{ .PluginName }} describe' to check status.")
@@ -301,8 +324,8 @@ func isCreateCommonFlag(name string) bool {
 	}
 	commonFlags := map[string]bool{
 		"cr-name": true, "no-wait": true, "wait": true,
-		"timeout": true, "output": true, "from-file": true,
-		"dry-run": true,
+		"timeout": true, "output": true, "compact": true,
+		"from-file": true, "dry-run": true,
 	}
 	return commonFlags[name]
 }
@@ -348,8 +371,10 @@ func loadSpecFromFile(path string) (map[string]interface{}, error) {
 	return spec, nil
 }
 
-func waitForCreateResult(ctx context.Context, plural, name string) error {
-	fmt.Printf("Waiting for sync (timeout: %s)...\n", createTimeout)
+func waitForCreateResult(ctx context.Context, plural, name string, isStructuredOutput bool) error {
+	if !isStructuredOutput {
+		fmt.Printf("Waiting for sync (timeout: %s)...\n", createTimeout)
+	}
 
 	deadline := time.Now().Add(createTimeout)
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -386,42 +411,55 @@ func waitForCreateResult(ctx context.Context, plural, name string) error {
 }
 
 func printCreateResult(obj *unstructured.Unstructured, elapsed time.Duration) error {
+	state, _, _ := unstructured.NestedString(obj.Object, "status", "state")
+	externalID, hasID, _ := unstructured.NestedString(obj.Object, "status", "externalID")
+	response, found, _ := unstructured.NestedMap(obj.Object, "status", "response")
+
+	// Structured output: clean envelope with CR metadata + response data
+	if outputFormat == "json" || outputFormat == "yaml" {
+		result := map[string]interface{}{
+			"name":      obj.GetName(),
+			"namespace": obj.GetNamespace(),
+			"kind":      obj.GetKind(),
+			"state":     state,
+		}
+		if hasID && externalID != "" {
+			result["externalID"] = externalID
+		}
+		if found {
+			if statusCode, ok := response["statusCode"].(int64); ok {
+				result["statusCode"] = statusCode
+			}
+			if data, hasData := response["data"]; hasData {
+				result["data"] = data
+			}
+		}
+		if elapsed > 0 {
+			result["syncTime"] = elapsed.Round(time.Millisecond).String()
+		}
+		if outputFormat == "json" {
+			return output.PrintJSON(result)
+		}
+		return output.PrintYAML(result)
+	}
+
+	// Default: human-readable text output
 	fmt.Println()
 	fmt.Println(output.Green("Resource synced successfully"))
-
-	// Get state
-	state, _, _ := unstructured.NestedString(obj.Object, "status", "state")
 	fmt.Printf("  State: %s\n", state)
-
-	// Get externalID
-	externalID, hasID, _ := unstructured.NestedString(obj.Object, "status", "externalID")
 	if hasID && externalID != "" {
 		fmt.Printf("  External ID: %s\n", externalID)
 	}
-
-	// Get response data
-	response, found, _ := unstructured.NestedMap(obj.Object, "status", "response")
 	if found {
-		// Check status code
 		if statusCode, ok := response["statusCode"].(int64); ok {
 			fmt.Printf("  Status Code: %d\n", statusCode)
 		}
-
-		// Print response data
 		data, hasData := response["data"]
 		if hasData {
 			fmt.Println("  Response:")
-			switch outputFormat {
-			case "json":
-				return output.PrintJSON(data)
-			case "yaml":
-				return output.PrintYAML(data)
-			default:
-				printCreateData(data, "    ")
-			}
+			printCreateData(data, "    ")
 		}
 	}
-
 	if elapsed > 0 {
 		fmt.Printf("\nSync time: %s\n", elapsed.Round(time.Millisecond))
 	}

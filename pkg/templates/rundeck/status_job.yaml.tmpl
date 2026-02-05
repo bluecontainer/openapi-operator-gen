@@ -37,7 +37,7 @@
         cmd="kubectl {{ .PluginName }} status"
         _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
         [ -n "$_NS" ] && cmd="$cmd -n $_NS"
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
         cmd="$cmd --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
     keepgoing: false

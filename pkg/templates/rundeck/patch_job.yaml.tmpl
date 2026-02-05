@@ -81,7 +81,7 @@
         [ -n "$RD_OPTION_TTL" ] && cmd="$cmd --ttl=\"$RD_OPTION_TTL\""
         [ "$RD_OPTION_RESTORE" = "true" ] && cmd="$cmd --restore"
         [ "$RD_OPTION_DRY_RUN" = "true" ] && cmd="$cmd --dry-run"
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
         _NS="${RD_OPTION_NAMESPACE:-$RD_GLOBALS_NAMESPACE}"
         [ -n "$_NS" ] && cmd="$cmd -n $_NS"
         [ -n "$RD_OPTION_TARGET_POD_ORDINAL" ] && cmd="$cmd --target-pod-ordinal=$RD_OPTION_TARGET_POD_ORDINAL"

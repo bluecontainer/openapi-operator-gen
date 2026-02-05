@@ -12,6 +12,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
 	"{{ .ModuleName }}/pkg/client"
+	"{{ .ModuleName }}/pkg/output"
 )
 
 var (
@@ -110,6 +111,7 @@ func init() {
 
 	// Add output format flag (don't use -o shorthand, conflicts with kubeconfig output)
 	rootCmd.PersistentFlags().StringVar(&outputFormat, "output", "", "Output format: table, json, yaml, wide")
+	rootCmd.PersistentFlags().BoolVar(&output.CompactMode, "compact", false, "Compact JSON output (single-line, for log filter parsing)")
 
 	// Set version template
 	rootCmd.SetVersionTemplate(fmt.Sprintf("kubectl-{{ .PluginName }} version %s\n  commit: %s\n  built:  %s\n", version, commit, buildDate))

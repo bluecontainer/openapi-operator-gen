@@ -98,6 +98,13 @@ type rundeckTemplateSet struct {
 	ManagedPatch      string
 	ManagedDelete     string
 	ManagedStatus     string
+	// Workflow templates (identical across modes, use jobref)
+	WorkflowHousekeeping     string
+	WorkflowDriftRemediation string
+	WorkflowStartMaintenance string
+	WorkflowEndMaintenance   string
+	WorkflowCreateAndVerify  string
+	WorkflowManagedDeploy    string
 }
 
 // nativeTemplates returns the template set for script-based execution.
@@ -122,6 +129,13 @@ func nativeTemplates() rundeckTemplateSet {
 		ManagedPatch:      templates.RundeckManagedPatchJobTemplate,
 		ManagedDelete:     templates.RundeckManagedDeleteJobTemplate,
 		ManagedStatus:     templates.RundeckManagedStatusJobTemplate,
+		// Workflow templates (shared across all modes)
+		WorkflowHousekeeping:     templates.RundeckHousekeepingWorkflowTemplate,
+		WorkflowDriftRemediation: templates.RundeckDriftRemediationWorkflowTemplate,
+		WorkflowStartMaintenance: templates.RundeckStartMaintenanceWorkflowTemplate,
+		WorkflowEndMaintenance:   templates.RundeckEndMaintenanceWorkflowTemplate,
+		WorkflowCreateAndVerify:  templates.RundeckCreateAndVerifyWorkflowTemplate,
+		WorkflowManagedDeploy:    templates.RundeckManagedDeployWorkflowTemplate,
 	}
 }
 
@@ -147,6 +161,13 @@ func dockerTemplates() rundeckTemplateSet {
 		ManagedPatch:      templates.RundeckDockerManagedPatchJobTemplate,
 		ManagedDelete:     templates.RundeckDockerManagedDeleteJobTemplate,
 		ManagedStatus:     templates.RundeckDockerManagedStatusJobTemplate,
+		// Workflow templates (shared across all modes)
+		WorkflowHousekeeping:     templates.RundeckHousekeepingWorkflowTemplate,
+		WorkflowDriftRemediation: templates.RundeckDriftRemediationWorkflowTemplate,
+		WorkflowStartMaintenance: templates.RundeckStartMaintenanceWorkflowTemplate,
+		WorkflowEndMaintenance:   templates.RundeckEndMaintenanceWorkflowTemplate,
+		WorkflowCreateAndVerify:  templates.RundeckCreateAndVerifyWorkflowTemplate,
+		WorkflowManagedDeploy:    templates.RundeckManagedDeployWorkflowTemplate,
 	}
 }
 
@@ -172,6 +193,13 @@ func k8sTemplates() rundeckTemplateSet {
 		ManagedPatch:      templates.RundeckK8sManagedPatchJobTemplate,
 		ManagedDelete:     templates.RundeckK8sManagedDeleteJobTemplate,
 		ManagedStatus:     templates.RundeckK8sManagedStatusJobTemplate,
+		// Workflow templates (shared across all modes)
+		WorkflowHousekeeping:     templates.RundeckHousekeepingWorkflowTemplate,
+		WorkflowDriftRemediation: templates.RundeckDriftRemediationWorkflowTemplate,
+		WorkflowStartMaintenance: templates.RundeckStartMaintenanceWorkflowTemplate,
+		WorkflowEndMaintenance:   templates.RundeckEndMaintenanceWorkflowTemplate,
+		WorkflowCreateAndVerify:  templates.RundeckCreateAndVerifyWorkflowTemplate,
+		WorkflowManagedDeploy:    templates.RundeckManagedDeployWorkflowTemplate,
 	}
 }
 
@@ -215,6 +243,8 @@ func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, 
 		filepath.Join(rundeckDir, "jobs", "queries"),
 		filepath.Join(rundeckDir, "jobs", "actions"),
 		filepath.Join(rundeckDir, "jobs", "operations"),
+		filepath.Join(rundeckDir, "jobs", "workflows"),
+		filepath.Join(rundeckDir, "jobs", "workflows", "managed"),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -349,6 +379,47 @@ func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, 
 		}
 	}
 
+	// Generate operations workflow jobs (housekeeping, drift-remediation, start/end maintenance)
+	workflowTemplates := []struct {
+		tmpl     string
+		filename string
+	}{
+		{tmplSet.WorkflowHousekeeping, "housekeeping.yaml"},
+		{tmplSet.WorkflowDriftRemediation, "drift-remediation.yaml"},
+		{tmplSet.WorkflowStartMaintenance, "start-maintenance.yaml"},
+		{tmplSet.WorkflowEndMaintenance, "end-maintenance.yaml"},
+	}
+	for _, wt := range workflowTemplates {
+		if err := g.executeTemplate(
+			wt.tmpl,
+			baseData,
+			filepath.Join(rundeckDir, "jobs", "workflows", wt.filename),
+		); err != nil {
+			return fmt.Errorf("failed to generate workflow %s: %w", wt.filename, err)
+		}
+	}
+
+	// Generate per-resource create-and-verify workflow jobs
+	for _, crd := range crds {
+		if crd.IsQuery || crd.IsAction {
+			continue // workflows only for CRUD resources
+		}
+		resourceInfo := RundeckResourceInfo{
+			RundeckTemplateData: baseData,
+			Kind:                crd.Kind,
+			KindLower:           strings.ToLower(crd.Kind),
+			Plural:              crd.Plural,
+			Fields:              g.mapFields(crd.Spec),
+		}
+		if err := g.executeTemplate(
+			tmplSet.WorkflowCreateAndVerify,
+			resourceInfo,
+			filepath.Join(rundeckDir, "jobs", "workflows", "create-and-verify-"+strings.ToLower(crd.Kind)+".yaml"),
+		); err != nil {
+			return fmt.Errorf("failed to generate create-and-verify workflow for %s: %w", crd.Kind, err)
+		}
+	}
+
 	return nil
 }
 
@@ -479,6 +550,19 @@ func (g *RundeckProjectGenerator) GenerateManagedJobs(managedCRsDir string) erro
 				if err := g.executeTemplate(j.tmpl, cr, filepath.Join(crDir, j.filename)); err != nil {
 					return fmt.Errorf("failed to generate %s: %w", j.filename, err)
 				}
+			}
+
+			// Generate managed deploy workflow
+			workflowManagedDir := filepath.Join(g.config.OutputDir, mode.dirName, "jobs", "workflows", "managed")
+			if err := os.MkdirAll(workflowManagedDir, 0755); err != nil {
+				return fmt.Errorf("failed to create workflow managed directory %s: %w", workflowManagedDir, err)
+			}
+			if err := g.executeTemplate(
+				mode.tmplSet.WorkflowManagedDeploy,
+				cr,
+				filepath.Join(workflowManagedDir, "deploy-"+cr.KindLower+"-"+cr.CRName+".yaml"),
+			); err != nil {
+				return fmt.Errorf("failed to generate managed deploy workflow for %s-%s: %w", cr.KindLower, cr.CRName, err)
 			}
 		}
 	}

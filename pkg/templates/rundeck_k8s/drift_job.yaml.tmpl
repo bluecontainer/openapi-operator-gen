@@ -65,7 +65,7 @@
         [ -n "$RD_OPTION_KIND" ] && cmd="$cmd --kind=$RD_OPTION_KIND"
         [ "$RD_OPTION_SHOW_DIFF" = "true" ] && cmd="$cmd --show-diff"
         [ "$RD_OPTION_ALL_NAMESPACES" = "true" ] && cmd="$cmd --all-namespaces"
-        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd -o $RD_OPTION_OUTPUT"
+        [ -n "$RD_OPTION_OUTPUT" ] && cmd="$cmd --output $RD_OPTION_OUTPUT"
         eval $cmd
     keepgoing: false
     strategy: node-first
