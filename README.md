@@ -3689,16 +3689,62 @@ Nodes command flags:
 | `-A, --all-namespaces` | Discover workloads across all namespaces |
 | `-l, --selector=SELECTOR` | Label selector to filter workloads (e.g., `app=myapp`) |
 
-**Node attributes emitted:**
+**Node model overview:**
 
-Each discovered workload becomes a Rundeck node with these attributes:
+The `nodes` command outputs [Rundeck resource model JSON](https://docs.rundeck.com/docs/manual/document-format-reference/resource-json-v10.html) — a JSON object where each key is a node name and each value contains the node's attributes. Rundeck uses these nodes for job dispatch, filtering, and attribute expansion.
+
+Key design decisions:
+- **`hostname: localhost`** — Nodes don't represent SSH targets; they represent logical Kubernetes workloads. Jobs execute locally on the Rundeck server (or in containers) and use the targeting attributes to route commands.
+- **`node-executor: local`** and **`file-copier: local`** — These prevent Rundeck from attempting SSH connections. All execution happens locally via the kubectl plugin.
+- **`targetType`, `targetValue`, `targetNamespace`** — These custom attributes map directly to the kubectl plugin's `--target-*` flags, enabling automatic endpoint discovery when jobs dispatch to nodes.
+
+**Example output:**
+
+```json
+{
+  "helm:petstore@default": {
+    "nodename": "helm:petstore@default",
+    "hostname": "localhost",
+    "tags": "helm-release,default",
+    "osFamily": "kubernetes",
+    "node-executor": "local",
+    "file-copier": "local",
+    "targetType": "helm-release",
+    "targetValue": "petstore",
+    "targetNamespace": "default",
+    "workloadKind": "StatefulSet",
+    "workloadName": "petstore-db",
+    "podCount": "3",
+    "healthyPods": "3"
+  },
+  "deploy:petstore-api@default": {
+    "nodename": "deploy:petstore-api@default",
+    "hostname": "localhost",
+    "tags": "deployment,default",
+    "osFamily": "kubernetes",
+    "node-executor": "local",
+    "file-copier": "local",
+    "targetType": "deployment",
+    "targetValue": "petstore-api",
+    "targetNamespace": "default",
+    "workloadKind": "Deployment",
+    "workloadName": "petstore-api",
+    "podCount": "2",
+    "healthyPods": "2"
+  }
+}
+```
+
+**Node attributes:**
 
 | Attribute | Description | Example |
 |-----------|-------------|---------|
-| `nodename` | Unique key for the node | `helm:petstore@default` |
-| `hostname` | Always `localhost` (nodes represent remote workloads) | `localhost` |
+| `nodename` | Unique key: `{type}:{name}@{namespace}` | `helm:petstore@default` |
+| `hostname` | Always `localhost` (execution is local) | `localhost` |
 | `tags` | Comma-separated: workload type and namespace | `helm-release,default` |
 | `osFamily` | Always `kubernetes` | `kubernetes` |
+| `node-executor` | Always `local` (no SSH) | `local` |
+| `file-copier` | Always `local` (no SCP) | `local` |
 | `targetType` | Workload type: `helm-release`, `statefulset`, or `deployment` | `helm-release` |
 | `targetValue` | Workload or Helm release name | `petstore` |
 | `targetNamespace` | Workload's namespace | `default` |
