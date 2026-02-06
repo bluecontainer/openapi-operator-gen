@@ -4,3 +4,13 @@ project.name={{ .APIName }}-operator
 project.description=Manage {{ .APIName }} resources via Kubernetes operator
 project.label={{ .APIName }}-operator
 project.globals.namespace={{ .Namespace }}
+
+# Node source: workload discovery via custom ResourceModelSource plugin
+# The plugin receives K8s credentials from Key Storage via STORAGE_PATH_AUTOMATIC_READ.
+# Discovers Helm releases, StatefulSets, and Deployments as Rundeck nodes.
+# Node attributes (targetType, targetValue, targetNamespace) map to --target-* flags.
+resources.source.1.type={{ .PluginName }}-k8s-nodes
+resources.source.1.config.k8s_token=keys/project/{{ .APIName }}-operator/k8s-token
+resources.source.1.config.k8s_url=__K8S_URL__
+resources.source.1.config.namespace={{ .Namespace }}
+resources.source.1.config.execution_mode=native

@@ -1,0 +1,17 @@
+{
+  "name": "petstore-operator-k8s",
+  "config": {
+    "project.description": "Manage petstore resources via Kubernetes operator (Kubernetes pod execution)",
+    "project.globals.namespace": "petstore-system",
+    "project.label": "petstore-operator-k8s",
+    "project.name": "petstore-operator-k8s",
+    "resources.source.1.config.docker_image": "petstore-kubectl-plugin:latest",
+    "resources.source.1.config.execution_mode": "kubernetes",
+    "resources.source.1.config.k8s_token": "keys/project/petstore-operator-k8s/k8s-token",
+    "resources.source.1.config.k8s_url": "__K8S_URL__",
+    "resources.source.1.config.namespace": "petstore-system",
+    "resources.source.1.config.plugin_namespace": "petstore-system",
+    "resources.source.1.config.service_account": "petstore-plugin-runner",
+    "resources.source.1.type": "petstore-k8s-nodes"
+  }
+}

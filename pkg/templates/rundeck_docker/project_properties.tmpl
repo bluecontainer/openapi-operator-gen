@@ -4,3 +4,15 @@ project.name={{ .APIName }}-operator-docker
 project.description=Manage {{ .APIName }} resources via Kubernetes operator (Docker execution)
 project.label={{ .APIName }}-operator-docker
 project.globals.namespace={{ .Namespace }}
+
+# Node source: workload discovery via custom ResourceModelSource plugin
+# The plugin receives K8s credentials from Key Storage via STORAGE_PATH_AUTOMATIC_READ.
+# Discovers Helm releases, StatefulSets, and Deployments as Rundeck nodes.
+# Node attributes (targetType, targetValue, targetNamespace) map to --target-* flags.
+resources.source.1.type={{ .PluginName }}-k8s-nodes
+resources.source.1.config.k8s_token=keys/project/{{ .APIName }}-operator-docker/k8s-token
+resources.source.1.config.k8s_url=__K8S_URL__
+resources.source.1.config.namespace={{ .Namespace }}
+resources.source.1.config.execution_mode=docker
+resources.source.1.config.docker_image={{ .PluginName }}-kubectl-plugin:latest
+resources.source.1.config.docker_network={{ .PluginName }}-operator-net

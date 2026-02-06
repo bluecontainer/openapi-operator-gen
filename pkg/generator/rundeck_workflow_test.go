@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -374,6 +375,235 @@ spec:
 		if nativeContent != modeContent {
 			t.Errorf("managed deploy workflow differs between %s and %s", modes[0], mode)
 		}
+	}
+}
+
+// =============================================================================
+// Rundeck Node Source Discovery Tests
+// =============================================================================
+
+func TestRundeckProjectPropertiesNodeSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		OutputDir:        tmpDir,
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		GeneratorVersion: "test",
+	}
+	g := NewRundeckProjectGenerator(cfg)
+	crds := testCRDs(cfg)
+
+	// Generate all 3 modes
+	if err := g.Generate(crds); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if err := g.GenerateDockerProject(crds); err != nil {
+		t.Fatalf("GenerateDockerProject failed: %v", err)
+	}
+	if err := g.GenerateK8sProject(crds); err != nil {
+		t.Fatalf("GenerateK8sProject failed: %v", err)
+	}
+
+	t.Run("native project.properties uses custom node source plugin", func(t *testing.T) {
+		content := readFile(t, filepath.Join(tmpDir, "rundeck-project", "project.properties"))
+		assertContains(t, content, "resources.source.1.type=petstore-k8s-nodes")
+		assertContains(t, content, "resources.source.1.config.k8s_token=keys/project/petstore-operator/k8s-token")
+		assertContains(t, content, "resources.source.1.config.execution_mode=native")
+		// Verify the node-source.sh reference script exists and contains expected content
+		script := readFile(t, filepath.Join(tmpDir, "rundeck-project", "node-source.sh"))
+		assertContains(t, script, "kubectl-petstore")
+		assertContains(t, script, "nodes")
+	})
+
+	t.Run("docker project.properties uses custom node source plugin", func(t *testing.T) {
+		content := readFile(t, filepath.Join(tmpDir, "rundeck-docker-project", "project.properties"))
+		assertContains(t, content, "resources.source.1.type=petstore-k8s-nodes")
+		assertContains(t, content, "resources.source.1.config.k8s_token=keys/project/petstore-operator-docker/k8s-token")
+		assertContains(t, content, "resources.source.1.config.execution_mode=docker")
+		script := readFile(t, filepath.Join(tmpDir, "rundeck-docker-project", "node-source.sh"))
+		assertContains(t, script, "docker run")
+		assertContains(t, script, "petstore")
+		assertContains(t, script, "nodes")
+	})
+
+	t.Run("k8s project.properties uses custom node source plugin", func(t *testing.T) {
+		content := readFile(t, filepath.Join(tmpDir, "rundeck-k8s-project", "project.properties"))
+		assertContains(t, content, "resources.source.1.type=petstore-k8s-nodes")
+		assertContains(t, content, "resources.source.1.config.k8s_token=keys/project/petstore-operator-k8s/k8s-token")
+		assertContains(t, content, "resources.source.1.config.execution_mode=kubernetes")
+		script := readFile(t, filepath.Join(tmpDir, "rundeck-k8s-project", "node-source.sh"))
+		assertContains(t, script, "kubectl")
+		assertContains(t, script, "plugin-runner")
+		assertContains(t, script, "nodes")
+	})
+}
+
+func TestRundeckProjectJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		OutputDir:        tmpDir,
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		GeneratorVersion: "test",
+	}
+	g := NewRundeckProjectGenerator(cfg)
+	crds := testCRDs(cfg)
+
+	// Generate all 3 modes
+	if err := g.Generate(crds); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if err := g.GenerateDockerProject(crds); err != nil {
+		t.Fatalf("GenerateDockerProject failed: %v", err)
+	}
+	if err := g.GenerateK8sProject(crds); err != nil {
+		t.Fatalf("GenerateK8sProject failed: %v", err)
+	}
+
+	type projectJSON struct {
+		Name   string            `json:"name"`
+		Config map[string]string `json:"config"`
+	}
+
+	tests := []struct {
+		name          string
+		dir           string
+		projectName   string
+		executionMode string
+	}{
+		{"native", "rundeck-project", "petstore-operator", "native"},
+		{"docker", "rundeck-docker-project", "petstore-operator-docker", "docker"},
+		{"k8s", "rundeck-k8s-project", "petstore-operator-k8s", "kubernetes"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" project.json is valid and mirrors properties", func(t *testing.T) {
+			jsonPath := filepath.Join(tmpDir, tt.dir, "project.json")
+			data, err := os.ReadFile(jsonPath)
+			if err != nil {
+				t.Fatalf("failed to read project.json: %v", err)
+			}
+
+			var proj projectJSON
+			if err := json.Unmarshal(data, &proj); err != nil {
+				t.Fatalf("project.json is not valid JSON: %v", err)
+			}
+
+			if proj.Name != tt.projectName {
+				t.Errorf("expected name %q, got %q", tt.projectName, proj.Name)
+			}
+
+			// Verify config contains custom node source plugin
+			if proj.Config["resources.source.1.type"] != "petstore-k8s-nodes" {
+				t.Errorf("expected resources.source.1.type=petstore-k8s-nodes, got %q", proj.Config["resources.source.1.type"])
+			}
+			if proj.Config["resources.source.1.config.execution_mode"] != tt.executionMode {
+				t.Errorf("expected resources.source.1.config.execution_mode=%s, got %q", tt.executionMode, proj.Config["resources.source.1.config.execution_mode"])
+			}
+
+			// Verify config mirrors project.properties keys
+			if proj.Config["project.name"] != tt.projectName {
+				t.Errorf("expected config project.name=%q, got %q", tt.projectName, proj.Config["project.name"])
+			}
+			if proj.Config["project.globals.namespace"] != "petstore-system" {
+				t.Errorf("expected namespace=petstore-system, got %q", proj.Config["project.globals.namespace"])
+			}
+		})
+	}
+}
+
+func TestRundeckJobTemplatesHybridTargeting(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		OutputDir:        tmpDir,
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		GeneratorVersion: "test",
+	}
+	g := NewRundeckProjectGenerator(cfg)
+	crds := testCRDs(cfg)
+
+	// Generate all 3 modes
+	if err := g.Generate(crds); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if err := g.GenerateDockerProject(crds); err != nil {
+		t.Fatalf("GenerateDockerProject failed: %v", err)
+	}
+	if err := g.GenerateK8sProject(crds); err != nil {
+		t.Fatalf("GenerateK8sProject failed: %v", err)
+	}
+
+	// Job templates that should have hybrid targeting
+	modes := []string{"rundeck-project", "rundeck-docker-project", "rundeck-k8s-project"}
+	targetingJobs := map[string]string{
+		"resources/pet/create-pet.yaml":     "jobs/resources/create-pet.yaml",
+		"queries/petfindbystatusquery.yaml": "jobs/queries/petfindbystatusquery.yaml",
+		"actions/petuploadimageaction.yaml": "jobs/actions/petuploadimageaction.yaml",
+		"operations/patch.yaml":             "jobs/operations/patch.yaml",
+	}
+
+	for name, relPath := range targetingJobs {
+		for _, mode := range modes {
+			t.Run(mode+"/"+name+" has hybrid targeting", func(t *testing.T) {
+				path := filepath.Join(tmpDir, mode, relPath)
+				content := readFile(t, path)
+
+				// Verify node dispatch enabled
+				assertContains(t, content, "nodeFilterEditable: true")
+				assertContains(t, content, "nodefilters:")
+				assertContains(t, content, "nodeStep: true")
+
+				// Verify hybrid targeting uses node attributes
+				assertContains(t, content, `@node.targetType@`)
+				assertContains(t, content, `@node.targetValue@`)
+				assertContains(t, content, `@node.targetNamespace@`)
+
+				// Verify explicit options still available as overrides
+				assertContains(t, content, "target_statefulset")
+				assertContains(t, content, "target_deployment")
+				assertContains(t, content, "target_helm_release")
+
+				// Verify case statement for node type dispatch
+				assertContains(t, content, "helm-release)")
+				assertContains(t, content, "statefulset)")
+				assertContains(t, content, "deployment)")
+			})
+		}
+	}
+}
+
+func TestRundeckNonTargetingJobsUnmodified(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		OutputDir:        tmpDir,
+		APIGroup:         "petstore.example.com",
+		APIVersion:       "v1alpha1",
+		GeneratorVersion: "test",
+	}
+	g := NewRundeckProjectGenerator(cfg)
+	crds := testCRDs(cfg)
+
+	if err := g.Generate(crds); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Non-targeting jobs should NOT have node attributes
+	nonTargetingJobs := []string{
+		"jobs/resources/get-pets.yaml",
+		"jobs/resources/describe-pet.yaml",
+		"jobs/operations/status.yaml",
+		"jobs/operations/drift.yaml",
+		"jobs/operations/cleanup.yaml",
+	}
+
+	for _, relPath := range nonTargetingJobs {
+		t.Run(relPath+" has no node targeting", func(t *testing.T) {
+			path := filepath.Join(tmpDir, "rundeck-project", relPath)
+			content := readFile(t, path)
+			assertNotContains(t, content, "@node.targetType@")
+			assertNotContains(t, content, "@node.targetValue@")
+		})
 	}
 }
 

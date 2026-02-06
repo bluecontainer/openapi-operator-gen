@@ -44,6 +44,12 @@ func NewClient(flags *genericclioptions.ConfigFlags, apiGroup, apiVersion string
 	}, nil
 }
 
+// DynamicClient returns the underlying dynamic.Interface for direct Kubernetes API queries.
+// Used by the nodes command to query apps/v1 resources outside the CRD apiGroup.
+func (c *Client) DynamicClient() dynamic.Interface {
+	return c.dynamic
+}
+
 // SetNamespace sets the default namespace for operations
 func (c *Client) SetNamespace(ns string) {
 	c.namespace = ns

@@ -323,6 +323,11 @@ var KubectlPluginCreateCmdTemplate string
 //go:embed kubectl_plugin/targeting.go.tmpl
 var KubectlPluginTargetingTemplate string
 
+// KubectlPluginNodesCmdTemplate is the template for the kubectl plugin nodes command (Rundeck resource model)
+//
+//go:embed kubectl_plugin/nodes_cmd.go.tmpl
+var KubectlPluginNodesCmdTemplate string
+
 // TargetAPIDeploymentTemplate is the template for the target API Deployment+Service
 //
 //go:embed target_api_deployment.yaml.tmpl
@@ -339,6 +344,11 @@ var DockerComposeTemplate string
 //
 //go:embed rundeck/project_properties.tmpl
 var RundeckProjectPropertiesTemplate string
+
+// RundeckNodeSourceTemplate is the template for the node source discovery script (native execution)
+//
+//go:embed rundeck/node_source.sh.tmpl
+var RundeckNodeSourceTemplate string
 
 // RundeckResourceCreateJobTemplate is the template for per-resource create jobs
 //
@@ -386,6 +396,11 @@ var RundeckCleanupJobTemplate string
 //
 //go:embed rundeck_docker/project_properties.tmpl
 var RundeckDockerProjectPropertiesTemplate string
+
+// RundeckDockerNodeSourceTemplate is the template for the node source discovery script (Docker execution)
+//
+//go:embed rundeck_docker/node_source.sh.tmpl
+var RundeckDockerNodeSourceTemplate string
 
 // RundeckDockerResourceCreateJobTemplate is the template for per-resource create jobs (Docker execution)
 //
@@ -455,6 +470,11 @@ var PluginRunnerRoleBindingTemplate string
 //
 //go:embed rundeck_k8s/project_properties.tmpl
 var RundeckK8sProjectPropertiesTemplate string
+
+// RundeckK8sNodeSourceTemplate is the template for the node source discovery script (K8s pod execution)
+//
+//go:embed rundeck_k8s/node_source.sh.tmpl
+var RundeckK8sNodeSourceTemplate string
 
 // RundeckK8sResourceCreateJobTemplate is the template for per-resource create jobs (K8s pod execution)
 //
@@ -698,3 +718,15 @@ var RundeckManagedDeployWorkflowTemplate string
 //
 //go:embed kubectl_plugin/dockerfile.tmpl
 var KubectlPluginDockerfileTemplate string
+
+// Rundeck Node Source Plugin Templates
+
+// RundeckPluginYAMLTemplate is the template for the Rundeck ResourceModelSource plugin descriptor
+//
+//go:embed rundeck_plugin/plugin.yaml.tmpl
+var RundeckPluginYAMLTemplate string
+
+// RundeckPluginNodesScriptTemplate is the template for the Rundeck ResourceModelSource plugin script
+//
+//go:embed rundeck_plugin/nodes.sh.tmpl
+var RundeckPluginNodesScriptTemplate string

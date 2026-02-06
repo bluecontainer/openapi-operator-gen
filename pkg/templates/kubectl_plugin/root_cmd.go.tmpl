@@ -134,6 +134,9 @@ func init() {
 	rootCmd.AddCommand(pauseCmd)
 	rootCmd.AddCommand(unpauseCmd)
 	rootCmd.AddCommand(cleanupCmd)
+
+	// Rundeck Integration
+	rootCmd.AddCommand(nodesCmd)
 }
 
 // initClient initializes the Kubernetes client

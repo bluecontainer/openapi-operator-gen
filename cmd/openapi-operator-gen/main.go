@@ -522,6 +522,10 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to generate kubectl plugin Dockerfile: %w", err)
 		}
 		fmt.Println("  Generated kubectl-plugin/Dockerfile")
+		if err := rundeckGen.GenerateNodeSourcePlugin(); err != nil {
+			return fmt.Errorf("failed to generate Rundeck node source plugin: %w", err)
+		}
+		fmt.Println("  Generated rundeck-plugin/")
 		if cfg.ManagedCRsDir != "" {
 			if err := rundeckGen.GenerateManagedJobs(cfg.ManagedCRsDir); err != nil {
 				return fmt.Errorf("failed to generate managed CR lifecycle jobs: %w", err)

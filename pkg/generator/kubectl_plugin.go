@@ -95,6 +95,8 @@ func (g *KubectlPluginGenerator) Generate(crds []*mapper.CRDDefinition, aggregat
 		{templates.KubectlPluginPauseCmdTemplate, filepath.Join(pluginDir, "cmd", "pause.go")},
 		{templates.KubectlPluginCleanupCmdTemplate, filepath.Join(pluginDir, "cmd", "cleanup.go")},
 		{templates.KubectlPluginTargetingTemplate, filepath.Join(pluginDir, "cmd", "targeting.go")},
+		// Rundeck Integration
+		{templates.KubectlPluginNodesCmdTemplate, filepath.Join(pluginDir, "cmd", "nodes.go")},
 		// Shared packages
 		{templates.KubectlPluginClientTemplate, filepath.Join(pluginDir, "pkg", "client", "client.go")},
 		{templates.KubectlPluginOutputTemplate, filepath.Join(pluginDir, "pkg", "output", "output.go")},

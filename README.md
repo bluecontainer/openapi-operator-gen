@@ -121,6 +121,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Docker Execution Project](#docker-execution-project)
   - [Kubernetes Execution Project](#kubernetes-execution-project)
   - [Docker Compose Integration](#docker-compose-integration)
+  - [Workload Node Discovery](#workload-node-discovery)
+  - [Hybrid Node-Attribute Targeting](#hybrid-node-attribute-targeting)
 - [Releasing](#releasing)
 - [License](#license)
 
@@ -3062,6 +3064,7 @@ The plugin provides commands organized in three phases:
 | **Phase 1: Core** | `status`, `get`, `describe` | Basic resource viewing |
 | **Phase 2: Diagnostic** | `compare`, `diagnose`, `drift` | Multi-endpoint diagnostics |
 | **Phase 3: Interactive** | `create`, `query`, `action`, `patch`, `pause`, `unpause`, `cleanup` | Resource management |
+| **Rundeck Integration** | `nodes` | Workload discovery as Rundeck resource model JSON |
 
 ### Phase 1: Core Commands
 
@@ -3602,6 +3605,106 @@ docker compose --profile k3s-deploy up -d rundeck-kubectl-build rundeck-docker-p
 # Wait for builds, then restage binaries and reimport jobs
 docker compose --profile k3s-deploy up -d rundeck-init --force-recreate
 ```
+
+### Workload Node Discovery
+
+The generated kubectl plugin includes a `nodes` command that discovers Kubernetes workloads (Helm releases, StatefulSets, Deployments) and outputs them as [Rundeck resource model JSON](https://docs.rundeck.com/docs/manual/document-format-reference/resource-json-v10.html). Each project's `project.properties` is configured with a script-based resource model source that calls this command automatically.
+
+**How it works:**
+
+1. The `nodes` command queries the Kubernetes API for StatefulSets and Deployments
+2. Workloads with an `app.kubernetes.io/instance` label are grouped into Helm release nodes (deduplicated across multiple workloads per release)
+3. Workloads without that label become standalone StatefulSet or Deployment nodes
+4. Pod health is checked by counting running pods matching each workload's selector
+5. The output is a JSON object keyed by `{targetType}:{targetValue}@{namespace}`
+
+```bash
+# Discover workloads in the default namespace
+kubectl petstore nodes
+
+# Discover across all namespaces
+kubectl petstore nodes --all-namespaces
+
+# Filter by label selector
+kubectl petstore nodes -l app.kubernetes.io/part-of=petstore
+```
+
+Nodes command flags:
+
+| Flag | Description |
+|------|-------------|
+| `-A, --all-namespaces` | Discover workloads across all namespaces |
+| `-l, --selector=SELECTOR` | Label selector to filter workloads (e.g., `app=myapp`) |
+
+**Node attributes emitted:**
+
+Each discovered workload becomes a Rundeck node with these attributes:
+
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `nodename` | Unique key for the node | `helm:petstore@default` |
+| `hostname` | Always `localhost` (nodes represent remote workloads) | `localhost` |
+| `tags` | Comma-separated: workload type and namespace | `helm-release,default` |
+| `osFamily` | Always `kubernetes` | `kubernetes` |
+| `targetType` | Workload type: `helm-release`, `statefulset`, or `deployment` | `helm-release` |
+| `targetValue` | Workload or Helm release name | `petstore` |
+| `targetNamespace` | Workload's namespace | `default` |
+| `workloadKind` | Underlying K8s kind: `StatefulSet` or `Deployment` | `StatefulSet` |
+| `workloadName` | Underlying workload name | `petstore-db` |
+| `podCount` | Total expected pod count | `3` |
+| `healthyPods` | Currently running pod count | `3` |
+
+**Node source configuration per execution mode:**
+
+| Mode | How `nodes` is invoked |
+|------|------------------------|
+| Script-based | `kubectl-petstore nodes -n {namespace} --server=... --token=...` |
+| Docker | `docker run --rm ... petstore nodes -n {namespace} --server=... --token=...` |
+| Kubernetes | `kubectl run ... -- petstore nodes -n {namespace}` (ephemeral pod) |
+
+**RBAC**: The `plugin-runner` ClusterRole includes `list` and `get` permissions for `apps/v1` StatefulSets and Deployments, `v1` Pods, and `v1` Services — required for workload discovery.
+
+### Hybrid Node-Attribute Targeting
+
+Jobs that support endpoint targeting (`create`, `query`, `action`, `patch`) use a hybrid targeting model. When Rundeck dispatches a job to a discovered node, the node's attributes automatically populate the `--target-*` flags. Explicit job options override node attributes when provided.
+
+**How it works in job scripts:**
+
+```bash
+# Hybrid targeting: explicit options override node attributes
+if [ -n "$RD_OPTION_TARGET_STATEFULSET" ] || [ -n "$RD_OPTION_TARGET_DEPLOYMENT" ] || \
+   [ -n "$RD_OPTION_TARGET_HELM_RELEASE" ] || ... ; then
+  # Use explicit options (manual override)
+  ...
+else
+  # Use Rundeck node attributes (from node source discovery)
+  _NODE_TYPE="@node.targetType@"
+  _NODE_VALUE="@node.targetValue@"
+  case "$_NODE_TYPE" in
+    helm-release) cmd="$cmd --target-helm-release=\"$_NODE_VALUE\"" ;;
+    statefulset)  cmd="$cmd --target-statefulset=\"$_NODE_VALUE\"" ;;
+    deployment)   cmd="$cmd --target-deployment=\"$_NODE_VALUE\"" ;;
+  esac
+fi
+```
+
+The `@node.xxx@` tokens are Rundeck's [node attribute expansion](https://docs.rundeck.com/docs/manual/jobs/job-plugins.html#node-step-plugins) syntax. When a job runs without node dispatch (e.g., on `localhost`), guards prevent unexpanded tokens from being passed as arguments.
+
+**Attribute-to-flag mapping:**
+
+| Node Attribute | Maps To | Example |
+|----------------|---------|---------|
+| `targetType=helm-release` | `--target-helm-release` | `--target-helm-release="petstore"` |
+| `targetType=statefulset` | `--target-statefulset` | `--target-statefulset="petstore-db"` |
+| `targetType=deployment` | `--target-deployment` | `--target-deployment="petstore-api"` |
+| `targetNamespace` | `--target-namespace` | `--target-namespace="production"` |
+
+**Usage patterns:**
+
+- **No node filter** (default `.*`): Job runs once against each discovered workload
+- **Node filter** (e.g., `tags: helm-release`): Job runs only against Helm release nodes
+- **Single node** (e.g., `name: helm:petstore@default`): Job targets one specific workload
+- **Manual override**: Set `target_statefulset` or other explicit options in the job form to bypass node attributes entirely
 
 ## Releasing
 

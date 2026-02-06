@@ -1,7 +1,10 @@
 package generator
 
 import (
+	"archive/zip"
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +34,7 @@ type RundeckTemplateData struct {
 	APIName          string // e.g., "petstore"
 	PluginName       string // e.g., "petstore" (kubectl plugin name)
 	Namespace        string // e.g., "petstore-system"
+	NodeSourceBase64 string // base64-encoded node-source.sh script
 }
 
 // RundeckResourceInfo is a CRUD resource with spec fields
@@ -80,6 +84,7 @@ type RundeckManagedCRInfo struct {
 // rundeckTemplateSet holds the template strings for a Rundeck project variant.
 type rundeckTemplateSet struct {
 	ProjectProperties string
+	NodeSourceScript  string
 	ResourceCreate    string
 	ResourceGet       string
 	ResourceDescribe  string
@@ -111,6 +116,7 @@ type rundeckTemplateSet struct {
 func nativeTemplates() rundeckTemplateSet {
 	return rundeckTemplateSet{
 		ProjectProperties: templates.RundeckProjectPropertiesTemplate,
+		NodeSourceScript:  templates.RundeckNodeSourceTemplate,
 		ResourceCreate:    templates.RundeckResourceCreateJobTemplate,
 		ResourceGet:       templates.RundeckResourceGetJobTemplate,
 		ResourceDescribe:  templates.RundeckResourceDescribeJobTemplate,
@@ -143,6 +149,7 @@ func nativeTemplates() rundeckTemplateSet {
 func dockerTemplates() rundeckTemplateSet {
 	return rundeckTemplateSet{
 		ProjectProperties: templates.RundeckDockerProjectPropertiesTemplate,
+		NodeSourceScript:  templates.RundeckDockerNodeSourceTemplate,
 		ResourceCreate:    templates.RundeckDockerResourceCreateJobTemplate,
 		ResourceGet:       templates.RundeckDockerResourceGetJobTemplate,
 		ResourceDescribe:  templates.RundeckDockerResourceDescribeJobTemplate,
@@ -175,6 +182,7 @@ func dockerTemplates() rundeckTemplateSet {
 func k8sTemplates() rundeckTemplateSet {
 	return rundeckTemplateSet{
 		ProjectProperties: templates.RundeckK8sProjectPropertiesTemplate,
+		NodeSourceScript:  templates.RundeckK8sNodeSourceTemplate,
 		ResourceCreate:    templates.RundeckK8sResourceCreateJobTemplate,
 		ResourceGet:       templates.RundeckK8sResourceGetJobTemplate,
 		ResourceDescribe:  templates.RundeckK8sResourceDescribeJobTemplate,
@@ -233,6 +241,88 @@ func (g *RundeckProjectGenerator) GeneratePluginDockerfile() error {
 	return g.executeTemplate(templates.KubectlPluginDockerfileTemplate, data, outputPath)
 }
 
+// GenerateNodeSourcePlugin generates a Rundeck ResourceModelSource plugin ZIP file.
+// The plugin enables Key Storage secret injection for the node source script.
+func (g *RundeckProjectGenerator) GenerateNodeSourcePlugin() error {
+	apiName := strings.Split(g.config.APIGroup, ".")[0]
+	data := RundeckTemplateData{
+		GeneratorVersion: g.config.GeneratorVersion,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		APIName:          apiName,
+		PluginName:       apiName,
+		Namespace:        apiName + "-system",
+	}
+
+	// Render plugin.yaml
+	pluginYAML, err := g.renderTemplate(templates.RundeckPluginYAMLTemplate, data)
+	if err != nil {
+		return fmt.Errorf("failed to render plugin.yaml: %w", err)
+	}
+
+	// Render nodes.sh
+	nodesScript, err := g.renderTemplate(templates.RundeckPluginNodesScriptTemplate, data)
+	if err != nil {
+		return fmt.Errorf("failed to render nodes.sh: %w", err)
+	}
+
+	// Create plugin ZIP file
+	pluginDir := filepath.Join(g.config.OutputDir, "rundeck-plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		return fmt.Errorf("failed to create plugin directory: %w", err)
+	}
+
+	zipPath := filepath.Join(pluginDir, apiName+"-node-source.zip")
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		return fmt.Errorf("failed to create plugin ZIP: %w", err)
+	}
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// Plugin directory name inside ZIP (Rundeck expects this structure)
+	pluginZipDir := apiName + "-node-source"
+
+	// Add plugin.yaml to ZIP
+	pluginYAMLWriter, err := zipWriter.Create(pluginZipDir + "/plugin.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to add plugin.yaml to ZIP: %w", err)
+	}
+	if _, err := pluginYAMLWriter.Write(pluginYAML); err != nil {
+		return fmt.Errorf("failed to write plugin.yaml to ZIP: %w", err)
+	}
+
+	// Add contents/nodes.sh to ZIP (with executable permission)
+	header := &zip.FileHeader{
+		Name:   pluginZipDir + "/contents/nodes.sh",
+		Method: zip.Deflate,
+	}
+	header.SetMode(0755)
+	nodesScriptWriter, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		return fmt.Errorf("failed to add nodes.sh to ZIP: %w", err)
+	}
+	if _, err := nodesScriptWriter.Write(nodesScript); err != nil {
+		return fmt.Errorf("failed to write nodes.sh to ZIP: %w", err)
+	}
+
+	// Also write standalone files for debugging/inspection
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), pluginYAML, 0644); err != nil {
+		return fmt.Errorf("failed to write plugin.yaml: %w", err)
+	}
+	contentsDir := filepath.Join(pluginDir, "contents")
+	if err := os.MkdirAll(contentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create contents directory: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(contentsDir, "nodes.sh"), nodesScript, 0755); err != nil {
+		return fmt.Errorf("failed to write nodes.sh: %w", err)
+	}
+
+	return nil
+}
+
 // generateProject generates a Rundeck project using the given template set.
 func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, dirName string, tmplSet rundeckTemplateSet) error {
 	// Create directory structure
@@ -263,20 +353,108 @@ func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, 
 		Namespace:        apiName + "-system",
 	}
 
-	// Generate project.properties
+	// Render node-source.sh, base64-encode it, and embed in project.properties.
+	// This avoids quoting issues with Rundeck's arg tokenizer and removes
+	// the need for volume-mounting the script file into the Rundeck container.
+	nodeSourceScript, err := g.renderTemplate(tmplSet.NodeSourceScript, baseData)
+	if err != nil {
+		return fmt.Errorf("failed to render node-source.sh: %w", err)
+	}
+	baseData.NodeSourceBase64 = base64.StdEncoding.EncodeToString(nodeSourceScript)
+
+	// Write node-source.sh for reference/debugging
+	nodeSourcePath := filepath.Join(rundeckDir, "node-source.sh")
+	if err := os.WriteFile(nodeSourcePath, nodeSourceScript, 0755); err != nil {
+		return fmt.Errorf("failed to write node-source.sh: %w", err)
+	}
+
+	// Generate project.properties (uses NodeSourceBase64 for inline script)
+	propsPath := filepath.Join(rundeckDir, "project.properties")
 	if err := g.executeTemplate(
 		tmplSet.ProjectProperties,
 		baseData,
-		filepath.Join(rundeckDir, "project.properties"),
+		propsPath,
 	); err != nil {
 		return fmt.Errorf("failed to generate project.properties: %w", err)
 	}
 
+	// Generate project.json from rendered project.properties for the Rundeck API
+	if err := g.generateProjectJSON(propsPath, filepath.Join(rundeckDir, "project.json")); err != nil {
+		return fmt.Errorf("failed to generate project.json: %w", err)
+	}
+
 	// Generate tokens.properties for Rundeck API authentication
-	// Format: username: token_string, role1, role2
+	// Format: username: token, role1, role2
 	tokensContent := fmt.Sprintf("# Generated by openapi-operator-gen %s\n# Static API token for automated setup (admin group required for project/job management)\nadmin: letmein99, admin, user\n", g.config.GeneratorVersion)
 	if err := os.WriteFile(filepath.Join(rundeckDir, "tokens.properties"), []byte(tokensContent), 0644); err != nil {
 		return fmt.Errorf("failed to generate tokens.properties: %w", err)
+	}
+
+	// Generate ACL policy for Key Storage access (node source scripts read K8s tokens)
+	aclContent := fmt.Sprintf(`# Generated by openapi-operator-gen %s
+# Grant admin group read/write access to Key Storage.
+# Required for: init script (upload K8s token).
+description: Admin Key Storage access (project context)
+context:
+  project: '.*'
+for:
+  storage:
+    - match:
+        path: '.*'
+      allow: [read, create, update, delete]
+by:
+  group: admin
+---
+description: Admin Key Storage access (application context)
+context:
+  application: rundeck
+for:
+  storage:
+    - match:
+        path: '.*'
+      allow: [read, create, update, delete]
+by:
+  group: admin
+---
+# Grant project URN read access to project-scoped Key Storage.
+# Required for: node source scripts (read K8s token via STORAGE_PATH_AUTOMATIC_READ).
+# Node sources load using the project's URN identity, not user identity.
+# URN matching uses exact equality, so each project needs its own rule.
+description: %[2]s-operator project Key Storage access
+context:
+  application: rundeck
+for:
+  storage:
+    - match:
+        path: 'keys/project/%[2]s-operator/.*'
+      allow: [read]
+by:
+  urn: 'project:%[2]s-operator'
+---
+description: %[2]s-operator-docker project Key Storage access
+context:
+  application: rundeck
+for:
+  storage:
+    - match:
+        path: 'keys/project/%[2]s-operator-docker/.*'
+      allow: [read]
+by:
+  urn: 'project:%[2]s-operator-docker'
+---
+description: %[2]s-operator-k8s project Key Storage access
+context:
+  application: rundeck
+for:
+  storage:
+    - match:
+        path: 'keys/project/%[2]s-operator-k8s/.*'
+      allow: [read]
+by:
+  urn: 'project:%[2]s-operator-k8s'
+`, g.config.GeneratorVersion, baseData.APIName)
+	if err := os.WriteFile(filepath.Join(rundeckDir, "storage-access.aclpolicy"), []byte(aclContent), 0644); err != nil {
+		return fmt.Errorf("failed to generate storage-access.aclpolicy: %w", err)
 	}
 
 	// Categorize CRDs and generate per-kind job files
@@ -685,6 +863,49 @@ func indentString(s string, spaces int) string {
 	return strings.Join(lines, "\n")
 }
 
+// generateProjectJSON parses a rendered project.properties file and writes an
+// equivalent project.json for the Rundeck project creation API (POST /api/14/projects).
+// The JSON format is {"name": "...", "config": {"key": "value", ...}}.
+// The project name is derived from the project.name property in the file.
+func (g *RundeckProjectGenerator) generateProjectJSON(propsPath string, outputPath string) error {
+	data, err := os.ReadFile(propsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", propsPath, err)
+	}
+
+	config := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			config[parts[0]] = parts[1]
+		}
+	}
+
+	projectName := config["project.name"]
+	if projectName == "" {
+		return fmt.Errorf("project.name not found in %s", propsPath)
+	}
+
+	payload := struct {
+		Name   string            `json:"name"`
+		Config map[string]string `json:"config"`
+	}{
+		Name:   projectName,
+		Config: config,
+	}
+
+	jsonBytes, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal project JSON: %w", err)
+	}
+
+	return os.WriteFile(outputPath, jsonBytes, 0644)
+}
+
 // executeTemplate parses and executes a template, writing the result to outputPath.
 func (g *RundeckProjectGenerator) executeTemplate(tmplContent string, data interface{}, outputPath string) error {
 	funcMap := template.FuncMap{
@@ -706,4 +927,27 @@ func (g *RundeckProjectGenerator) executeTemplate(tmplContent string, data inter
 	}
 
 	return os.WriteFile(outputPath, buf.Bytes(), 0644)
+}
+
+// renderTemplate parses and executes a template, returning the result as bytes.
+func (g *RundeckProjectGenerator) renderTemplate(tmplContent string, data interface{}) ([]byte, error) {
+	funcMap := template.FuncMap{
+		"lower": strings.ToLower,
+		"upper": strings.ToUpper,
+		"join": func(items []string, sep string) string {
+			return strings.Join(items, sep)
+		},
+	}
+
+	tmpl, err := template.New("rundeck").Funcs(funcMap).Parse(tmplContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
