@@ -121,6 +121,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Docker Execution Project](#docker-execution-project)
   - [Kubernetes Execution Project](#kubernetes-execution-project)
   - [Docker Compose Integration](#docker-compose-integration)
+  - [ResourceModelSource Plugin](#resourcemodelsource-plugin)
   - [Workload Node Discovery](#workload-node-discovery)
   - [Hybrid Node-Attribute Targeting](#hybrid-node-attribute-targeting)
 - [Releasing](#releasing)
@@ -3464,6 +3465,12 @@ config/rbac/
 
 kubectl-plugin/
 └── Dockerfile                      # Multi-stage build for plugin image
+
+rundeck-plugin/                     # Rundeck ResourceModelSource plugin
+├── plugin.yaml                     # Plugin descriptor
+├── contents/
+│   └── nodes.sh                    # Script that invokes kubectl plugin nodes
+└── {app}-node-source.zip           # Pre-built plugin archive
 ```
 
 ### Job Types
@@ -3605,6 +3612,52 @@ docker compose --profile k3s-deploy up -d rundeck-kubectl-build rundeck-docker-p
 # Wait for builds, then restage binaries and reimport jobs
 docker compose --profile k3s-deploy up -d rundeck-init --force-recreate
 ```
+
+### ResourceModelSource Plugin
+
+The generator creates a Rundeck [ResourceModelSource](https://docs.rundeck.com/docs/developer/06-logging-plugins.html#resource-model-source-plugins) script plugin that discovers Kubernetes workloads and presents them as Rundeck nodes. This plugin is packaged as `rundeck-plugin/{app}-node-source.zip` and must be installed into Rundeck's `libext/` directory.
+
+**Plugin structure:**
+
+```
+rundeck-plugin/
+├── plugin.yaml                     # Plugin descriptor with configuration properties
+├── contents/
+│   └── nodes.sh                    # Script that invokes the kubectl plugin
+└── petstore-node-source.zip        # Pre-built plugin archive ready for installation
+```
+
+**Plugin configuration properties** (exposed in project settings):
+
+| Property | Description | Default |
+|----------|-------------|---------|
+| `k8s_token` | Key Storage path for Kubernetes service account token | `keys/project/{project}/k8s-token` |
+| `k8s_url` | Kubernetes API server URL | (required) |
+| `namespace` | Namespace to discover workloads in | `{app}-system` |
+| `execution_mode` | How to run the kubectl plugin: `native`, `docker`, or `kubernetes` | `native` |
+| `docker_image` | Docker image for `docker` mode | `{app}-kubectl-plugin:latest` |
+| `docker_network` | Docker network for `docker` mode | `host` |
+| `plugin_namespace` | Namespace for ephemeral pods in `kubernetes` mode | `{app}-system` |
+| `service_account` | ServiceAccount for pods in `kubernetes` mode | `{app}-plugin-runner` |
+
+**Credential handling:**
+
+The plugin uses Rundeck's `STORAGE_PATH_AUTOMATIC_READ` mechanism to retrieve the Kubernetes token from Key Storage. This means:
+
+1. The `k8s_token` property contains a Key Storage path (e.g., `keys/project/petstore-operator/k8s-token`)
+2. Rundeck automatically reads the secret and passes it to the script via `RD_CONFIG_K8S_TOKEN`
+3. ACL policies must grant the project URN read access to the Key Storage path
+
+**Installation:**
+
+```bash
+# Copy the plugin to Rundeck's libext directory
+cp rundeck-plugin/petstore-node-source.zip /var/rundeck/libext/
+
+# Rundeck auto-loads plugins from libext/ — no restart required
+```
+
+In Docker Compose, the plugin is automatically mounted and available. The `rundeck-init` service configures the project settings and uploads the Kubernetes token to Key Storage.
 
 ### Workload Node Discovery
 
