@@ -3689,6 +3689,33 @@ Nodes command flags:
 | `-A, --all-namespaces` | Discover workloads across all namespaces |
 | `-l, --selector=SELECTOR` | Label selector to filter workloads (e.g., `app=myapp`) |
 
+**Label selector syntax:**
+
+The `-l, --selector` flag uses standard Kubernetes label selector syntax. Filtering happens server-side for efficiency.
+
+```bash
+# Equality - workloads with exact label match
+kubectl petstore nodes -l app.kubernetes.io/part-of=petstore
+
+# Multiple labels (AND) - must match all
+kubectl petstore nodes -l "app=petstore,tier=backend"
+
+# Inequality - exclude workloads with label value
+kubectl petstore nodes -l "environment!=development"
+
+# Set membership - label value in set
+kubectl petstore nodes -l "environment in (prod,staging)"
+
+# Set exclusion - label value not in set
+kubectl petstore nodes -l "environment notin (dev,test)"
+
+# Label existence - workloads that have the label (any value)
+kubectl petstore nodes -l "app.kubernetes.io/managed-by"
+
+# Label absence - workloads that don't have the label
+kubectl petstore nodes -l "!experimental"
+```
+
 **Node model overview:**
 
 The `nodes` command outputs [Rundeck resource model JSON](https://docs.rundeck.com/docs/manual/document-format-reference/resource-json-v10.html) — a JSON object where each key is a node name and each value contains the node's attributes. Rundeck uses these nodes for job dispatch, filtering, and attribute expansion.
