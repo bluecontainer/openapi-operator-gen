@@ -39,10 +39,22 @@ fi
 [ -n "$CLUSTER_TOKEN_SUFFIX" ] && FLAGS="$FLAGS --cluster-token-suffix=$CLUSTER_TOKEN_SUFFIX"
 [ -n "$DEFAULT_TOKEN_SUFFIX" ] && FLAGS="$FLAGS --default-token-suffix=$DEFAULT_TOKEN_SUFFIX"
 
+# Find the kubectl-rundeck-nodes binary
+# Priority: 1) bundled in plugin, 2) system PATH
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$SCRIPT_DIR/kubectl-rundeck-nodes" ]; then
+  KUBECTL_RUNDECK_NODES="$SCRIPT_DIR/kubectl-rundeck-nodes"
+elif command -v kubectl-rundeck-nodes &>/dev/null; then
+  KUBECTL_RUNDECK_NODES="kubectl-rundeck-nodes"
+else
+  echo "Error: kubectl-rundeck-nodes not found (not bundled or in PATH)" >&2
+  exit 1
+fi
+
 case "$EXECUTION_MODE" in
   native)
     # Native execution: kubectl-rundeck-nodes runs directly on Rundeck host
-    kubectl-rundeck-nodes --server="$K8S_URL" --token="$K8S_TOKEN" \
+    "$KUBECTL_RUNDECK_NODES" --server="$K8S_URL" --token="$K8S_TOKEN" \
       --insecure-skip-tls-verify $FLAGS
     ;;
 
