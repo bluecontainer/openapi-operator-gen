@@ -76,3 +76,15 @@ providers:
         required: false
         scope: Instance
         default: "{{ .PluginName }}-plugin-runner"
+      - name: cluster_name
+        type: String
+        title: Cluster Name
+        description: "Cluster identifier for multi-cluster discovery (e.g., prod, staging)"
+        required: false
+        scope: Instance
+      - name: cluster_token_suffix
+        type: String
+        title: Cluster Token Suffix
+        description: "Key Storage path suffix for this cluster's token (e.g., clusters/prod/token). Jobs use keys/${node.clusterTokenSuffix} in storagePath."
+        required: false
+        scope: Instance

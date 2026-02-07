@@ -48,6 +48,11 @@
   - name: k8s_token
     secure: true
     valueExposed: true
+    storagePath: keys/${node.clusterTokenSuffix}
+    hidden: true
+  - name: k8s_token_default
+    secure: true
+    valueExposed: true
     storagePath: keys/project/{{ .PluginName }}-operator/k8s-token
     hidden: true
   scheduleEnabled: true
@@ -65,7 +70,11 @@
         [ "$RD_OPTION_DRIFT" = "true" ] && cmd="$cmd --drift"
         [ -n "$RD_OPTION_SELECTOR" ] && cmd="$cmd --selector=\"$RD_OPTION_SELECTOR\""
         [ "$RD_OPTION_ALL_NAMESPACES" = "true" ] && cmd="$cmd --all-namespaces"
-        cmd="$cmd --server=\"$RD_GLOBALS_K8S_URL\" --token=\"$RD_OPTION_K8S_TOKEN\" --insecure-skip-tls-verify"
+        # Use cluster URL from node attribute if available, fall back to project global
+        _CLUSTER_URL="@node.clusterUrl@"
+        [ -z "$_CLUSTER_URL" ] || [ "$_CLUSTER_URL" = "@""node.clusterUrl""@" ] && _CLUSTER_URL="$RD_GLOBALS_K8S_URL"
+        _K8S_TOKEN="${RD_OPTION_K8S_TOKEN:-$RD_OPTION_K8S_TOKEN_DEFAULT}"
+        cmd="$cmd --server=\"$_CLUSTER_URL\" --token=\"$_K8S_TOKEN\" --insecure-skip-tls-verify"
         eval $cmd
     keepgoing: false
     strategy: node-first

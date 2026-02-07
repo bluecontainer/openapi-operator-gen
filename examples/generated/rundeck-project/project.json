@@ -2,11 +2,13 @@
   "name": "petstore-operator",
   "config": {
     "project.description": "Manage petstore resources via Kubernetes operator",
+    "project.globals.k8s_url": "__K8S_URL__",
     "project.globals.namespace": "petstore-system",
     "project.label": "petstore-operator",
     "project.name": "petstore-operator",
+    "resources.source.1.config.cluster_token_suffix": "project/petstore-operator/k8s-token",
     "resources.source.1.config.execution_mode": "native",
-    "resources.source.1.config.k8s_token": "keys/project/petstore-operator/k8s-token",
+    "resources.source.1.config.k8s_token": "keys/${resources.source.1.config.cluster_token_suffix}",
     "resources.source.1.config.k8s_url": "__K8S_URL__",
     "resources.source.1.config.namespace": "petstore-system",
     "resources.source.1.type": "petstore-k8s-nodes"

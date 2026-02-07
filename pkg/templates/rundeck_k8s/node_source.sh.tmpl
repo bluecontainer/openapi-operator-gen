@@ -21,7 +21,7 @@ SA="${PLUGIN_SERVICE_ACCOUNT:-{{ .PluginName }}-plugin-runner}"
 POD="plugin-nodes-$(date +%s)-$RANDOM"
 
 kubectl --server="$K8S_URL" --token="$K8S_TOKEN" --insecure-skip-tls-verify \
-  run "$POD" --image="$IMAGE" --restart=Never --rm -i --quiet --image-pull-policy=Never \
+  run "$POD" --image="$IMAGE" --restart=Never --rm -i --quiet --image-pull-policy=IfNotPresent \
   -n "$PLUGIN_NS" \
   --overrides='{"spec":{"serviceAccountName":"'"$SA"'"}}' \
   -- {{ .PluginName }} nodes -n {{ .Namespace }}
