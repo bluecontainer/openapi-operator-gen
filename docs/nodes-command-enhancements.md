@@ -609,3 +609,213 @@ var nodesCmd = nodes.NewCommand(nodes.CommandOptions{
 3. **Publish to Krew** - Submit to krew-index for distribution
 4. **Update generator** - Template imports library instead of embedding implementation
 5. **Regenerate examples** - Verify generated plugins still work
+
+---
+
+## Standalone Rundeck Plugin
+
+In addition to the kubectl plugin, a standalone Rundeck ResourceModelSource plugin can be created that works with any Kubernetes cluster without requiring a generated operator.
+
+### Two Standalone Plugins
+
+```
+1. kubectl-rundeck-nodes     # kubectl plugin (Go binary)
+   └── Discovers K8s workloads, outputs Rundeck JSON
+
+2. rundeck-k8s-nodes         # Rundeck plugin (ZIP)
+   └── ResourceModelSource that invokes the kubectl plugin
+```
+
+### Comparison: Generated vs Standalone
+
+| Aspect | Generated Plugin | Standalone Plugin |
+|--------|------------------|-------------------|
+| Name | `petstore-k8s-nodes` | `rundeck-k8s-nodes` |
+| Command | `petstore nodes` | `kubectl-rundeck-nodes` |
+| Default namespace | Operator namespace | Configurable |
+| Token suffix | `project/petstore-operator/k8s-token` | Configurable |
+| Binary bundled | In operator container | Separate install or bundled |
+| Requires operator | Yes | No |
+
+### Rundeck Plugin Structure
+
+```
+rundeck-k8s-nodes/
+├── plugin.yaml              # ResourceModelSource plugin definition
+├── contents/
+│   └── nodes.sh             # Script wrapper for kubectl-rundeck-nodes
+├── Makefile                 # Builds the ZIP
+└── README.md
+```
+
+### plugin.yaml (Standalone)
+
+```yaml
+name: rundeck-k8s-nodes
+rundeckPluginVersion: 2.0
+author: "bluecontainer"
+description: "Kubernetes workload discovery for Rundeck node source"
+pluginType: script
+providers:
+  - name: k8s-workload-nodes
+    service: ResourceModelSource
+    plugin-type: script
+    script-interpreter: /bin/bash
+    script-file: nodes.sh
+    resource-format: resourcejson
+    config:
+      - name: k8s_token
+        type: String
+        title: Kubernetes Token
+        required: true
+        renderingOptions:
+          valueConversion: "STORAGE_PATH_AUTOMATIC_READ"
+      - name: k8s_url
+        type: String
+        title: Kubernetes API URL
+        required: true
+      - name: namespace
+        type: String
+        title: Namespace
+        description: "Namespace to discover workloads (empty = all with -A)"
+      - name: label_selector
+        type: String
+        title: Label Selector
+        description: "Filter workloads by labels (e.g., app=myapp)"
+      - name: execution_mode
+        type: Select
+        title: Execution Mode
+        values: "native,docker"
+        default: "native"
+      - name: docker_image
+        type: String
+        title: Docker Image
+        description: "Image containing kubectl-rundeck-nodes"
+        default: "bluecontainer/kubectl-rundeck-nodes:latest"
+      - name: exclude_operator
+        type: Boolean
+        title: Exclude Operator
+        default: "true"
+      - name: cluster_name
+        type: String
+        title: Cluster Name
+        description: "Identifier for multi-cluster setups"
+      - name: cluster_token_suffix
+        type: String
+        title: Cluster Token Suffix
+        description: "Key Storage path suffix for this cluster"
+      - name: default_token_suffix
+        type: String
+        title: Default Token Suffix
+        description: "Default Key Storage path suffix when not using multi-cluster"
+        default: "rundeck/k8s-token"
+```
+
+### nodes.sh (Standalone)
+
+```bash
+#!/bin/bash
+set -e
+
+K8S_TOKEN="${RD_CONFIG_K8S_TOKEN:-}"
+K8S_URL="${RD_CONFIG_K8S_URL:-}"
+NAMESPACE="${RD_CONFIG_NAMESPACE:-}"
+LABEL_SELECTOR="${RD_CONFIG_LABEL_SELECTOR:-}"
+EXECUTION_MODE="${RD_CONFIG_EXECUTION_MODE:-native}"
+DOCKER_IMAGE="${RD_CONFIG_DOCKER_IMAGE:-bluecontainer/kubectl-rundeck-nodes:latest}"
+EXCLUDE_OPERATOR="${RD_CONFIG_EXCLUDE_OPERATOR:-true}"
+CLUSTER_NAME="${RD_CONFIG_CLUSTER_NAME:-}"
+CLUSTER_TOKEN_SUFFIX="${RD_CONFIG_CLUSTER_TOKEN_SUFFIX:-}"
+DEFAULT_TOKEN_SUFFIX="${RD_CONFIG_DEFAULT_TOKEN_SUFFIX:-rundeck/k8s-token}"
+
+if [ -z "$K8S_TOKEN" ]; then
+  echo "Error: K8S_TOKEN not provided" >&2
+  exit 1
+fi
+
+if [ -z "$K8S_URL" ]; then
+  echo "Error: K8S_URL not provided" >&2
+  exit 1
+fi
+
+# Build flags
+FLAGS=""
+[ -n "$NAMESPACE" ] && FLAGS="$FLAGS -n $NAMESPACE" || FLAGS="$FLAGS -A"
+[ -n "$LABEL_SELECTOR" ] && FLAGS="$FLAGS -l $LABEL_SELECTOR"
+[ "$EXCLUDE_OPERATOR" = "true" ] && FLAGS="$FLAGS --exclude-operator"
+[ -n "$CLUSTER_NAME" ] && FLAGS="$FLAGS --cluster-name=$CLUSTER_NAME"
+[ -n "$K8S_URL" ] && FLAGS="$FLAGS --cluster-url=$K8S_URL"
+[ -n "$CLUSTER_TOKEN_SUFFIX" ] && FLAGS="$FLAGS --cluster-token-suffix=$CLUSTER_TOKEN_SUFFIX"
+[ -n "$DEFAULT_TOKEN_SUFFIX" ] && FLAGS="$FLAGS --default-token-suffix=$DEFAULT_TOKEN_SUFFIX"
+
+case "$EXECUTION_MODE" in
+  native)
+    kubectl-rundeck-nodes --server="$K8S_URL" --token="$K8S_TOKEN" \
+      --insecure-skip-tls-verify $FLAGS
+    ;;
+  docker)
+    docker run --rm -i --network host \
+      -e KUBERNETES_SERVICE_HOST="" \
+      "$DOCKER_IMAGE" \
+      --server="$K8S_URL" --token="$K8S_TOKEN" \
+      --insecure-skip-tls-verify $FLAGS
+    ;;
+  *)
+    echo "Error: Unknown execution mode: $EXECUTION_MODE" >&2
+    exit 1
+    ;;
+esac
+```
+
+### Distribution Options
+
+| Method | kubectl Plugin | Rundeck Plugin |
+|--------|----------------|----------------|
+| **Krew** | `kubectl krew install rundeck-nodes` | N/A |
+| **GitHub Releases** | Binary downloads | ZIP downloads |
+| **Docker Hub** | `bluecontainer/kubectl-rundeck-nodes` | N/A |
+| **Rundeck Plugin Repo** | N/A | Upload ZIP |
+| **Bundled ZIP** | N/A | Binary included in ZIP |
+
+### Benefits of Standalone Rundeck Plugin
+
+- Works with **any** Kubernetes cluster (no operator needed)
+- Install once in Rundeck, use for multiple clusters via node sources
+- Community can use it without generating an operator
+- All enhancements (filtering, health checks, etc.) available to everyone
+- Can be used alongside generated operator-specific plugins
+
+### Repository Structure
+
+Both plugins can live in the same repository:
+
+```
+github.com/bluecontainer/kubectl-rundeck-nodes/
+├── cmd/kubectl-rundeck-nodes/
+│   └── main.go                    # Standalone kubectl plugin CLI
+├── pkg/nodes/
+│   ├── discover.go                # Core discovery logic
+│   ├── types.go                   # RundeckNode struct, Options
+│   ├── output.go                  # JSON/table/yaml formatters
+│   └── filters.go                 # Type/label/pattern filtering
+├── rundeck-plugin/
+│   ├── plugin.yaml                # Rundeck ResourceModelSource
+│   ├── contents/
+│   │   └── nodes.sh               # Script wrapper
+│   └── Makefile                   # Builds ZIP
+├── Dockerfile                     # Multi-arch image
+├── Makefile                       # Build all artifacts
+├── .goreleaser.yaml               # Release automation
+└── go.mod
+```
+
+### Updated Implementation Phases
+
+1. **Extract library** - Move discovery logic to `pkg/nodes/` with configurable options
+2. **Create standalone kubectl plugin** - Wrap library in `cmd/kubectl-rundeck-nodes/`
+3. **Create standalone Rundeck plugin** - Shell wrapper in `rundeck-plugin/`
+4. **Docker image** - Multi-arch image for docker execution mode
+5. **Publish kubectl plugin to Krew** - Submit to krew-index
+6. **Publish Rundeck plugin** - GitHub releases, optionally Rundeck plugin repo
+7. **Update generator** - Template imports library instead of embedding
+8. **Regenerate examples** - Verify generated plugins still work
