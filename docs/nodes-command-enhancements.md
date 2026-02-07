@@ -457,3 +457,155 @@ kubectl petstore nodes -A \
   --exclude-operator \
   -o names
 ```
+
+---
+
+## Standalone Plugin Architecture
+
+The `nodes` command can be extracted as a standalone kubectl plugin (`kubectl-rundeck-nodes`) that is also used as a library by generated plugins. This provides broader distribution (via Krew) while keeping generated plugins in sync with enhancements.
+
+### Comparison with Existing Plugins
+
+| Plugin | Function | Similarity to `nodes` |
+|--------|----------|----------------------|
+| [ketall](https://github.com/corneliusweig/ketall) | Lists ALL resources in a cluster | Comprehensive discovery, but outputs raw K8s resources, not Rundeck format |
+| [kubectl-tree](https://github.com/ahmetb/kubectl-tree) | Shows object hierarchies via ownerReferences | Relationship visualization, but not workload-focused |
+| [lineage](https://krew.sigs.k8s.io/plugins/) | Like tree but understands logical relationships | Better for understanding Helm release relationships |
+| [resource-capacity](https://github.com/robscott/kube-capacity) | Shows resource requests/limits/utilization | Health/capacity focus, but for K8s nodes not workloads |
+| [kubectl-ansible](https://github.com/moshloop/kubectl-ansible) | Dynamic Ansible inventory from K8s cluster | Inventory export, but for Ansible not Rundeck |
+
+**Gap filled by `nodes`:** No existing plugin provides Rundeck resource model JSON output with workload-centric discovery, targeting attributes, multi-cluster credentials, and integrated health reporting.
+
+### Current Dependencies on Generated Plugin
+
+| Dependency | Location | Extraction Difficulty |
+|------------|----------|----------------------|
+| `k8sClient.DynamicClient()` | Line 96 | Easy - standard client-go |
+| `k8sClient.GetNamespace()` | Line 101 | Easy - kubeconfig loader |
+| `{{ .PluginName }}` in `defaultClusterTokenSuffix` | Line 25 | Easy - make configurable via flag |
+| `{{ .PluginName }}` in help text | Lines 76-82 | Easy - parameterize or use generic name |
+
+**What's already generic:**
+- API calls use only standard `apps/v1` (StatefulSets, Deployments) and `v1` (Pods)
+- Output is standard Rundeck resource model JSON format
+- All imports are standard k8s client-go packages
+- Helm release detection via `app.kubernetes.io/instance` label is universal
+
+### Proposed Library Structure
+
+```
+github.com/bluecontainer/kubectl-rundeck-nodes/
+├── cmd/kubectl-rundeck-nodes/
+│   └── main.go                    # Standalone CLI entrypoint
+├── pkg/nodes/
+│   ├── discover.go                # Core workload discovery logic
+│   ├── types.go                   # RundeckNode struct, Options
+│   ├── output.go                  # JSON/table/yaml formatters
+│   └── filters.go                 # Type/label/pattern filtering
+└── go.mod
+```
+
+### Library Interface
+
+```go
+// pkg/nodes/types.go
+package nodes
+
+type Options struct {
+    Namespace           string
+    AllNamespaces       bool
+    LabelSelector       string
+    ClusterName         string
+    ClusterURL          string
+    DefaultTokenSuffix  string   // Caller provides their default
+
+    // Phase 1 enhancements
+    Types               []string // helm-release, statefulset, deployment
+    ExcludeTypes        []string
+    ExcludeOperator     bool
+    HealthyOnly         bool
+}
+
+type RundeckNode struct {
+    NodeName           string `json:"nodename"`
+    Hostname           string `json:"hostname"`
+    Tags               string `json:"tags"`
+    OSFamily           string `json:"osFamily"`
+    NodeExecutor       string `json:"node-executor"`
+    FileCopier         string `json:"file-copier"`
+    Cluster            string `json:"cluster,omitempty"`
+    ClusterURL         string `json:"clusterUrl,omitempty"`
+    ClusterTokenSuffix string `json:"clusterTokenSuffix,omitempty"`
+    TargetType         string `json:"targetType"`
+    TargetValue        string `json:"targetValue"`
+    TargetNamespace    string `json:"targetNamespace"`
+    WorkloadKind       string `json:"workloadKind"`
+    WorkloadName       string `json:"workloadName"`
+    PodCount           string `json:"podCount"`
+    HealthyPods        string `json:"healthyPods"`
+}
+
+// Discover queries K8s and returns Rundeck nodes
+func Discover(ctx context.Context, client dynamic.Interface, opts Options) (map[string]*RundeckNode, error)
+
+// Output writes nodes in the requested format
+func Output(w io.Writer, nodes map[string]*RundeckNode, format string) error
+```
+
+### Standalone Plugin Usage
+
+```go
+// cmd/kubectl-rundeck-nodes/main.go
+func main() {
+    var opts nodes.Options
+
+    cmd := &cobra.Command{
+        Use: "kubectl-rundeck-nodes",
+        RunE: func(cmd *cobra.Command, args []string) error {
+            dynClient := initClient()
+
+            result, err := nodes.Discover(ctx, dynClient, opts)
+            if err != nil {
+                return err
+            }
+            return nodes.Output(os.Stdout, result, outputFormat)
+        },
+    }
+
+    cmd.Flags().StringVar(&opts.DefaultTokenSuffix, "default-token-suffix",
+        "rundeck/k8s-token", "Default Rundeck Key Storage path suffix")
+    // ... other flags from enhancements
+}
+```
+
+### Generated Plugin Usage
+
+```go
+// Generated nodes_cmd.go (minimal template)
+import "github.com/bluecontainer/kubectl-rundeck-nodes/pkg/nodes"
+
+var nodesCmd = nodes.NewCommand(nodes.CommandOptions{
+    DefaultTokenSuffix: "project/{{ .PluginName }}-operator/k8s-token",
+    GetDynamicClient:   func() dynamic.Interface { return k8sClient.DynamicClient() },
+    GetNamespace:       func() string { return k8sClient.GetNamespace() },
+})
+```
+
+### Benefits
+
+| Aspect | Benefit |
+|--------|---------|
+| **Single implementation** | Bug fixes and enhancements apply everywhere |
+| **Krew distribution** | Standalone plugin installable via `kubectl krew install rundeck-nodes` |
+| **Generated plugins** | Import library, just provide config (token suffix, plugin name) |
+| **Enhancements** | Phase 1-4 features benefit all users |
+| **Testing** | One test suite covers both use cases |
+| **Versioning** | Generated plugins can pin to specific library versions |
+
+### Implementation Phases
+
+1. **Extract library** - Move discovery logic to `pkg/nodes/` with configurable options
+2. **Create standalone CLI** - Wrap library in `cmd/kubectl-rundeck-nodes/`
+3. **Publish to Krew** - Submit to krew-index for distribution
+4. **Update generator** - Template imports library instead of embedding implementation
+5. **Regenerate examples** - Verify generated plugins still work
