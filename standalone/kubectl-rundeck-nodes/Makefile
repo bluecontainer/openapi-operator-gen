@@ -13,7 +13,7 @@ GOTEST := $(GOCMD) test
 GOMOD := $(GOCMD) mod
 GOFMT := $(GOCMD) fmt
 
-.PHONY: all build test clean fmt tidy install cross-compile
+.PHONY: all build test clean fmt tidy install cross-compile docker-build docker-buildx docker-buildx-local docker-buildx-setup
 
 all: build
 
@@ -50,10 +50,35 @@ cross-compile: clean
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kubectl-rundeck-nodes
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/kubectl-rundeck-nodes
 
-# Build Docker image
+# Docker image name
+DOCKER_IMAGE ?= bluecontainer/kubectl-rundeck-nodes
+DOCKER_TAG ?= $(VERSION)
+PLATFORMS ?= linux/amd64,linux/arm64
+
+# Build Docker image (single platform, local)
 docker-build:
-	docker build -t $(BINARY_NAME):$(VERSION) .
-	docker tag $(BINARY_NAME):$(VERSION) $(BINARY_NAME):latest
+	docker build --build-arg VERSION=$(VERSION) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE):latest .
+
+# Build and push multi-arch Docker image (requires docker buildx)
+docker-buildx:
+	docker buildx build --platform $(PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE):latest \
+		--push .
+
+# Build multi-arch Docker image locally (load into docker, single platform)
+docker-buildx-local:
+	docker buildx build --load \
+		--build-arg VERSION=$(VERSION) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE):latest .
+
+# Create buildx builder if not exists
+docker-buildx-setup:
+	docker buildx create --name multiarch --use --bootstrap || docker buildx use multiarch
 
 # Run locally
 run:

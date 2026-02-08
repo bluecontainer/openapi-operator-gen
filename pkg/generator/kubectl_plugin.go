@@ -50,6 +50,7 @@ type KubectlPluginTemplateData struct {
 	AggregateKind    string
 	HasBundle        bool
 	BundleKind       string
+	NodesLibraryPath string // Relative path to kubectl-rundeck-nodes library for replace directive
 }
 
 // Generate generates the kubectl plugin code
@@ -129,6 +130,13 @@ func (g *KubectlPluginGenerator) prepareTemplateData(crds []*mapper.CRDDefinitio
 	// Build module name for the plugin
 	pluginModuleName := fmt.Sprintf("%s/kubectl-plugin", g.config.ModuleName)
 
+	// Compute relative path to the nodes library for go.mod replace directive
+	// The plugin is generated at ${OutputDir}/kubectl-plugin/, so we need to compute
+	// the relative path from there to the standalone library
+	// Default: assume library is in standalone/kubectl-rundeck-nodes relative to project root
+	// For examples/generated, this would be ../../../standalone/kubectl-rundeck-nodes
+	nodesLibraryPath := "../../../standalone/kubectl-rundeck-nodes"
+
 	data := KubectlPluginTemplateData{
 		Year:             time.Now().Year(),
 		GeneratorVersion: g.config.GeneratorVersion,
@@ -138,6 +146,7 @@ func (g *KubectlPluginGenerator) prepareTemplateData(crds []*mapper.CRDDefinitio
 		PluginName:       apiName,
 		BinaryName:       "kubectl-" + apiName,
 		ModuleName:       pluginModuleName,
+		NodesLibraryPath: nodesLibraryPath,
 		ResourceKinds:    make([]KindInfo, 0),
 		QueryKinds:       make([]KindInfo, 0),
 		ActionKinds:      make([]KindInfo, 0),

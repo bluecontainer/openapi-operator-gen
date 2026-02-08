@@ -1,0 +1,27 @@
+# Build artifacts
+bin/
+*.exe
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Documentation
+README.md
+LICENSE
+*.md
+
+# Test fixtures
+testdata/
