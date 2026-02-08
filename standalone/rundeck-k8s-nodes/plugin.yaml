@@ -60,10 +60,11 @@ providers:
         values:
           - native
           - docker
+          - kubernetes
       - name: docker_image
         type: String
         title: Docker Image
-        description: Image containing kubectl-rundeck-nodes (docker mode only)
+        description: Image containing kubectl-rundeck-nodes (docker/kubernetes mode)
         required: false
         scope: Instance
         default: bluecontainer/kubectl-rundeck-nodes:latest
@@ -74,6 +75,31 @@ providers:
         required: false
         scope: Instance
         default: host
+      - name: plugin_namespace
+        type: String
+        title: Plugin Namespace
+        description: Namespace to run plugin pod in (kubernetes mode only)
+        required: false
+        scope: Instance
+        default: default
+      - name: service_account
+        type: String
+        title: Service Account
+        description: ServiceAccount for plugin pod (kubernetes mode only)
+        required: false
+        scope: Instance
+        default: default
+      - name: image_pull_policy
+        type: Select
+        title: Image Pull Policy
+        description: Image pull policy for plugin pod (kubernetes mode only)
+        required: false
+        scope: Instance
+        default: IfNotPresent
+        values:
+          - Always
+          - IfNotPresent
+          - Never
       - name: cluster_name
         type: String
         title: Cluster Name

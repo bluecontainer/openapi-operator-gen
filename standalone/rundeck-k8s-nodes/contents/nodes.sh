@@ -12,6 +12,9 @@ LABEL_SELECTOR="${RD_CONFIG_LABEL_SELECTOR:-}"
 EXECUTION_MODE="${RD_CONFIG_EXECUTION_MODE:-native}"
 DOCKER_IMAGE="${RD_CONFIG_DOCKER_IMAGE:-bluecontainer/kubectl-rundeck-nodes:latest}"
 DOCKER_NETWORK="${RD_CONFIG_DOCKER_NETWORK:-host}"
+PLUGIN_NAMESPACE="${RD_CONFIG_PLUGIN_NAMESPACE:-default}"
+SERVICE_ACCOUNT="${RD_CONFIG_SERVICE_ACCOUNT:-default}"
+IMAGE_PULL_POLICY="${RD_CONFIG_IMAGE_PULL_POLICY:-IfNotPresent}"
 CLUSTER_NAME="${RD_CONFIG_CLUSTER_NAME:-}"
 CLUSTER_TOKEN_SUFFIX="${RD_CONFIG_CLUSTER_TOKEN_SUFFIX:-}"
 DEFAULT_TOKEN_SUFFIX="${RD_CONFIG_DEFAULT_TOKEN_SUFFIX:-rundeck/k8s-token}"
@@ -77,6 +80,17 @@ case "$EXECUTION_MODE" in
     docker run --rm --network "$DOCKER_NETWORK" "$DOCKER_IMAGE" \
       --server="$K8S_URL" --token="$K8S_TOKEN" \
       --insecure-skip-tls-verify $FLAGS
+    ;;
+
+  kubernetes)
+    # Kubernetes execution: kubectl-rundeck-nodes runs in ephemeral K8s pod
+    POD="rundeck-nodes-$(date +%s)-$RANDOM"
+    kubectl --server="$K8S_URL" --token="$K8S_TOKEN" --insecure-skip-tls-verify \
+      run "$POD" --image="$DOCKER_IMAGE" --restart=Never --rm -i --quiet \
+      --image-pull-policy="$IMAGE_PULL_POLICY" \
+      -n "$PLUGIN_NAMESPACE" \
+      --overrides='{"spec":{"serviceAccountName":"'"$SERVICE_ACCOUNT"'"}}' \
+      -- kubectl-rundeck-nodes $FLAGS
     ;;
 
   *)
