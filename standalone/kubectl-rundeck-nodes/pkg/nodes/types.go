@@ -51,6 +51,31 @@ type DiscoverOptions struct {
 	// DefaultTokenSuffix is the default Key Storage path suffix when
 	// ClusterTokenSuffix is not set. Defaults to "rundeck/k8s-token".
 	DefaultTokenSuffix string
+
+	// Phase 1: Core Filtering Options
+
+	// Types filters to only include these workload types.
+	// Valid values: "helm-release", "statefulset", "deployment"
+	// Empty means all types.
+	Types []string
+
+	// ExcludeTypes excludes these workload types from discovery.
+	// Applied after Types filtering.
+	ExcludeTypes []string
+
+	// ExcludeLabels excludes workloads matching any of these label selectors.
+	// Each entry is a label selector (e.g., "app=operator").
+	ExcludeLabels []string
+
+	// ExcludeOperator excludes the operator controller-manager from discovery.
+	// This is a convenience flag that excludes workloads matching common operator patterns:
+	// - label app.kubernetes.io/component=operator
+	// - label control-plane=controller-manager
+	// - name matching *-controller-manager or *-operator
+	ExcludeOperator bool
+
+	// HealthyOnly includes only workloads where all pods are running.
+	HealthyOnly bool
 }
 
 // helmInfo tracks Helm release information during discovery.
@@ -66,3 +91,15 @@ type helmInfo struct {
 
 // DefaultTokenSuffix is the default Rundeck Key Storage path suffix.
 const DefaultTokenSuffix = "rundeck/k8s-token"
+
+// Workload type constants
+const (
+	TypeHelmRelease = "helm-release"
+	TypeStatefulSet = "statefulset"
+	TypeDeployment  = "deployment"
+)
+
+// ValidTypes returns the list of valid workload types.
+func ValidTypes() []string {
+	return []string{TypeHelmRelease, TypeStatefulSet, TypeDeployment}
+}

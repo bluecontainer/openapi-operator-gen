@@ -31,6 +31,13 @@ var (
 	clusterTokenSuffix string
 	defaultTokenSuffix string
 	output             string
+
+	// Phase 1: Core Filtering
+	types           []string
+	excludeTypes    []string
+	excludeLabels   []string
+	excludeOperator bool
+	healthyOnly     bool
 )
 
 func main() {
@@ -69,7 +76,16 @@ Examples:
   kubectl rundeck-nodes -l app.kubernetes.io/part-of=myapp
 
   # Multi-cluster setup with token suffix
-  kubectl rundeck-nodes --cluster-name=prod --cluster-token-suffix=clusters/prod/token`,
+  kubectl rundeck-nodes --cluster-name=prod --cluster-token-suffix=clusters/prod/token
+
+  # Filter by workload type
+  kubectl rundeck-nodes --types=statefulset,helm-release
+
+  # Exclude operator workloads
+  kubectl rundeck-nodes --exclude-operator
+
+  # Only healthy workloads
+  kubectl rundeck-nodes --healthy-only`,
 	Version: version,
 	RunE:    run,
 }
@@ -87,6 +103,13 @@ func init() {
 	rootCmd.Flags().StringVar(&clusterTokenSuffix, "cluster-token-suffix", "", "Key Storage path suffix for cluster token")
 	rootCmd.Flags().StringVar(&defaultTokenSuffix, "default-token-suffix", nodes.DefaultTokenSuffix, "Default Key Storage path suffix")
 	rootCmd.Flags().StringVarP(&output, "output", "o", "json", "Output format: json, yaml, table")
+
+	// Phase 1: Core Filtering flags
+	rootCmd.Flags().StringSliceVar(&types, "types", nil, "Only include these workload types (helm-release, statefulset, deployment)")
+	rootCmd.Flags().StringSliceVar(&excludeTypes, "exclude-types", nil, "Exclude these workload types")
+	rootCmd.Flags().StringSliceVar(&excludeLabels, "exclude-labels", nil, "Exclude workloads matching these label selectors")
+	rootCmd.Flags().BoolVar(&excludeOperator, "exclude-operator", false, "Exclude operator controller-manager workloads")
+	rootCmd.Flags().BoolVar(&healthyOnly, "healthy-only", false, "Only include workloads with all pods running")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -113,6 +136,12 @@ func run(cmd *cobra.Command, args []string) error {
 		ClusterURL:         clusterURL,
 		ClusterTokenSuffix: clusterTokenSuffix,
 		DefaultTokenSuffix: defaultTokenSuffix,
+		// Phase 1: Core Filtering
+		Types:           types,
+		ExcludeTypes:    excludeTypes,
+		ExcludeLabels:   excludeLabels,
+		ExcludeOperator: excludeOperator,
+		HealthyOnly:     healthyOnly,
 	}
 
 	discovered, err := nodes.Discover(ctx, client, opts)

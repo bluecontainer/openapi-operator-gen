@@ -93,3 +93,36 @@ providers:
         required: false
         scope: Instance
         default: rundeck/k8s-token
+      # Phase 1: Core Filtering Options
+      - name: types
+        type: String
+        title: Workload Types
+        description: "Only include these workload types (comma-separated: helm-release, statefulset, deployment)"
+        required: false
+        scope: Instance
+      - name: exclude_types
+        type: String
+        title: Exclude Types
+        description: "Exclude these workload types (comma-separated)"
+        required: false
+        scope: Instance
+      - name: exclude_labels
+        type: String
+        title: Exclude Labels
+        description: "Exclude workloads matching these labels (comma-separated selectors, e.g., app=operator,tier=control-plane)"
+        required: false
+        scope: Instance
+      - name: exclude_operator
+        type: Boolean
+        title: Exclude Operator
+        description: Exclude operator controller-manager workloads
+        required: false
+        scope: Instance
+        default: "true"
+      - name: healthy_only
+        type: Boolean
+        title: Healthy Only
+        description: Only include workloads with all pods running
+        required: false
+        scope: Instance
+        default: "false"

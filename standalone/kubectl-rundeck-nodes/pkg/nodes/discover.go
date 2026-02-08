@@ -21,6 +21,12 @@ var (
 // It discovers StatefulSets and Deployments, with Helm release detection and
 // deduplication based on the app.kubernetes.io/instance label.
 func Discover(ctx context.Context, client dynamic.Interface, opts DiscoverOptions) (map[string]*RundeckNode, error) {
+	// Create filter from options
+	filter, err := NewFilter(opts)
+	if err != nil {
+		return nil, fmt.Errorf("invalid filter options: %w", err)
+	}
+
 	listOpts := metav1.ListOptions{}
 	if opts.LabelSelector != "" {
 		listOpts.LabelSelector = opts.LabelSelector
@@ -29,19 +35,26 @@ func Discover(ctx context.Context, client dynamic.Interface, opts DiscoverOption
 	nodes := make(map[string]*RundeckNode)
 	helmReleases := make(map[string]*helmInfo) // key: "release@namespace"
 
-	// Discover StatefulSets
-	if err := discoverStatefulSets(ctx, client, opts, listOpts, nodes, helmReleases); err != nil {
-		// Log but don't fail - allow partial discovery
-		fmt.Printf("Warning: failed to list StatefulSets: %v\n", err)
+	// Discover StatefulSets (if type is allowed)
+	if filter.ShouldIncludeType(TypeStatefulSet) {
+		if err := discoverStatefulSets(ctx, client, opts, listOpts, filter, nodes, helmReleases); err != nil {
+			// Log but don't fail - allow partial discovery
+			fmt.Printf("Warning: failed to list StatefulSets: %v\n", err)
+		}
 	}
 
-	// Discover Deployments
-	if err := discoverDeployments(ctx, client, opts, listOpts, nodes, helmReleases); err != nil {
-		fmt.Printf("Warning: failed to list Deployments: %v\n", err)
+	// Discover Deployments (if type is allowed)
+	if filter.ShouldIncludeType(TypeDeployment) {
+		if err := discoverDeployments(ctx, client, opts, listOpts, filter, nodes, helmReleases); err != nil {
+			fmt.Printf("Warning: failed to list Deployments: %v\n", err)
+		}
 	}
 
-	// Add Helm release nodes
+	// Add Helm release nodes (if type is allowed)
 	for _, info := range helmReleases {
+		if !filter.ShouldIncludeHelmRelease(info) {
+			continue
+		}
 		nodeKey := makeNodeKey(opts.ClusterName, "helm", info.release, info.namespace)
 		nodes[nodeKey] = &RundeckNode{
 			NodeName:           nodeKey,
@@ -66,7 +79,7 @@ func Discover(ctx context.Context, client dynamic.Interface, opts DiscoverOption
 	return nodes, nil
 }
 
-func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts DiscoverOptions, listOpts metav1.ListOptions, nodes map[string]*RundeckNode, helmReleases map[string]*helmInfo) error {
+func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts DiscoverOptions, listOpts metav1.ListOptions, filter *Filter, nodes map[string]*RundeckNode, helmReleases map[string]*helmInfo) error {
 	var stsList *unstructured.UnstructuredList
 	var err error
 
@@ -90,6 +103,14 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 
 		healthy := countHealthyPods(ctx, client, stsNS, getSelectorLabels(&sts))
 
+		// Apply filters (exclude labels, operator exclusion)
+		if filter.ShouldExcludeByLabels(labels) {
+			continue
+		}
+		if filter.ShouldExcludeOperator(stsName, labels) {
+			continue
+		}
+
 		helmRelease := labels["app.kubernetes.io/instance"]
 		if helmRelease != "" {
 			key := helmRelease + "@" + stsNS
@@ -111,6 +132,11 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 				}
 			}
 		} else {
+			// Apply health filter for non-Helm workloads
+			if filter.ShouldExcludeByHealth(healthy, int(replicas)) {
+				continue
+			}
+
 			nodeKey := makeNodeKey(opts.ClusterName, "sts", stsName, stsNS)
 			nodes[nodeKey] = &RundeckNode{
 				NodeName:           nodeKey,
@@ -136,7 +162,7 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 	return nil
 }
 
-func discoverDeployments(ctx context.Context, client dynamic.Interface, opts DiscoverOptions, listOpts metav1.ListOptions, nodes map[string]*RundeckNode, helmReleases map[string]*helmInfo) error {
+func discoverDeployments(ctx context.Context, client dynamic.Interface, opts DiscoverOptions, listOpts metav1.ListOptions, filter *Filter, nodes map[string]*RundeckNode, helmReleases map[string]*helmInfo) error {
 	var deployList *unstructured.UnstructuredList
 	var err error
 
@@ -160,6 +186,14 @@ func discoverDeployments(ctx context.Context, client dynamic.Interface, opts Dis
 
 		healthy := countHealthyPods(ctx, client, deployNS, getSelectorLabels(&deploy))
 
+		// Apply filters (exclude labels, operator exclusion)
+		if filter.ShouldExcludeByLabels(labels) {
+			continue
+		}
+		if filter.ShouldExcludeOperator(deployName, labels) {
+			continue
+		}
+
 		helmRelease := labels["app.kubernetes.io/instance"]
 		if helmRelease != "" {
 			key := helmRelease + "@" + deployNS
@@ -177,6 +211,11 @@ func discoverDeployments(ctx context.Context, client dynamic.Interface, opts Dis
 				}
 			}
 		} else {
+			// Apply health filter for non-Helm workloads
+			if filter.ShouldExcludeByHealth(healthy, int(replicas)) {
+				continue
+			}
+
 			nodeKey := makeNodeKey(opts.ClusterName, "deploy", deployName, deployNS)
 			nodes[nodeKey] = &RundeckNode{
 				NodeName:           nodeKey,

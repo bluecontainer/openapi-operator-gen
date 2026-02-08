@@ -16,6 +16,13 @@ CLUSTER_NAME="${RD_CONFIG_CLUSTER_NAME:-}"
 CLUSTER_TOKEN_SUFFIX="${RD_CONFIG_CLUSTER_TOKEN_SUFFIX:-}"
 DEFAULT_TOKEN_SUFFIX="${RD_CONFIG_DEFAULT_TOKEN_SUFFIX:-rundeck/k8s-token}"
 
+# Phase 1: Core Filtering Options
+TYPES="${RD_CONFIG_TYPES:-}"
+EXCLUDE_TYPES="${RD_CONFIG_EXCLUDE_TYPES:-}"
+EXCLUDE_LABELS="${RD_CONFIG_EXCLUDE_LABELS:-}"
+EXCLUDE_OPERATOR="${RD_CONFIG_EXCLUDE_OPERATOR:-true}"
+HEALTHY_ONLY="${RD_CONFIG_HEALTHY_ONLY:-false}"
+
 if [ -z "$K8S_TOKEN" ]; then
   echo "Error: K8S_TOKEN not provided" >&2
   exit 1
@@ -38,6 +45,13 @@ fi
 [ -n "$K8S_URL" ] && FLAGS="$FLAGS --cluster-url=$K8S_URL"
 [ -n "$CLUSTER_TOKEN_SUFFIX" ] && FLAGS="$FLAGS --cluster-token-suffix=$CLUSTER_TOKEN_SUFFIX"
 [ -n "$DEFAULT_TOKEN_SUFFIX" ] && FLAGS="$FLAGS --default-token-suffix=$DEFAULT_TOKEN_SUFFIX"
+
+# Phase 1: Core Filtering flags
+[ -n "$TYPES" ] && FLAGS="$FLAGS --types=$TYPES"
+[ -n "$EXCLUDE_TYPES" ] && FLAGS="$FLAGS --exclude-types=$EXCLUDE_TYPES"
+[ -n "$EXCLUDE_LABELS" ] && FLAGS="$FLAGS --exclude-labels=$EXCLUDE_LABELS"
+[ "$EXCLUDE_OPERATOR" = "true" ] && FLAGS="$FLAGS --exclude-operator"
+[ "$HEALTHY_ONLY" = "true" ] && FLAGS="$FLAGS --healthy-only"
 
 # Find the kubectl-rundeck-nodes binary
 # Priority: 1) bundled in plugin, 2) system PATH
