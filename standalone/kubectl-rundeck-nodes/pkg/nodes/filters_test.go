@@ -33,6 +33,16 @@ func TestNewFilter(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "with phase 2 options",
+			opts: DiscoverOptions{
+				NamePatterns:             []string{"myapp-*"},
+				ExcludePatterns:          []string{"*-test"},
+				ExcludeNamespaces:        []string{"kube-system"},
+				NamespacePatterns:        []string{"prod-*"},
+				ExcludeNamespacePatterns: []string{"*-temp"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -248,14 +258,15 @@ func TestFilter_ShouldExcludeOperator(t *testing.T) {
 
 func TestFilter_ShouldExcludeByHealth(t *testing.T) {
 	tests := []struct {
-		name        string
-		healthyOnly bool
-		healthyPods int
-		totalPods   int
-		want        bool
+		name          string
+		healthyOnly   bool
+		unhealthyOnly bool
+		healthyPods   int
+		totalPods     int
+		want          bool
 	}{
 		{
-			name:        "healthy-only disabled",
+			name:        "no filter - include all",
 			healthyOnly: false,
 			healthyPods: 1,
 			totalPods:   3,
@@ -289,12 +300,41 @@ func TestFilter_ShouldExcludeByHealth(t *testing.T) {
 			totalPods:   0,
 			want:        false,
 		},
+		{
+			name:          "unhealthy-only - all healthy (exclude)",
+			unhealthyOnly: true,
+			healthyPods:   3,
+			totalPods:     3,
+			want:          true,
+		},
+		{
+			name:          "unhealthy-only - some unhealthy (include)",
+			unhealthyOnly: true,
+			healthyPods:   2,
+			totalPods:     3,
+			want:          false,
+		},
+		{
+			name:          "unhealthy-only - none healthy (include)",
+			unhealthyOnly: true,
+			healthyPods:   0,
+			totalPods:     3,
+			want:          false,
+		},
+		{
+			name:          "unhealthy-only - zero replicas (exclude as healthy)",
+			unhealthyOnly: true,
+			healthyPods:   0,
+			totalPods:     0,
+			want:          true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f, _ := NewFilter(DiscoverOptions{
-				HealthyOnly: tt.healthyOnly,
+				HealthyOnly:   tt.healthyOnly,
+				UnhealthyOnly: tt.unhealthyOnly,
 			})
 			if got := f.ShouldExcludeByHealth(tt.healthyPods, tt.totalPods); got != tt.want {
 				t.Errorf("ShouldExcludeByHealth(%d, %d) = %v, want %v",
@@ -368,6 +408,288 @@ func TestFilter_ShouldIncludeHelmRelease(t *testing.T) {
 			f, _ := NewFilter(DiscoverOptions{
 				Types:       tt.types,
 				HealthyOnly: tt.healthyOnly,
+			})
+			if got := f.ShouldIncludeHelmRelease(tt.info); got != tt.want {
+				t.Errorf("ShouldIncludeHelmRelease() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Phase 2: Name pattern tests
+
+func TestFilter_ShouldExcludeByName(t *testing.T) {
+	tests := []struct {
+		name            string
+		namePatterns    []string
+		excludePatterns []string
+		workloadName    string
+		want            bool
+	}{
+		{
+			name:         "no patterns - include all",
+			workloadName: "myapp-backend",
+			want:         false,
+		},
+		{
+			name:         "name-pattern matches",
+			namePatterns: []string{"myapp-*"},
+			workloadName: "myapp-backend",
+			want:         false,
+		},
+		{
+			name:         "name-pattern does not match",
+			namePatterns: []string{"myapp-*"},
+			workloadName: "other-service",
+			want:         true, // excluded because no include pattern matched
+		},
+		{
+			name:         "multiple name-patterns - one matches",
+			namePatterns: []string{"myapp-*", "*-backend"},
+			workloadName: "other-backend",
+			want:         false,
+		},
+		{
+			name:         "multiple name-patterns - none match",
+			namePatterns: []string{"myapp-*", "other-*"},
+			workloadName: "service-frontend",
+			want:         true, // excluded
+		},
+		{
+			name:            "exclude-pattern matches",
+			excludePatterns: []string{"*-test"},
+			workloadName:    "myapp-test",
+			want:            true, // excluded
+		},
+		{
+			name:            "exclude-pattern does not match",
+			excludePatterns: []string{"*-test"},
+			workloadName:    "myapp-backend",
+			want:            false,
+		},
+		{
+			name:            "include and exclude - include matches, exclude does not",
+			namePatterns:    []string{"myapp-*"},
+			excludePatterns: []string{"*-test"},
+			workloadName:    "myapp-backend",
+			want:            false,
+		},
+		{
+			name:            "include and exclude - both match (exclude wins)",
+			namePatterns:    []string{"myapp-*"},
+			excludePatterns: []string{"*-test"},
+			workloadName:    "myapp-test",
+			want:            true, // excluded
+		},
+		{
+			name:         "case insensitive matching",
+			namePatterns: []string{"MyApp-*"},
+			workloadName: "myapp-backend",
+			want:         false,
+		},
+		{
+			name:         "exact name pattern",
+			namePatterns: []string{"myapp"},
+			workloadName: "myapp",
+			want:         false,
+		},
+		{
+			name:         "exact name pattern - no match",
+			namePatterns: []string{"myapp"},
+			workloadName: "myapp-backend",
+			want:         true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, _ := NewFilter(DiscoverOptions{
+				NamePatterns:    tt.namePatterns,
+				ExcludePatterns: tt.excludePatterns,
+			})
+			if got := f.ShouldExcludeByName(tt.workloadName); got != tt.want {
+				t.Errorf("ShouldExcludeByName(%q) = %v, want %v", tt.workloadName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilter_ShouldExcludeByNamespace(t *testing.T) {
+	tests := []struct {
+		name                     string
+		excludeNamespaces        []string
+		namespacePatterns        []string
+		excludeNamespacePatterns []string
+		namespace                string
+		want                     bool
+	}{
+		{
+			name:      "no filters - include all",
+			namespace: "default",
+			want:      false,
+		},
+		{
+			name:              "exclude-namespaces matches",
+			excludeNamespaces: []string{"kube-system", "kube-public"},
+			namespace:         "kube-system",
+			want:              true,
+		},
+		{
+			name:              "exclude-namespaces does not match",
+			excludeNamespaces: []string{"kube-system", "kube-public"},
+			namespace:         "default",
+			want:              false,
+		},
+		{
+			name:              "namespace-pattern matches",
+			namespacePatterns: []string{"prod-*"},
+			namespace:         "prod-us-east",
+			want:              false,
+		},
+		{
+			name:              "namespace-pattern does not match",
+			namespacePatterns: []string{"prod-*"},
+			namespace:         "staging-us-east",
+			want:              true, // excluded
+		},
+		{
+			name:              "multiple namespace-patterns - one matches",
+			namespacePatterns: []string{"prod-*", "staging-*"},
+			namespace:         "staging-us-west",
+			want:              false,
+		},
+		{
+			name:                     "exclude-namespace-pattern matches",
+			excludeNamespacePatterns: []string{"*-test"},
+			namespace:                "feature-test",
+			want:                     true, // excluded
+		},
+		{
+			name:                     "exclude-namespace-pattern does not match",
+			excludeNamespacePatterns: []string{"*-test"},
+			namespace:                "production",
+			want:                     false,
+		},
+		{
+			name:              "include pattern and exclude namespace - exclude wins",
+			namespacePatterns: []string{"*"},
+			excludeNamespaces: []string{"kube-system"},
+			namespace:         "kube-system",
+			want:              true, // excluded
+		},
+		{
+			name:                     "include and exclude patterns - both match (exclude wins)",
+			namespacePatterns:        []string{"*-west"},
+			excludeNamespacePatterns: []string{"staging-*"},
+			namespace:                "staging-west",
+			want:                     true, // excluded
+		},
+		{
+			name:              "kube-* pattern",
+			namespacePatterns: []string{"kube-*"},
+			namespace:         "kube-system",
+			want:              false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, _ := NewFilter(DiscoverOptions{
+				ExcludeNamespaces:        tt.excludeNamespaces,
+				NamespacePatterns:        tt.namespacePatterns,
+				ExcludeNamespacePatterns: tt.excludeNamespacePatterns,
+			})
+			if got := f.ShouldExcludeByNamespace(tt.namespace); got != tt.want {
+				t.Errorf("ShouldExcludeByNamespace(%q) = %v, want %v", tt.namespace, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilter_ShouldIncludeHelmRelease_Phase2(t *testing.T) {
+	tests := []struct {
+		name              string
+		namePatterns      []string
+		excludePatterns   []string
+		excludeNamespaces []string
+		namespacePatterns []string
+		info              *helmInfo
+		want              bool
+	}{
+		{
+			name: "no filters",
+			info: &helmInfo{
+				release:     "myrelease",
+				namespace:   "default",
+				totalPods:   3,
+				healthyPods: 3,
+			},
+			want: true,
+		},
+		{
+			name:         "name-pattern matches release name",
+			namePatterns: []string{"my*"},
+			info: &helmInfo{
+				release:     "myrelease",
+				namespace:   "default",
+				totalPods:   3,
+				healthyPods: 3,
+			},
+			want: true,
+		},
+		{
+			name:         "name-pattern does not match release name",
+			namePatterns: []string{"other*"},
+			info: &helmInfo{
+				release:     "myrelease",
+				namespace:   "default",
+				totalPods:   3,
+				healthyPods: 3,
+			},
+			want: false,
+		},
+		{
+			name:              "exclude-namespaces matches",
+			excludeNamespaces: []string{"kube-system"},
+			info: &helmInfo{
+				release:     "myrelease",
+				namespace:   "kube-system",
+				totalPods:   3,
+				healthyPods: 3,
+			},
+			want: false,
+		},
+		{
+			name:              "namespace-pattern matches",
+			namespacePatterns: []string{"prod-*"},
+			info: &helmInfo{
+				release:     "myrelease",
+				namespace:   "prod-us-east",
+				totalPods:   3,
+				healthyPods: 3,
+			},
+			want: true,
+		},
+		{
+			name:              "namespace-pattern does not match",
+			namespacePatterns: []string{"prod-*"},
+			info: &helmInfo{
+				release:     "myrelease",
+				namespace:   "staging-us-east",
+				totalPods:   3,
+				healthyPods: 3,
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, _ := NewFilter(DiscoverOptions{
+				NamePatterns:      tt.namePatterns,
+				ExcludePatterns:   tt.excludePatterns,
+				ExcludeNamespaces: tt.excludeNamespaces,
+				NamespacePatterns: tt.namespacePatterns,
 			})
 			if got := f.ShouldIncludeHelmRelease(tt.info); got != tt.want {
 				t.Errorf("ShouldIncludeHelmRelease() = %v, want %v", got, tt.want)

@@ -18,14 +18,18 @@ type Filter struct {
 
 	// Pre-parsed exclude label selectors
 	excludeSelectors []labels.Selector
+
+	// Phase 2: Pre-computed namespace exclusion set
+	excludeNamespaces map[string]bool
 }
 
 // NewFilter creates a filter from discovery options.
 func NewFilter(opts DiscoverOptions) (*Filter, error) {
 	f := &Filter{
-		opts:         opts,
-		includeTypes: make(map[string]bool),
-		excludeTypes: make(map[string]bool),
+		opts:              opts,
+		includeTypes:      make(map[string]bool),
+		excludeTypes:      make(map[string]bool),
+		excludeNamespaces: make(map[string]bool),
 	}
 
 	// Build type filter sets
@@ -43,6 +47,11 @@ func NewFilter(opts DiscoverOptions) (*Filter, error) {
 			return nil, err
 		}
 		f.excludeSelectors = append(f.excludeSelectors, parsed)
+	}
+
+	// Build namespace exclusion set
+	for _, ns := range opts.ExcludeNamespaces {
+		f.excludeNamespaces[ns] = true
 	}
 
 	return f, nil
@@ -109,21 +118,98 @@ func (f *Filter) ShouldExcludeOperator(name string, workloadLabels map[string]st
 
 // ShouldExcludeByHealth returns true if the workload should be excluded based on health.
 func (f *Filter) ShouldExcludeByHealth(healthyPods, totalPods int) bool {
-	if !f.opts.HealthyOnly {
-		return false
+	isHealthy := healthyPods >= totalPods
+
+	// HealthyOnly: exclude if not all pods are healthy
+	if f.opts.HealthyOnly && !isHealthy {
+		return true
 	}
 
-	// Exclude if not all pods are healthy
-	return healthyPods < totalPods
+	// UnhealthyOnly: exclude if all pods are healthy
+	if f.opts.UnhealthyOnly && isHealthy {
+		return true
+	}
+
+	return false
+}
+
+// ShouldExcludeByName returns true if the workload should be excluded based on name patterns.
+func (f *Filter) ShouldExcludeByName(name string) bool {
+	nameLower := strings.ToLower(name)
+
+	// If include patterns specified, must match at least one
+	if len(f.opts.NamePatterns) > 0 {
+		matched := false
+		for _, pattern := range f.opts.NamePatterns {
+			if m, _ := filepath.Match(strings.ToLower(pattern), nameLower); m {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return true // Exclude if no include pattern matched
+		}
+	}
+
+	// Check exclude patterns
+	for _, pattern := range f.opts.ExcludePatterns {
+		if m, _ := filepath.Match(strings.ToLower(pattern), nameLower); m {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ShouldExcludeByNamespace returns true if the workload should be excluded based on namespace.
+func (f *Filter) ShouldExcludeByNamespace(namespace string) bool {
+	// Check exact namespace exclusion
+	if f.excludeNamespaces[namespace] {
+		return true
+	}
+
+	// If include patterns specified, must match at least one
+	if len(f.opts.NamespacePatterns) > 0 {
+		matched := false
+		for _, pattern := range f.opts.NamespacePatterns {
+			if m, _ := filepath.Match(pattern, namespace); m {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return true // Exclude if no include pattern matched
+		}
+	}
+
+	// Check exclude patterns
+	for _, pattern := range f.opts.ExcludeNamespacePatterns {
+		if m, _ := filepath.Match(pattern, namespace); m {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ShouldIncludeWorkload checks all filters and returns true if the workload should be included.
 func (f *Filter) ShouldIncludeWorkload(obj *unstructured.Unstructured, workloadType string, healthyPods, totalPods int) bool {
 	name := obj.GetName()
+	namespace := obj.GetNamespace()
 	workloadLabels := obj.GetLabels()
 
 	// Type filter
 	if !f.ShouldIncludeType(workloadType) {
+		return false
+	}
+
+	// Namespace filter (Phase 2)
+	if f.ShouldExcludeByNamespace(namespace) {
+		return false
+	}
+
+	// Name pattern filter (Phase 2)
+	if f.ShouldExcludeByName(name) {
 		return false
 	}
 
@@ -149,6 +235,16 @@ func (f *Filter) ShouldIncludeWorkload(obj *unstructured.Unstructured, workloadT
 func (f *Filter) ShouldIncludeHelmRelease(info *helmInfo) bool {
 	// Type filter
 	if !f.ShouldIncludeType(TypeHelmRelease) {
+		return false
+	}
+
+	// Namespace filter (Phase 2)
+	if f.ShouldExcludeByNamespace(info.namespace) {
+		return false
+	}
+
+	// Name pattern filter (Phase 2) - uses release name
+	if f.ShouldExcludeByName(info.release) {
 		return false
 	}
 

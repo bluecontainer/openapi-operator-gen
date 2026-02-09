@@ -55,11 +55,18 @@ func Discover(ctx context.Context, client dynamic.Interface, opts DiscoverOption
 		if !filter.ShouldIncludeHelmRelease(info) {
 			continue
 		}
+
+		// Build extra tags and attributes from stored labels/annotations
+		baseTags := joinTags("helm-release", info.namespace, opts.ClusterName)
+		extraTags := buildExtraTags(opts, info.labels)
+		allTags := mergeTagStrings(baseTags, extraTags)
+		extraAttrs := buildExtraAttributes(opts, info.labels, info.annotations)
+
 		nodeKey := makeNodeKey(opts.ClusterName, "helm", info.release, info.namespace)
 		nodes[nodeKey] = &RundeckNode{
 			NodeName:           nodeKey,
 			Hostname:           "localhost",
-			Tags:               joinTags("helm-release", info.namespace, opts.ClusterName),
+			Tags:               allTags,
 			OSFamily:           "kubernetes",
 			NodeExecutor:       "local",
 			FileCopier:         "local",
@@ -73,6 +80,8 @@ func Discover(ctx context.Context, client dynamic.Interface, opts DiscoverOption
 			WorkloadName:       info.workloadName,
 			PodCount:           fmt.Sprintf("%d", info.totalPods),
 			HealthyPods:        fmt.Sprintf("%d", info.healthyPods),
+			Healthy:            fmt.Sprintf("%t", info.healthyPods >= info.totalPods),
+			ExtraAttributes:    extraAttrs,
 		}
 	}
 
@@ -96,6 +105,7 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 		stsName := sts.GetName()
 		stsNS := sts.GetNamespace()
 		labels := sts.GetLabels()
+		annotations := sts.GetAnnotations()
 		replicas, _, _ := unstructured.NestedInt64(sts.Object, "spec", "replicas")
 		if replicas == 0 {
 			replicas = 1
@@ -129,6 +139,8 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 					workloadName: stsName,
 					totalPods:    int(replicas),
 					healthyPods:  healthy,
+					labels:       labels,
+					annotations:  annotations,
 				}
 			}
 		} else {
@@ -137,11 +149,17 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 				continue
 			}
 
+			// Build extra tags and attributes
+			baseTags := joinTags("statefulset", stsNS, opts.ClusterName)
+			extraTags := buildExtraTags(opts, labels)
+			allTags := mergeTagStrings(baseTags, extraTags)
+			extraAttrs := buildExtraAttributes(opts, labels, annotations)
+
 			nodeKey := makeNodeKey(opts.ClusterName, "sts", stsName, stsNS)
 			nodes[nodeKey] = &RundeckNode{
 				NodeName:           nodeKey,
 				Hostname:           "localhost",
-				Tags:               joinTags("statefulset", stsNS, opts.ClusterName),
+				Tags:               allTags,
 				OSFamily:           "kubernetes",
 				NodeExecutor:       "local",
 				FileCopier:         "local",
@@ -155,6 +173,8 @@ func discoverStatefulSets(ctx context.Context, client dynamic.Interface, opts Di
 				WorkloadName:       stsName,
 				PodCount:           fmt.Sprintf("%d", replicas),
 				HealthyPods:        fmt.Sprintf("%d", healthy),
+				Healthy:            fmt.Sprintf("%t", healthy >= int(replicas)),
+				ExtraAttributes:    extraAttrs,
 			}
 		}
 	}
@@ -179,6 +199,7 @@ func discoverDeployments(ctx context.Context, client dynamic.Interface, opts Dis
 		deployName := deploy.GetName()
 		deployNS := deploy.GetNamespace()
 		labels := deploy.GetLabels()
+		annotations := deploy.GetAnnotations()
 		replicas, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
 		if replicas == 0 {
 			replicas = 1
@@ -208,6 +229,8 @@ func discoverDeployments(ctx context.Context, client dynamic.Interface, opts Dis
 					workloadName: deployName,
 					totalPods:    int(replicas),
 					healthyPods:  healthy,
+					labels:       labels,
+					annotations:  annotations,
 				}
 			}
 		} else {
@@ -216,11 +239,17 @@ func discoverDeployments(ctx context.Context, client dynamic.Interface, opts Dis
 				continue
 			}
 
+			// Build extra tags and attributes
+			baseTags := joinTags("deployment", deployNS, opts.ClusterName)
+			extraTags := buildExtraTags(opts, labels)
+			allTags := mergeTagStrings(baseTags, extraTags)
+			extraAttrs := buildExtraAttributes(opts, labels, annotations)
+
 			nodeKey := makeNodeKey(opts.ClusterName, "deploy", deployName, deployNS)
 			nodes[nodeKey] = &RundeckNode{
 				NodeName:           nodeKey,
 				Hostname:           "localhost",
-				Tags:               joinTags("deployment", deployNS, opts.ClusterName),
+				Tags:               allTags,
 				OSFamily:           "kubernetes",
 				NodeExecutor:       "local",
 				FileCopier:         "local",
@@ -234,6 +263,8 @@ func discoverDeployments(ctx context.Context, client dynamic.Interface, opts Dis
 				WorkloadName:       deployName,
 				PodCount:           fmt.Sprintf("%d", replicas),
 				HealthyPods:        fmt.Sprintf("%d", healthy),
+				Healthy:            fmt.Sprintf("%t", healthy >= int(replicas)),
+				ExtraAttributes:    extraAttrs,
 			}
 		}
 	}

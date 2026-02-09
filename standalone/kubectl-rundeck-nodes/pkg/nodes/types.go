@@ -4,6 +4,8 @@
 // targeting flags.
 package nodes
 
+import "encoding/json"
+
 // RundeckNode represents a single Rundeck resource model node.
 type RundeckNode struct {
 	NodeName           string `json:"nodename"`
@@ -22,6 +24,50 @@ type RundeckNode struct {
 	WorkloadName       string `json:"workloadName"`
 	PodCount           string `json:"podCount"`
 	HealthyPods        string `json:"healthyPods"`
+	Healthy            string `json:"healthy"`
+
+	// ExtraAttributes holds dynamic attributes from labels/annotations.
+	// These are merged into the JSON output at the top level.
+	ExtraAttributes map[string]string `json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling to merge ExtraAttributes.
+func (n *RundeckNode) MarshalJSON() ([]byte, error) {
+	// Build the base map
+	result := map[string]interface{}{
+		"nodename":        n.NodeName,
+		"hostname":        n.Hostname,
+		"tags":            n.Tags,
+		"osFamily":        n.OSFamily,
+		"node-executor":   n.NodeExecutor,
+		"file-copier":     n.FileCopier,
+		"targetType":      n.TargetType,
+		"targetValue":     n.TargetValue,
+		"targetNamespace": n.TargetNamespace,
+		"workloadKind":    n.WorkloadKind,
+		"workloadName":    n.WorkloadName,
+		"podCount":        n.PodCount,
+		"healthyPods":     n.HealthyPods,
+		"healthy":         n.Healthy,
+	}
+
+	// Add optional fields
+	if n.Cluster != "" {
+		result["cluster"] = n.Cluster
+	}
+	if n.ClusterURL != "" {
+		result["clusterUrl"] = n.ClusterURL
+	}
+	if n.ClusterTokenSuffix != "" {
+		result["clusterTokenSuffix"] = n.ClusterTokenSuffix
+	}
+
+	// Merge extra attributes
+	for k, v := range n.ExtraAttributes {
+		result[k] = v
+	}
+
+	return json.Marshal(result)
 }
 
 // DiscoverOptions configures workload discovery behavior.
@@ -76,6 +122,48 @@ type DiscoverOptions struct {
 
 	// HealthyOnly includes only workloads where all pods are running.
 	HealthyOnly bool
+
+	// UnhealthyOnly includes only workloads where some pods are not running.
+	UnhealthyOnly bool
+
+	// Phase 2: Pattern Matching Options
+
+	// NamePatterns filters to only include workloads matching these glob patterns.
+	// Uses filepath.Match syntax (e.g., "myapp-*", "*-backend").
+	NamePatterns []string
+
+	// ExcludePatterns excludes workloads matching these glob patterns.
+	ExcludePatterns []string
+
+	// ExcludeNamespaces excludes workloads in these specific namespaces.
+	ExcludeNamespaces []string
+
+	// NamespacePatterns filters to only include workloads in namespaces matching these patterns.
+	NamespacePatterns []string
+
+	// ExcludeNamespacePatterns excludes workloads in namespaces matching these patterns.
+	ExcludeNamespacePatterns []string
+
+	// Phase 4: Output Customization Options
+
+	// AddTags adds custom static tags to all discovered nodes.
+	// Example: ["env:prod", "team:platform"]
+	AddTags []string
+
+	// LabelsAsTags converts Kubernetes labels to Rundeck tags.
+	// Specify label keys (e.g., "app.kubernetes.io/name", "tier").
+	// The label value becomes the tag value.
+	LabelsAsTags []string
+
+	// LabelAttributes adds Kubernetes labels as node attributes.
+	// Specify label keys to include as node attributes.
+	// The attribute name will be "label.<key>" (dots converted to underscores).
+	LabelAttributes []string
+
+	// AnnotationAttributes adds Kubernetes annotations as node attributes.
+	// Specify annotation keys to include as node attributes.
+	// The attribute name will be "annotation.<key>" (dots converted to underscores).
+	AnnotationAttributes []string
 }
 
 // helmInfo tracks Helm release information during discovery.
@@ -87,6 +175,9 @@ type helmInfo struct {
 	workloadName string
 	totalPods    int
 	healthyPods  int
+	// Labels and annotations from the first workload (for tag/attribute extraction)
+	labels      map[string]string
+	annotations map[string]string
 }
 
 // DefaultTokenSuffix is the default Rundeck Key Storage path suffix.

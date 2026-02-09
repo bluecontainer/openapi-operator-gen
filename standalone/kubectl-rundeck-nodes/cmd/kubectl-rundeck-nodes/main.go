@@ -38,6 +38,20 @@ var (
 	excludeLabels   []string
 	excludeOperator bool
 	healthyOnly     bool
+	unhealthyOnly   bool
+
+	// Phase 2: Pattern Matching
+	namePatterns             []string
+	excludePatterns          []string
+	excludeNamespaces        []string
+	namespacePatterns        []string
+	excludeNamespacePatterns []string
+
+	// Phase 4: Output Customization
+	addTags              []string
+	labelsAsTags         []string
+	labelAttributes      []string
+	annotationAttributes []string
 )
 
 func main() {
@@ -110,6 +124,20 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&excludeLabels, "exclude-labels", nil, "Exclude workloads matching these label selectors")
 	rootCmd.Flags().BoolVar(&excludeOperator, "exclude-operator", false, "Exclude operator controller-manager workloads")
 	rootCmd.Flags().BoolVar(&healthyOnly, "healthy-only", false, "Only include workloads with all pods running")
+	rootCmd.Flags().BoolVar(&unhealthyOnly, "unhealthy-only", false, "Only include workloads with some pods not running")
+
+	// Phase 2: Pattern Matching flags
+	rootCmd.Flags().StringSliceVar(&namePatterns, "name-pattern", nil, "Only include workloads matching these glob patterns (e.g., myapp-*)")
+	rootCmd.Flags().StringSliceVar(&excludePatterns, "exclude-pattern", nil, "Exclude workloads matching these glob patterns")
+	rootCmd.Flags().StringSliceVar(&excludeNamespaces, "exclude-namespaces", nil, "Exclude workloads in these namespaces")
+	rootCmd.Flags().StringSliceVar(&namespacePatterns, "namespace-pattern", nil, "Only include workloads in namespaces matching these patterns")
+	rootCmd.Flags().StringSliceVar(&excludeNamespacePatterns, "exclude-namespace-pattern", nil, "Exclude workloads in namespaces matching these patterns")
+
+	// Phase 4: Output Customization flags
+	rootCmd.Flags().StringSliceVar(&addTags, "add-tags", nil, "Add custom tags to all nodes (e.g., env:prod,team:platform)")
+	rootCmd.Flags().StringSliceVar(&labelsAsTags, "labels-as-tags", nil, "Convert these Kubernetes labels to Rundeck tags (e.g., app.kubernetes.io/name)")
+	rootCmd.Flags().StringSliceVar(&labelAttributes, "label-attributes", nil, "Add these Kubernetes labels as node attributes (e.g., app.kubernetes.io/version)")
+	rootCmd.Flags().StringSliceVar(&annotationAttributes, "annotation-attributes", nil, "Add these Kubernetes annotations as node attributes")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -142,6 +170,18 @@ func run(cmd *cobra.Command, args []string) error {
 		ExcludeLabels:   excludeLabels,
 		ExcludeOperator: excludeOperator,
 		HealthyOnly:     healthyOnly,
+		UnhealthyOnly:   unhealthyOnly,
+		// Phase 2: Pattern Matching
+		NamePatterns:             namePatterns,
+		ExcludePatterns:          excludePatterns,
+		ExcludeNamespaces:        excludeNamespaces,
+		NamespacePatterns:        namespacePatterns,
+		ExcludeNamespacePatterns: excludeNamespacePatterns,
+		// Phase 4: Output Customization
+		AddTags:              addTags,
+		LabelsAsTags:         labelsAsTags,
+		LabelAttributes:      labelAttributes,
+		AnnotationAttributes: annotationAttributes,
 	}
 
 	discovered, err := nodes.Discover(ctx, client, opts)
