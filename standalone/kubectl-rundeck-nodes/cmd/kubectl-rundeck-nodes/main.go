@@ -52,6 +52,14 @@ var (
 	labelsAsTags         []string
 	labelAttributes      []string
 	annotationAttributes []string
+
+	// Phase 5: Pod Discovery
+	includePods        bool
+	podsOnly           bool
+	podStatus          []string
+	podNamePatterns    []string
+	podReadyOnly       bool
+	maxPodsPerWorkload int
 )
 
 func main() {
@@ -71,13 +79,24 @@ as a Rundeck script-based resource model source.
 Each discovered workload becomes a Rundeck node with attributes that map to
 kubectl plugin --target-* flags:
 
-  targetType:      helm-release, statefulset, or deployment
-  targetValue:     the workload or release name
+  targetType:      helm-release, statefulset, deployment, or pod
+  targetValue:     the workload or release name (or pod name)
   targetNamespace: the workload's namespace
-  workloadKind:    StatefulSet or Deployment
+  workloadKind:    StatefulSet, Deployment, or Pod
   workloadName:    the underlying workload name
   podCount:        total pod count
   healthyPods:     running pod count
+
+Pod nodes (when --include-pods is used) have additional attributes:
+  parentType:      parent workload type (statefulset, deployment, helm-release)
+  parentName:      parent workload name
+  parentNodename:  full nodename of the parent workload
+  podIP:           pod's cluster IP
+  hostIP:          IP of the node where pod runs
+  k8sNode:         Kubernetes node name
+  phase:           pod phase (Running, Pending, etc.)
+  ready:           whether all containers are ready
+  restarts:        total container restart count
 
 Examples:
   # Discover workloads in the default namespace
@@ -99,7 +118,19 @@ Examples:
   kubectl rundeck-nodes --exclude-operator
 
   # Only healthy workloads
-  kubectl rundeck-nodes --healthy-only`,
+  kubectl rundeck-nodes --healthy-only
+
+  # Include individual pods for each workload
+  kubectl rundeck-nodes --include-pods
+
+  # Only pods (no workload nodes)
+  kubectl rundeck-nodes --pods-only
+
+  # Only running pods, first replica only
+  kubectl rundeck-nodes --pods-only --pod-status=Running --pod-name-pattern="*-0"
+
+  # Limit pods per workload to avoid node explosion
+  kubectl rundeck-nodes --include-pods --max-pods-per-workload=5`,
 	Version: version,
 	RunE:    run,
 }
@@ -138,6 +169,14 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&labelsAsTags, "labels-as-tags", nil, "Convert these Kubernetes labels to Rundeck tags (e.g., app.kubernetes.io/name)")
 	rootCmd.Flags().StringSliceVar(&labelAttributes, "label-attributes", nil, "Add these Kubernetes labels as node attributes (e.g., app.kubernetes.io/version)")
 	rootCmd.Flags().StringSliceVar(&annotationAttributes, "annotation-attributes", nil, "Add these Kubernetes annotations as node attributes")
+
+	// Phase 5: Pod Discovery flags
+	rootCmd.Flags().BoolVar(&includePods, "include-pods", false, "Include individual pods as nodes (in addition to workloads)")
+	rootCmd.Flags().BoolVar(&podsOnly, "pods-only", false, "Only return pod nodes, excluding workload-level nodes (implies --include-pods)")
+	rootCmd.Flags().StringSliceVar(&podStatus, "pod-status", nil, "Only include pods with these phases (e.g., Running, Pending)")
+	rootCmd.Flags().StringSliceVar(&podNamePatterns, "pod-name-pattern", nil, "Only include pods matching these glob patterns (e.g., *-0 for first StatefulSet replica)")
+	rootCmd.Flags().BoolVar(&podReadyOnly, "pod-ready-only", false, "Only include pods where all containers are ready")
+	rootCmd.Flags().IntVar(&maxPodsPerWorkload, "max-pods-per-workload", 0, "Maximum number of pod nodes per workload (0 = unlimited)")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -182,6 +221,13 @@ func run(cmd *cobra.Command, args []string) error {
 		LabelsAsTags:         labelsAsTags,
 		LabelAttributes:      labelAttributes,
 		AnnotationAttributes: annotationAttributes,
+		// Phase 5: Pod Discovery
+		IncludePods:        includePods,
+		PodsOnly:           podsOnly,
+		PodStatusFilter:    podStatus,
+		PodNamePatterns:    podNamePatterns,
+		PodReadyOnly:       podReadyOnly,
+		MaxPodsPerWorkload: maxPodsPerWorkload,
 	}
 
 	discovered, err := nodes.Discover(ctx, client, opts)

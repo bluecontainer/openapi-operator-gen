@@ -716,3 +716,249 @@ func TestValidTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestValidTypesWithPods(t *testing.T) {
+	types := ValidTypesWithPods()
+	if len(types) != 4 {
+		t.Errorf("ValidTypesWithPods() returned %d types, want 4", len(types))
+	}
+
+	expected := map[string]bool{
+		TypeHelmRelease: true,
+		TypeStatefulSet: true,
+		TypeDeployment:  true,
+		TypePod:         true,
+	}
+
+	for _, typ := range types {
+		if !expected[typ] {
+			t.Errorf("Unexpected type in ValidTypesWithPods(): %s", typ)
+		}
+	}
+}
+
+// Phase 5: Pod filtering tests
+
+func TestFilter_ShouldIncludePod(t *testing.T) {
+	tests := []struct {
+		name            string
+		podStatusFilter []string
+		podNamePatterns []string
+		podReadyOnly    bool
+		excludeLabels   []string
+		podName         string
+		phase           string
+		isReady         bool
+		podLabels       map[string]string
+		want            bool
+	}{
+		{
+			name:    "no filters - include all",
+			podName: "myapp-0",
+			phase:   "Running",
+			isReady: true,
+			want:    true,
+		},
+		{
+			name:            "pod-status filter - matches",
+			podStatusFilter: []string{"Running"},
+			podName:         "myapp-0",
+			phase:           "Running",
+			isReady:         true,
+			want:            true,
+		},
+		{
+			name:            "pod-status filter - no match",
+			podStatusFilter: []string{"Running"},
+			podName:         "myapp-0",
+			phase:           "Pending",
+			isReady:         false,
+			want:            false,
+		},
+		{
+			name:            "pod-status filter - multiple statuses",
+			podStatusFilter: []string{"Running", "Pending"},
+			podName:         "myapp-0",
+			phase:           "Pending",
+			isReady:         false,
+			want:            true,
+		},
+		{
+			name:         "pod-ready-only - ready",
+			podReadyOnly: true,
+			podName:      "myapp-0",
+			phase:        "Running",
+			isReady:      true,
+			want:         true,
+		},
+		{
+			name:         "pod-ready-only - not ready",
+			podReadyOnly: true,
+			podName:      "myapp-0",
+			phase:        "Running",
+			isReady:      false,
+			want:         false,
+		},
+		{
+			name:            "pod-name-pattern matches",
+			podNamePatterns: []string{"*-0"},
+			podName:         "myapp-0",
+			phase:           "Running",
+			isReady:         true,
+			want:            true,
+		},
+		{
+			name:            "pod-name-pattern does not match",
+			podNamePatterns: []string{"*-0"},
+			podName:         "myapp-1",
+			phase:           "Running",
+			isReady:         true,
+			want:            false,
+		},
+		{
+			name:            "multiple pod-name-patterns - one matches",
+			podNamePatterns: []string{"*-0", "*-1"},
+			podName:         "myapp-1",
+			phase:           "Running",
+			isReady:         true,
+			want:            true,
+		},
+		{
+			name:            "pod-name-pattern case insensitive",
+			podNamePatterns: []string{"MyApp-*"},
+			podName:         "myapp-0",
+			phase:           "Running",
+			isReady:         true,
+			want:            true,
+		},
+		{
+			name:          "exclude-labels applies to pods",
+			excludeLabels: []string{"app=operator"},
+			podName:       "operator-0",
+			phase:         "Running",
+			isReady:       true,
+			podLabels:     map[string]string{"app": "operator"},
+			want:          false,
+		},
+		{
+			name:          "exclude-labels - no match",
+			excludeLabels: []string{"app=operator"},
+			podName:       "myapp-0",
+			phase:         "Running",
+			isReady:       true,
+			podLabels:     map[string]string{"app": "myapp"},
+			want:          true,
+		},
+		{
+			name:            "combined filters - all pass",
+			podStatusFilter: []string{"Running"},
+			podNamePatterns: []string{"myapp-*"},
+			podReadyOnly:    true,
+			podName:         "myapp-0",
+			phase:           "Running",
+			isReady:         true,
+			want:            true,
+		},
+		{
+			name:            "combined filters - status fails",
+			podStatusFilter: []string{"Running"},
+			podNamePatterns: []string{"myapp-*"},
+			podReadyOnly:    true,
+			podName:         "myapp-0",
+			phase:           "Pending",
+			isReady:         false,
+			want:            false,
+		},
+		{
+			name:            "combined filters - name pattern fails",
+			podStatusFilter: []string{"Running"},
+			podNamePatterns: []string{"other-*"},
+			podReadyOnly:    true,
+			podName:         "myapp-0",
+			phase:           "Running",
+			isReady:         true,
+			want:            false,
+		},
+		{
+			name:            "combined filters - ready fails",
+			podStatusFilter: []string{"Running"},
+			podNamePatterns: []string{"myapp-*"},
+			podReadyOnly:    true,
+			podName:         "myapp-0",
+			phase:           "Running",
+			isReady:         false,
+			want:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := NewFilter(DiscoverOptions{
+				PodStatusFilter: tt.podStatusFilter,
+				PodNamePatterns: tt.podNamePatterns,
+				PodReadyOnly:    tt.podReadyOnly,
+				ExcludeLabels:   tt.excludeLabels,
+			})
+			if err != nil {
+				t.Fatalf("NewFilter() error = %v", err)
+			}
+
+			podLabels := tt.podLabels
+			if podLabels == nil {
+				podLabels = map[string]string{}
+			}
+
+			if got := f.ShouldIncludePod(tt.podName, tt.phase, tt.isReady, podLabels); got != tt.want {
+				t.Errorf("ShouldIncludePod(%q, %q, %v, %v) = %v, want %v",
+					tt.podName, tt.phase, tt.isReady, podLabels, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewFilter_WithPodOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    DiscoverOptions
+		wantErr bool
+	}{
+		{
+			name: "with pod status filter",
+			opts: DiscoverOptions{
+				PodStatusFilter: []string{"Running", "Pending"},
+			},
+		},
+		{
+			name: "with pod name patterns",
+			opts: DiscoverOptions{
+				PodNamePatterns: []string{"*-0", "*-1"},
+			},
+		},
+		{
+			name: "with pod ready only",
+			opts: DiscoverOptions{
+				PodReadyOnly: true,
+			},
+		},
+		{
+			name: "with all pod options",
+			opts: DiscoverOptions{
+				IncludePods:        true,
+				PodsOnly:           false,
+				PodStatusFilter:    []string{"Running"},
+				PodNamePatterns:    []string{"*-0"},
+				PodReadyOnly:       true,
+				MaxPodsPerWorkload: 5,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewFilter(tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewFilter() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

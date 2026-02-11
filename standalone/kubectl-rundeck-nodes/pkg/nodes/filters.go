@@ -21,6 +21,9 @@ type Filter struct {
 
 	// Phase 2: Pre-computed namespace exclusion set
 	excludeNamespaces map[string]bool
+
+	// Phase 5: Pod filtering
+	podStatusFilter map[string]bool // Pre-computed pod status filter set
 }
 
 // NewFilter creates a filter from discovery options.
@@ -30,6 +33,7 @@ func NewFilter(opts DiscoverOptions) (*Filter, error) {
 		includeTypes:      make(map[string]bool),
 		excludeTypes:      make(map[string]bool),
 		excludeNamespaces: make(map[string]bool),
+		podStatusFilter:   make(map[string]bool),
 	}
 
 	// Build type filter sets
@@ -52,6 +56,11 @@ func NewFilter(opts DiscoverOptions) (*Filter, error) {
 	// Build namespace exclusion set
 	for _, ns := range opts.ExcludeNamespaces {
 		f.excludeNamespaces[ns] = true
+	}
+
+	// Build pod status filter set
+	for _, status := range opts.PodStatusFilter {
+		f.podStatusFilter[status] = true
 	}
 
 	return f, nil
@@ -255,6 +264,41 @@ func (f *Filter) ShouldIncludeHelmRelease(info *helmInfo) bool {
 
 	// Note: We can't easily filter Helm releases by labels since they aggregate
 	// multiple workloads. The workload-level filters already apply during discovery.
+
+	return true
+}
+
+// ShouldIncludePod checks if a pod should be included based on pod-specific filters.
+func (f *Filter) ShouldIncludePod(podName, phase string, isReady bool, podLabels map[string]string) bool {
+	// Check pod status filter
+	if len(f.podStatusFilter) > 0 && !f.podStatusFilter[phase] {
+		return false
+	}
+
+	// Check pod ready filter
+	if f.opts.PodReadyOnly && !isReady {
+		return false
+	}
+
+	// Check pod name patterns
+	if len(f.opts.PodNamePatterns) > 0 {
+		matched := false
+		nameLower := strings.ToLower(podName)
+		for _, pattern := range f.opts.PodNamePatterns {
+			if m, _ := filepath.Match(strings.ToLower(pattern), nameLower); m {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	// Check exclude labels (applies to pods too)
+	if f.ShouldExcludeByLabels(podLabels) {
+		return false
+	}
 
 	return true
 }

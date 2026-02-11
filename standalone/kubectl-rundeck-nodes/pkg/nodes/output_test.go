@@ -109,8 +109,9 @@ func TestWriteYAML(t *testing.T) {
 	if !strings.Contains(output, "helm-release") {
 		t.Error("Expected 'helm-release' in YAML output")
 	}
-	if !strings.Contains(output, "targetvalue: release") {
-		t.Error("Expected 'targetvalue: release' in YAML output")
+	// YAML now uses the same camelCase keys as JSON for consistency
+	if !strings.Contains(output, "targetValue: release") {
+		t.Error("Expected 'targetValue: release' in YAML output")
 	}
 }
 

@@ -6,7 +6,8 @@
   "permissions": {
     "allow": [
       "Bash(docker save:*)",
-      "Bash(/home/benspark/.local/bin/k3d image import:*)"
+      "Bash(/home/benspark/.local/bin/k3d image import:*)",
+      "Bash(docker rmi:*)"
     ]
   }
 }

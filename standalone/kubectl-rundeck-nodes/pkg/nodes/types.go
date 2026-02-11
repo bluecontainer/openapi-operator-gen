@@ -26,14 +26,17 @@ type RundeckNode struct {
 	HealthyPods        string `json:"healthyPods"`
 	Healthy            string `json:"healthy"`
 
+	// Pod-specific fields (only set for pod nodes)
+	PodInfo *PodInfo `json:"-"`
+
 	// ExtraAttributes holds dynamic attributes from labels/annotations.
 	// These are merged into the JSON output at the top level.
 	ExtraAttributes map[string]string `json:"-"`
 }
 
-// MarshalJSON implements custom JSON marshaling to merge ExtraAttributes.
-func (n *RundeckNode) MarshalJSON() ([]byte, error) {
-	// Build the base map
+// ToMap converts the RundeckNode to a map for serialization.
+// This ensures consistent output between JSON and YAML formats.
+func (n *RundeckNode) ToMap() map[string]interface{} {
 	result := map[string]interface{}{
 		"nodename":        n.NodeName,
 		"hostname":        n.Hostname,
@@ -62,12 +65,32 @@ func (n *RundeckNode) MarshalJSON() ([]byte, error) {
 		result["clusterTokenSuffix"] = n.ClusterTokenSuffix
 	}
 
+	// Add pod-specific fields if this is a pod node
+	if n.PodInfo != nil {
+		result["podIP"] = n.PodInfo.PodIP
+		result["hostIP"] = n.PodInfo.HostIP
+		result["k8sNode"] = n.PodInfo.K8sNodeName
+		result["phase"] = n.PodInfo.Phase
+		result["ready"] = n.PodInfo.Ready
+		result["restarts"] = n.PodInfo.Restarts
+		result["containerCount"] = n.PodInfo.ContainerCount
+		result["readyContainers"] = n.PodInfo.ReadyContainers
+		result["parentType"] = n.PodInfo.ParentType
+		result["parentName"] = n.PodInfo.ParentName
+		result["parentNodename"] = n.PodInfo.ParentNodename
+	}
+
 	// Merge extra attributes
 	for k, v := range n.ExtraAttributes {
 		result[k] = v
 	}
 
-	return json.Marshal(result)
+	return result
+}
+
+// MarshalJSON implements custom JSON marshaling to merge ExtraAttributes and PodInfo.
+func (n *RundeckNode) MarshalJSON() ([]byte, error) {
+	return json.Marshal(n.ToMap())
 }
 
 // DiscoverOptions configures workload discovery behavior.
@@ -164,6 +187,31 @@ type DiscoverOptions struct {
 	// Specify annotation keys to include as node attributes.
 	// The attribute name will be "annotation.<key>" (dots converted to underscores).
 	AnnotationAttributes []string
+
+	// Phase 5: Pod Discovery Options
+
+	// IncludePods expands discovered workloads to include their individual pods as nodes.
+	// Each pod becomes a separate Rundeck node with parent workload reference.
+	IncludePods bool
+
+	// PodsOnly returns only pod nodes, excluding workload-level nodes.
+	// Implies IncludePods=true.
+	PodsOnly bool
+
+	// PodStatusFilter filters pods by phase (e.g., "Running", "Pending").
+	// Empty means all phases.
+	PodStatusFilter []string
+
+	// PodNamePatterns filters pods by name using glob patterns.
+	// Example: "*-0" to match first replica of StatefulSets.
+	PodNamePatterns []string
+
+	// PodReadyOnly includes only pods where all containers are ready.
+	PodReadyOnly bool
+
+	// MaxPodsPerWorkload limits the number of pod nodes per workload.
+	// 0 means no limit. Useful to avoid node explosion in large deployments.
+	MaxPodsPerWorkload int
 }
 
 // helmInfo tracks Helm release information during discovery.
@@ -188,9 +236,40 @@ const (
 	TypeHelmRelease = "helm-release"
 	TypeStatefulSet = "statefulset"
 	TypeDeployment  = "deployment"
+	TypePod         = "pod"
 )
 
-// ValidTypes returns the list of valid workload types.
+// ValidTypes returns the list of valid workload types (excluding pods).
 func ValidTypes() []string {
 	return []string{TypeHelmRelease, TypeStatefulSet, TypeDeployment}
+}
+
+// ValidTypesWithPods returns the list of valid types including pods.
+func ValidTypesWithPods() []string {
+	return []string{TypeHelmRelease, TypeStatefulSet, TypeDeployment, TypePod}
+}
+
+// PodInfo holds pod-specific information for pod nodes.
+type PodInfo struct {
+	// PodIP is the pod's cluster IP address.
+	PodIP string
+	// HostIP is the IP of the node where the pod is running.
+	HostIP string
+	// K8sNodeName is the Kubernetes node name where the pod is scheduled.
+	K8sNodeName string
+	// Phase is the pod's lifecycle phase (Running, Pending, Succeeded, Failed, Unknown).
+	Phase string
+	// Ready indicates if all containers in the pod are ready.
+	Ready bool
+	// Restarts is the total restart count across all containers.
+	Restarts int
+	// ContainerCount is the number of containers in the pod.
+	ContainerCount int
+	// ReadyContainers is the number of ready containers.
+	ReadyContainers int
+
+	// Parent workload information
+	ParentType     string // "statefulset", "deployment", or "helm-release"
+	ParentName     string // Name of the parent workload
+	ParentNodename string // Full nodename of the parent workload node
 }
