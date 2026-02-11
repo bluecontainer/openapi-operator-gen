@@ -6,17 +6,11 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
-	"strings"
 
+	"github.com/bluecontainer/kubectl-rundeck-nodes/pkg/nodes"
 	"github.com/spf13/cobra"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 )
 
 const (
@@ -26,32 +20,43 @@ const (
 )
 
 var (
-	nodesAllNamespaces     bool
-	nodesLabelSelector     string
-	nodesClusterName       string
-	nodesClusterURL        string
-	nodesClusterTokenSuffix string
-)
+	nodesAllNamespaces      bool
+	nodesLabelSelector      string
+	nodesClusterName        string
+	nodesClusterURL         string
+	nodesClusterTokenSuffix  string
+	nodesDefaultTokenSuffix  string
+	nodesOutput              string
 
-// rundeckNode represents a single Rundeck resource model node.
-type rundeckNode struct {
-	NodeName         string `json:"nodename"`
-	Hostname         string `json:"hostname"`
-	Tags             string `json:"tags"`
-	OSFamily         string `json:"osFamily"`
-	NodeExecutor     string `json:"node-executor"`
-	FileCopier       string `json:"file-copier"`
-	Cluster            string `json:"cluster,omitempty"`
-	ClusterURL         string `json:"clusterUrl,omitempty"`
-	ClusterTokenSuffix string `json:"clusterTokenSuffix,omitempty"`
-	TargetType       string `json:"targetType"`
-	TargetValue      string `json:"targetValue"`
-	TargetNamespace  string `json:"targetNamespace"`
-	WorkloadKind     string `json:"workloadKind"`
-	WorkloadName     string `json:"workloadName"`
-	PodCount         string `json:"podCount"`
-	HealthyPods      string `json:"healthyPods"`
-}
+	// Phase 1: Core Filtering flags
+	nodesTypes           []string
+	nodesExcludeTypes    []string
+	nodesExcludeLabels   []string
+	nodesExcludeOperator bool
+	nodesHealthyOnly     bool
+	nodesUnhealthyOnly   bool
+
+	// Phase 2: Pattern Matching flags
+	nodesNamePatterns             []string
+	nodesExcludePatterns          []string
+	nodesExcludeNamespaces        []string
+	nodesNamespacePatterns        []string
+	nodesExcludeNamespacePatterns []string
+
+	// Phase 4: Output Customization flags
+	nodesAddTags              []string
+	nodesLabelsAsTags         []string
+	nodesLabelAttributes      []string
+	nodesAnnotationAttributes []string
+
+	// Phase 5: Pod Discovery flags
+	nodesIncludePods        bool
+	nodesPodsOnly           bool
+	nodesPodStatus          []string
+	nodesPodNamePattern     []string
+	nodesPodReadyOnly       bool
+	nodesMaxPodsPerWorkload int
+)
 
 var nodesCmd = &cobra.Command{
 	Use:   "nodes",
@@ -79,7 +84,34 @@ Examples:
   kubectl {{ .PluginName }} nodes --all-namespaces
 
   # Filter by label selector
-  kubectl {{ .PluginName }} nodes -l app.kubernetes.io/part-of=petstore`,
+  kubectl {{ .PluginName }} nodes -l app.kubernetes.io/part-of=petstore
+
+  # Filter by workload type
+  kubectl {{ .PluginName }} nodes --types=statefulset,helm-release
+
+  # Exclude operator workloads
+  kubectl {{ .PluginName }} nodes --exclude-operator
+
+  # Only healthy workloads
+  kubectl {{ .PluginName }} nodes --healthy-only
+
+  # Only unhealthy workloads (for alerting/remediation)
+  kubectl {{ .PluginName }} nodes --unhealthy-only
+
+  # Filter by name pattern
+  kubectl {{ .PluginName }} nodes --name-pattern="myapp-*"
+
+  # Exclude specific namespaces
+  kubectl {{ .PluginName }} nodes --exclude-namespaces=kube-system,kube-public
+
+  # Include individual pods as nodes
+  kubectl {{ .PluginName }} nodes --include-pods
+
+  # Only show pods (no workload-level nodes)
+  kubectl {{ .PluginName }} nodes --pods-only
+
+  # Only running, ready pods
+  kubectl {{ .PluginName }} nodes --pods-only --pod-status=Running --pod-ready-only`,
 	RunE: runNodes,
 }
 
@@ -89,6 +121,37 @@ func init() {
 	nodesCmd.Flags().StringVar(&nodesClusterName, "cluster-name", "", "Cluster identifier for multi-cluster node discovery")
 	nodesCmd.Flags().StringVar(&nodesClusterURL, "cluster-url", "", "Cluster API URL to embed in node attributes")
 	nodesCmd.Flags().StringVar(&nodesClusterTokenSuffix, "cluster-token-suffix", "", "Rundeck Key Storage path suffix for cluster token (e.g., clusters/prod/token). Jobs prepend 'keys/' to this value.")
+	nodesCmd.Flags().StringVar(&nodesDefaultTokenSuffix, "default-token-suffix", nodes.DefaultTokenSuffix, "Default Key Storage path suffix when --cluster-token-suffix is not set")
+	nodesCmd.Flags().StringVarP(&nodesOutput, "output", "o", "json", "Output format: json, yaml, table")
+
+	// Phase 1: Core Filtering flags
+	nodesCmd.Flags().StringSliceVar(&nodesTypes, "types", nil, "Only include these workload types (helm-release, statefulset, deployment)")
+	nodesCmd.Flags().StringSliceVar(&nodesExcludeTypes, "exclude-types", nil, "Exclude these workload types")
+	nodesCmd.Flags().StringSliceVar(&nodesExcludeLabels, "exclude-labels", nil, "Exclude workloads matching these label selectors")
+	nodesCmd.Flags().BoolVar(&nodesExcludeOperator, "exclude-operator", false, "Exclude operator controller-manager workloads")
+	nodesCmd.Flags().BoolVar(&nodesHealthyOnly, "healthy-only", false, "Only include workloads with all pods running")
+	nodesCmd.Flags().BoolVar(&nodesUnhealthyOnly, "unhealthy-only", false, "Only include workloads with some pods not running")
+
+	// Phase 2: Pattern Matching flags
+	nodesCmd.Flags().StringSliceVar(&nodesNamePatterns, "name-pattern", nil, "Only include workloads matching these glob patterns (e.g., myapp-*)")
+	nodesCmd.Flags().StringSliceVar(&nodesExcludePatterns, "exclude-pattern", nil, "Exclude workloads matching these glob patterns")
+	nodesCmd.Flags().StringSliceVar(&nodesExcludeNamespaces, "exclude-namespaces", nil, "Exclude workloads in these namespaces")
+	nodesCmd.Flags().StringSliceVar(&nodesNamespacePatterns, "namespace-pattern", nil, "Only include workloads in namespaces matching these patterns")
+	nodesCmd.Flags().StringSliceVar(&nodesExcludeNamespacePatterns, "exclude-namespace-pattern", nil, "Exclude workloads in namespaces matching these patterns")
+
+	// Phase 4: Output Customization flags
+	nodesCmd.Flags().StringSliceVar(&nodesAddTags, "add-tags", nil, "Add custom tags to all nodes (e.g., env:prod,team:platform)")
+	nodesCmd.Flags().StringSliceVar(&nodesLabelsAsTags, "labels-as-tags", nil, "Convert these Kubernetes labels to Rundeck tags (e.g., app.kubernetes.io/name)")
+	nodesCmd.Flags().StringSliceVar(&nodesLabelAttributes, "label-attributes", nil, "Add these Kubernetes labels as node attributes (e.g., app.kubernetes.io/version)")
+	nodesCmd.Flags().StringSliceVar(&nodesAnnotationAttributes, "annotation-attributes", nil, "Add these Kubernetes annotations as node attributes")
+
+	// Phase 5: Pod Discovery flags
+	nodesCmd.Flags().BoolVar(&nodesIncludePods, "include-pods", false, "Include individual pods as nodes (in addition to workloads)")
+	nodesCmd.Flags().BoolVar(&nodesPodsOnly, "pods-only", false, "Only return pod nodes, excluding workload-level nodes (implies --include-pods)")
+	nodesCmd.Flags().StringSliceVar(&nodesPodStatus, "pod-status", nil, "Only include pods with these phases (e.g., Running, Pending)")
+	nodesCmd.Flags().StringSliceVar(&nodesPodNamePattern, "pod-name-pattern", nil, "Only include pods matching these glob patterns (e.g., *-0 for first replica)")
+	nodesCmd.Flags().BoolVar(&nodesPodReadyOnly, "pod-ready-only", false, "Only include pods where all containers are ready")
+	nodesCmd.Flags().IntVar(&nodesMaxPodsPerWorkload, "max-pods-per-workload", 0, "Maximum number of pod nodes per workload (0 = unlimited)")
 }
 
 func runNodes(cmd *cobra.Command, args []string) error {
@@ -100,257 +163,52 @@ func runNodes(cmd *cobra.Command, args []string) error {
 
 	ns := k8sClient.GetNamespace()
 
-	stsGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
-	deployGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
-	podGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-
-	listOpts := metav1.ListOptions{}
-	if nodesLabelSelector != "" {
-		listOpts.LabelSelector = nodesLabelSelector
+	// Determine effective token suffix
+	tokenSuffix := nodesClusterTokenSuffix
+	if tokenSuffix == "" {
+		tokenSuffix = defaultClusterTokenSuffix
 	}
 
-	nodes := make(map[string]*rundeckNode)
-
-	// Track Helm releases to deduplicate (multiple workloads per release)
-	type helmInfo struct {
-		release       string
-		namespace     string
-		workloadKind  string
-		workloadName  string
-		totalPods     int
-		healthyPods   int
+	opts := nodes.DiscoverOptions{
+		Namespace:          ns,
+		AllNamespaces:      nodesAllNamespaces,
+		LabelSelector:      nodesLabelSelector,
+		ClusterName:        nodesClusterName,
+		ClusterURL:         nodesClusterURL,
+		ClusterTokenSuffix: tokenSuffix,
+		DefaultTokenSuffix: nodesDefaultTokenSuffix,
+		// Phase 1: Core Filtering
+		Types:           nodesTypes,
+		ExcludeTypes:    nodesExcludeTypes,
+		ExcludeLabels:   nodesExcludeLabels,
+		ExcludeOperator: nodesExcludeOperator,
+		HealthyOnly:     nodesHealthyOnly,
+		UnhealthyOnly:   nodesUnhealthyOnly,
+		// Phase 2: Pattern Matching
+		NamePatterns:             nodesNamePatterns,
+		ExcludePatterns:          nodesExcludePatterns,
+		ExcludeNamespaces:        nodesExcludeNamespaces,
+		NamespacePatterns:        nodesNamespacePatterns,
+		ExcludeNamespacePatterns: nodesExcludeNamespacePatterns,
+		// Phase 4: Output Customization
+		AddTags:              nodesAddTags,
+		LabelsAsTags:         nodesLabelsAsTags,
+		LabelAttributes:      nodesLabelAttributes,
+		AnnotationAttributes: nodesAnnotationAttributes,
+		// Phase 5: Pod Discovery
+		IncludePods:        nodesIncludePods,
+		PodsOnly:           nodesPodsOnly,
+		PodStatusFilter:    nodesPodStatus,
+		PodNamePatterns:    nodesPodNamePattern,
+		PodReadyOnly:       nodesPodReadyOnly,
+		MaxPodsPerWorkload: nodesMaxPodsPerWorkload,
 	}
-	helmReleases := make(map[string]*helmInfo) // key: "release@namespace"
 
-	// --- Discover StatefulSets ---
-	var stsList *unstructured.UnstructuredList
-	var err error
-	if nodesAllNamespaces {
-		stsList, err = dynClient.Resource(stsGVR).Namespace("").List(ctx, listOpts)
-	} else {
-		stsList, err = dynClient.Resource(stsGVR).Namespace(ns).List(ctx, listOpts)
-	}
+	discovered, err := nodes.Discover(ctx, dynClient, opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to list StatefulSets: %v\n", err)
-	} else {
-		for _, sts := range stsList.Items {
-			stsName := sts.GetName()
-			stsNS := sts.GetNamespace()
-			labels := sts.GetLabels()
-			replicas, _, _ := unstructured.NestedInt64(sts.Object, "spec", "replicas")
-			if replicas == 0 {
-				replicas = 1
-			}
-
-			// Count running pods
-			healthy := countHealthyPods(ctx, dynClient, podGVR, stsNS, getSelectorLabels(&sts))
-
-			helmRelease := labels["app.kubernetes.io/instance"]
-			if helmRelease != "" {
-				key := helmRelease + "@" + stsNS
-				if existing, ok := helmReleases[key]; ok {
-					// Keep the workload with more replicas as the "primary"
-					existing.totalPods += int(replicas)
-					existing.healthyPods += healthy
-					if int(replicas) > 0 && existing.workloadKind == "" {
-						existing.workloadKind = "StatefulSet"
-						existing.workloadName = stsName
-					}
-				} else {
-					helmReleases[key] = &helmInfo{
-						release:      helmRelease,
-						namespace:    stsNS,
-						workloadKind: "StatefulSet",
-						workloadName: stsName,
-						totalPods:    int(replicas),
-						healthyPods:  healthy,
-					}
-				}
-			} else {
-				nodeKey := makeNodeKey("sts", stsName, stsNS)
-				nodes[nodeKey] = &rundeckNode{
-					NodeName:         nodeKey,
-					Hostname:         "localhost",
-					Tags:             joinTags("statefulset", stsNS, nodesClusterName),
-					OSFamily:         "kubernetes",
-					NodeExecutor:     "local",
-					FileCopier:       "local",
-					Cluster:          nodesClusterName,
-					ClusterURL:       nodesClusterURL,
-					ClusterTokenSuffix: getClusterTokenSuffix(),
-					TargetType:       "statefulset",
-					TargetValue:      stsName,
-					TargetNamespace:  stsNS,
-					WorkloadKind:     "StatefulSet",
-					WorkloadName:     stsName,
-					PodCount:         fmt.Sprintf("%d", replicas),
-					HealthyPods:      fmt.Sprintf("%d", healthy),
-				}
-			}
-		}
+		return fmt.Errorf("discovery failed: %w", err)
 	}
 
-	// --- Discover Deployments ---
-	var deployList *unstructured.UnstructuredList
-	if nodesAllNamespaces {
-		deployList, err = dynClient.Resource(deployGVR).Namespace("").List(ctx, listOpts)
-	} else {
-		deployList, err = dynClient.Resource(deployGVR).Namespace(ns).List(ctx, listOpts)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to list Deployments: %v\n", err)
-	} else {
-		for _, deploy := range deployList.Items {
-			deployName := deploy.GetName()
-			deployNS := deploy.GetNamespace()
-			labels := deploy.GetLabels()
-			replicas, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
-			if replicas == 0 {
-				replicas = 1
-			}
-
-			healthy := countHealthyPods(ctx, dynClient, podGVR, deployNS, getSelectorLabels(&deploy))
-
-			helmRelease := labels["app.kubernetes.io/instance"]
-			if helmRelease != "" {
-				key := helmRelease + "@" + deployNS
-				if existing, ok := helmReleases[key]; ok {
-					existing.totalPods += int(replicas)
-					existing.healthyPods += healthy
-				} else {
-					helmReleases[key] = &helmInfo{
-						release:      helmRelease,
-						namespace:    deployNS,
-						workloadKind: "Deployment",
-						workloadName: deployName,
-						totalPods:    int(replicas),
-						healthyPods:  healthy,
-					}
-				}
-			} else {
-				nodeKey := makeNodeKey("deploy", deployName, deployNS)
-				nodes[nodeKey] = &rundeckNode{
-					NodeName:         nodeKey,
-					Hostname:         "localhost",
-					Tags:             joinTags("deployment", deployNS, nodesClusterName),
-					OSFamily:         "kubernetes",
-					NodeExecutor:     "local",
-					FileCopier:       "local",
-					Cluster:          nodesClusterName,
-					ClusterURL:       nodesClusterURL,
-					ClusterTokenSuffix: getClusterTokenSuffix(),
-					TargetType:       "deployment",
-					TargetValue:      deployName,
-					TargetNamespace:  deployNS,
-					WorkloadKind:     "Deployment",
-					WorkloadName:     deployName,
-					PodCount:         fmt.Sprintf("%d", replicas),
-					HealthyPods:      fmt.Sprintf("%d", healthy),
-				}
-			}
-		}
-	}
-
-	// --- Add Helm release nodes ---
-	for _, info := range helmReleases {
-		nodeKey := makeNodeKey("helm", info.release, info.namespace)
-		nodes[nodeKey] = &rundeckNode{
-			NodeName:         nodeKey,
-			Hostname:         "localhost",
-			Tags:             joinTags("helm-release", info.namespace, nodesClusterName),
-			OSFamily:         "kubernetes",
-			NodeExecutor:     "local",
-			FileCopier:       "local",
-			Cluster:          nodesClusterName,
-			ClusterURL:       nodesClusterURL,
-			ClusterTokenSuffix: getClusterTokenSuffix(),
-			TargetType:       "helm-release",
-			TargetValue:      info.release,
-			TargetNamespace:  info.namespace,
-			WorkloadKind:     info.workloadKind,
-			WorkloadName:     info.workloadName,
-			PodCount:         fmt.Sprintf("%d", info.totalPods),
-			HealthyPods:      fmt.Sprintf("%d", info.healthyPods),
-		}
-	}
-
-	// Output as Rundeck resource JSON (sorted by key for deterministic output)
-	keys := make([]string, 0, len(nodes))
-	for k := range nodes {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	output := make(map[string]*rundeckNode, len(nodes))
-	for _, k := range keys {
-		output[k] = nodes[k]
-	}
-
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
-}
-
-// getSelectorLabels extracts spec.selector.matchLabels from a workload.
-func getSelectorLabels(obj *unstructured.Unstructured) map[string]string {
-	labels, found, err := unstructured.NestedStringMap(obj.Object, "spec", "selector", "matchLabels")
-	if err != nil || !found {
-		return nil
-	}
-	return labels
-}
-
-// countHealthyPods counts running pods matching the given selector labels.
-func countHealthyPods(ctx context.Context, dynClient dynamic.Interface, podGVR schema.GroupVersionResource, namespace string, selectorLabels map[string]string) int {
-	if len(selectorLabels) == 0 {
-		return 0
-	}
-
-	parts := make([]string, 0, len(selectorLabels))
-	for k, v := range selectorLabels {
-		parts = append(parts, k+"="+v)
-	}
-	selector := strings.Join(parts, ",")
-
-	pods, err := dynClient.Resource(podGVR).Namespace(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-	})
-	if err != nil {
-		return 0
-	}
-
-	healthy := 0
-	for _, pod := range pods.Items {
-		phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase")
-		if phase == "Running" {
-			healthy++
-		}
-	}
-	return healthy
-}
-
-// joinTags creates a comma-separated tag string for Rundeck nodes.
-func joinTags(workloadType, namespace, cluster string) string {
-	if cluster != "" {
-		return workloadType + "," + namespace + "," + cluster
-	}
-	return workloadType + "," + namespace
-}
-
-// makeNodeKey creates a unique node key, optionally prefixed with cluster name.
-func makeNodeKey(workloadType, name, namespace string) string {
-	baseKey := fmt.Sprintf("%s:%s@%s", workloadType, name, namespace)
-	if nodesClusterName != "" {
-		return nodesClusterName + "/" + baseKey
-	}
-	return baseKey
-}
-
-// getClusterTokenSuffix returns the effective token path suffix, using the default if not specified.
-// This suffix is used with "keys/${node.clusterTokenSuffix}" in Rundeck job storagePath.
-func getClusterTokenSuffix() string {
-	if nodesClusterTokenSuffix != "" {
-		return nodesClusterTokenSuffix
-	}
-	return defaultClusterTokenSuffix
+	format := nodes.OutputFormat(nodesOutput)
+	return nodes.Write(os.Stdout, discovered, format)
 }
