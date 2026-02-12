@@ -3,7 +3,6 @@ package generator
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,13 +27,13 @@ func NewRundeckProjectGenerator(cfg *config.Config) *RundeckProjectGenerator {
 
 // RundeckTemplateData is the top-level data for the project template
 type RundeckTemplateData struct {
-	GeneratorVersion string
-	APIGroup         string
-	APIVersion       string
-	APIName          string // e.g., "petstore"
-	PluginName       string // e.g., "petstore" (kubectl plugin name)
-	Namespace        string // e.g., "petstore-system"
-	NodeSourceBase64 string // base64-encoded node-source.sh script
+	GeneratorVersion     string
+	APIGroup             string
+	APIVersion           string
+	APIName              string // e.g., "petstore"
+	PluginName           string // e.g., "petstore" (kubectl plugin name)
+	Namespace            string // e.g., "petstore-system"
+	StandaloneNodeSource bool   // use standalone k8s-workload-nodes provider
 }
 
 // RundeckResourceInfo is a CRUD resource with spec fields
@@ -84,7 +83,6 @@ type RundeckManagedCRInfo struct {
 // rundeckTemplateSet holds the template strings for a Rundeck project variant.
 type rundeckTemplateSet struct {
 	ProjectProperties string
-	NodeSourceScript  string
 	ResourceCreate    string
 	ResourceGet       string
 	ResourceDescribe  string
@@ -116,7 +114,6 @@ type rundeckTemplateSet struct {
 func nativeTemplates() rundeckTemplateSet {
 	return rundeckTemplateSet{
 		ProjectProperties: templates.RundeckProjectPropertiesTemplate,
-		NodeSourceScript:  templates.RundeckNodeSourceTemplate,
 		ResourceCreate:    templates.RundeckResourceCreateJobTemplate,
 		ResourceGet:       templates.RundeckResourceGetJobTemplate,
 		ResourceDescribe:  templates.RundeckResourceDescribeJobTemplate,
@@ -149,7 +146,6 @@ func nativeTemplates() rundeckTemplateSet {
 func dockerTemplates() rundeckTemplateSet {
 	return rundeckTemplateSet{
 		ProjectProperties: templates.RundeckDockerProjectPropertiesTemplate,
-		NodeSourceScript:  templates.RundeckDockerNodeSourceTemplate,
 		ResourceCreate:    templates.RundeckDockerResourceCreateJobTemplate,
 		ResourceGet:       templates.RundeckDockerResourceGetJobTemplate,
 		ResourceDescribe:  templates.RundeckDockerResourceDescribeJobTemplate,
@@ -182,7 +178,6 @@ func dockerTemplates() rundeckTemplateSet {
 func k8sTemplates() rundeckTemplateSet {
 	return rundeckTemplateSet{
 		ProjectProperties: templates.RundeckK8sProjectPropertiesTemplate,
-		NodeSourceScript:  templates.RundeckK8sNodeSourceTemplate,
 		ResourceCreate:    templates.RundeckK8sResourceCreateJobTemplate,
 		ResourceGet:       templates.RundeckK8sResourceGetJobTemplate,
 		ResourceDescribe:  templates.RundeckK8sResourceDescribeJobTemplate,
@@ -345,30 +340,16 @@ func (g *RundeckProjectGenerator) generateProject(crds []*mapper.CRDDefinition, 
 	// Prepare base template data
 	apiName := strings.Split(g.config.APIGroup, ".")[0]
 	baseData := RundeckTemplateData{
-		GeneratorVersion: g.config.GeneratorVersion,
-		APIGroup:         g.config.APIGroup,
-		APIVersion:       g.config.APIVersion,
-		APIName:          apiName,
-		PluginName:       apiName,
-		Namespace:        apiName + "-system",
+		GeneratorVersion:     g.config.GeneratorVersion,
+		APIGroup:             g.config.APIGroup,
+		APIVersion:           g.config.APIVersion,
+		APIName:              apiName,
+		PluginName:           apiName,
+		Namespace:            apiName + "-system",
+		StandaloneNodeSource: g.config.StandaloneNodeSource,
 	}
 
-	// Render node-source.sh, base64-encode it, and embed in project.properties.
-	// This avoids quoting issues with Rundeck's arg tokenizer and removes
-	// the need for volume-mounting the script file into the Rundeck container.
-	nodeSourceScript, err := g.renderTemplate(tmplSet.NodeSourceScript, baseData)
-	if err != nil {
-		return fmt.Errorf("failed to render node-source.sh: %w", err)
-	}
-	baseData.NodeSourceBase64 = base64.StdEncoding.EncodeToString(nodeSourceScript)
-
-	// Write node-source.sh for reference/debugging
-	nodeSourcePath := filepath.Join(rundeckDir, "node-source.sh")
-	if err := os.WriteFile(nodeSourcePath, nodeSourceScript, 0755); err != nil {
-		return fmt.Errorf("failed to write node-source.sh: %w", err)
-	}
-
-	// Generate project.properties (uses NodeSourceBase64 for inline script)
+	// Generate project.properties
 	propsPath := filepath.Join(rundeckDir, "project.properties")
 	if err := g.executeTemplate(
 		tmplSet.ProjectProperties,

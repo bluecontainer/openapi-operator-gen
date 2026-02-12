@@ -346,11 +346,20 @@ services:
         curl -fSL -o /home/rundeck/libext/jq-json-logfilter-$${JQ_PLUGIN_VERSION}.jar "$${JQ_PLUGIN_URL}" \
           && echo "Plugin installed: jq-json-logfilter $${JQ_PLUGIN_VERSION}" \
           || echo "WARNING: Failed to download jq-json-logfilter plugin"
+{{- if .StandaloneNodeSource }}
+        # Download standalone Rundeck node source plugin from GitHub (latest release)
+        NODES_PLUGIN_VERSION=$$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/bluecontainer/kubectl-rundeck-nodes/releases/latest | xargs basename | sed 's/^v//')
+        NODES_PLUGIN_URL="https://github.com/bluecontainer/kubectl-rundeck-nodes/releases/latest/download/rundeck-k8s-nodes-$${NODES_PLUGIN_VERSION}-linux-amd64.zip"
+        curl -fSL -o /home/rundeck/libext/rundeck-k8s-nodes-$${NODES_PLUGIN_VERSION}.zip "$${NODES_PLUGIN_URL}" \
+          && echo "Plugin installed: rundeck-k8s-nodes-$${NODES_PLUGIN_VERSION}" \
+          || echo "WARNING: Failed to download rundeck-k8s-nodes plugin"
+{{- else }}
         # Install node source plugin for workload discovery
         if [ -f /rundeck-plugin/{{ .AppName }}-node-source.zip ]; then
           cp /rundeck-plugin/{{ .AppName }}-node-source.zip /home/rundeck/libext/
           echo "Plugin installed: {{ .AppName }}-node-source"
         fi
+{{- end }}
         export PATH="/home/rundeck/server/data:$PATH"
         exec /home/rundeck/docker-lib/entry.sh
     environment:
@@ -364,7 +373,9 @@ services:
       - rundeck-data:/home/rundeck/server/data
       - ./rundeck-project/tokens.properties:/home/rundeck/etc/tokens.properties:ro
       - ./rundeck-project/storage-access.aclpolicy:/home/rundeck/etc/storage-access.aclpolicy:ro
+{{- if not .StandaloneNodeSource }}
       - ./rundeck-plugin:/rundeck-plugin:ro
+{{- end }}
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:4440"]

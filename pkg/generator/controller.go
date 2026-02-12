@@ -1102,15 +1102,16 @@ func (g *ControllerGenerator) generateDeploymentManifests() error {
 
 // targetAPITemplateData holds shared template data for target API generation.
 type targetAPITemplateData struct {
-	GeneratorVersion  string
-	AppName           string
-	Namespace         string
-	TargetAPIImage    string
-	HasTargetAPI      bool
-	ContainerPort     int
-	BasePath          string
-	HasKubectlPlugin  bool
-	HasRundeckProject bool
+	GeneratorVersion     string
+	AppName              string
+	Namespace            string
+	TargetAPIImage       string
+	HasTargetAPI         bool
+	ContainerPort        int
+	BasePath             string
+	HasKubectlPlugin     bool
+	HasRundeckProject    bool
+	StandaloneNodeSource bool
 }
 
 // resolveTargetAPIData computes the shared template data used by both
@@ -1141,15 +1142,16 @@ func (g *ControllerGenerator) resolveTargetAPIData() targetAPITemplateData {
 	}
 
 	return targetAPITemplateData{
-		GeneratorVersion:  g.config.GeneratorVersion,
-		AppName:           appName,
-		Namespace:         namespace,
-		TargetAPIImage:    g.config.TargetAPIImage,
-		HasTargetAPI:      g.config.TargetAPIImage != "",
-		ContainerPort:     containerPort,
-		BasePath:          basePath,
-		HasKubectlPlugin:  g.config.GenerateKubectlPlugin,
-		HasRundeckProject: g.config.GenerateRundeckProject,
+		GeneratorVersion:     g.config.GeneratorVersion,
+		AppName:              appName,
+		Namespace:            namespace,
+		TargetAPIImage:       g.config.TargetAPIImage,
+		HasTargetAPI:         g.config.TargetAPIImage != "",
+		ContainerPort:        containerPort,
+		BasePath:             basePath,
+		HasKubectlPlugin:     g.config.GenerateKubectlPlugin,
+		HasRundeckProject:    g.config.GenerateRundeckProject,
+		StandaloneNodeSource: g.config.StandaloneNodeSource,
 	}
 }
 

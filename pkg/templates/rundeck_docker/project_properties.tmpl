@@ -12,11 +12,11 @@ project.globals.k8s_url=__K8S_URL__
 # Node attributes (targetType, targetValue, targetNamespace) map to --target-* flags.
 # For multi-cluster support, each node source can set cluster_name and cluster_token_suffix.
 # Jobs use keys/${node.clusterTokenSuffix} for dynamic per-node credential selection.
-resources.source.1.type={{ .PluginName }}-k8s-nodes
+{{ if .StandaloneNodeSource }}resources.source.1.type=k8s-workload-nodes{{ else }}resources.source.1.type={{ .PluginName }}-k8s-nodes{{ end }}
 resources.source.1.config.cluster_token_suffix=project/{{ .PluginName }}-operator-docker/k8s-token
 resources.source.1.config.k8s_token=keys/${resources.source.1.config.cluster_token_suffix}
 resources.source.1.config.k8s_url=__K8S_URL__
 resources.source.1.config.namespace={{ .Namespace }}
 resources.source.1.config.execution_mode=docker
-resources.source.1.config.docker_image={{ .PluginName }}-kubectl-plugin:latest
+{{ if .StandaloneNodeSource }}resources.source.1.config.docker_image=ghcr.io/bluecontainer/kubectl-rundeck-nodes:latest{{ else }}resources.source.1.config.docker_image={{ .PluginName }}-kubectl-plugin:latest{{ end }}
 resources.source.1.config.docker_network={{ .PluginName }}-operator-net

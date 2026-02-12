@@ -60,6 +60,7 @@ example: build
 		--kubectl-plugin \
  		--target-api-image=docker.io/swaggerapi/petstore3:unstable \
 		--rundeck-project \
+		--standalone-node-source \
 		--managed-crs=examples/managed-crs
 	echo 'replace github.com/bluecontainer/openapi-operator-gen => ../..' >> examples/generated/go.mod
 
