@@ -345,11 +345,6 @@ var DockerComposeTemplate string
 //go:embed rundeck/project_properties.tmpl
 var RundeckProjectPropertiesTemplate string
 
-// RundeckNodeSourceTemplate is the template for the node source discovery script (native execution)
-//
-//go:embed rundeck/node_source.sh.tmpl
-var RundeckNodeSourceTemplate string
-
 // RundeckResourceCreateJobTemplate is the template for per-resource create jobs
 //
 //go:embed rundeck/resource_create_job.yaml.tmpl
@@ -396,11 +391,6 @@ var RundeckCleanupJobTemplate string
 //
 //go:embed rundeck_docker/project_properties.tmpl
 var RundeckDockerProjectPropertiesTemplate string
-
-// RundeckDockerNodeSourceTemplate is the template for the node source discovery script (Docker execution)
-//
-//go:embed rundeck_docker/node_source.sh.tmpl
-var RundeckDockerNodeSourceTemplate string
 
 // RundeckDockerResourceCreateJobTemplate is the template for per-resource create jobs (Docker execution)
 //
@@ -470,11 +460,6 @@ var PluginRunnerRoleBindingTemplate string
 //
 //go:embed rundeck_k8s/project_properties.tmpl
 var RundeckK8sProjectPropertiesTemplate string
-
-// RundeckK8sNodeSourceTemplate is the template for the node source discovery script (K8s pod execution)
-//
-//go:embed rundeck_k8s/node_source.sh.tmpl
-var RundeckK8sNodeSourceTemplate string
 
 // RundeckK8sResourceCreateJobTemplate is the template for per-resource create jobs (K8s pod execution)
 //

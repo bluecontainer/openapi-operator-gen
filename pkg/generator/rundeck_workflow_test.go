@@ -407,34 +407,63 @@ func TestRundeckProjectPropertiesNodeSource(t *testing.T) {
 	t.Run("native project.properties uses custom node source plugin", func(t *testing.T) {
 		content := readFile(t, filepath.Join(tmpDir, "rundeck-project", "project.properties"))
 		assertContains(t, content, "resources.source.1.type=petstore-k8s-nodes")
-		assertContains(t, content, "resources.source.1.config.k8s_token=keys/project/petstore-operator/k8s-token")
+		assertContains(t, content, "resources.source.1.config.cluster_token_suffix=project/petstore-operator/k8s-token")
+		assertContains(t, content, "resources.source.1.config.k8s_token=keys/${resources.source.1.config.cluster_token_suffix}")
 		assertContains(t, content, "resources.source.1.config.execution_mode=native")
-		// Verify the node-source.sh reference script exists and contains expected content
-		script := readFile(t, filepath.Join(tmpDir, "rundeck-project", "node-source.sh"))
-		assertContains(t, script, "kubectl-petstore")
-		assertContains(t, script, "nodes")
 	})
 
 	t.Run("docker project.properties uses custom node source plugin", func(t *testing.T) {
 		content := readFile(t, filepath.Join(tmpDir, "rundeck-docker-project", "project.properties"))
 		assertContains(t, content, "resources.source.1.type=petstore-k8s-nodes")
-		assertContains(t, content, "resources.source.1.config.k8s_token=keys/project/petstore-operator-docker/k8s-token")
+		assertContains(t, content, "resources.source.1.config.cluster_token_suffix=project/petstore-operator-docker/k8s-token")
+		assertContains(t, content, "resources.source.1.config.k8s_token=keys/${resources.source.1.config.cluster_token_suffix}")
 		assertContains(t, content, "resources.source.1.config.execution_mode=docker")
-		script := readFile(t, filepath.Join(tmpDir, "rundeck-docker-project", "node-source.sh"))
-		assertContains(t, script, "docker run")
-		assertContains(t, script, "petstore")
-		assertContains(t, script, "nodes")
 	})
 
 	t.Run("k8s project.properties uses custom node source plugin", func(t *testing.T) {
 		content := readFile(t, filepath.Join(tmpDir, "rundeck-k8s-project", "project.properties"))
 		assertContains(t, content, "resources.source.1.type=petstore-k8s-nodes")
-		assertContains(t, content, "resources.source.1.config.k8s_token=keys/project/petstore-operator-k8s/k8s-token")
+		assertContains(t, content, "resources.source.1.config.cluster_token_suffix=project/petstore-operator-k8s/k8s-token")
+		assertContains(t, content, "resources.source.1.config.k8s_token=keys/${resources.source.1.config.cluster_token_suffix}")
 		assertContains(t, content, "resources.source.1.config.execution_mode=kubernetes")
-		script := readFile(t, filepath.Join(tmpDir, "rundeck-k8s-project", "node-source.sh"))
-		assertContains(t, script, "kubectl")
-		assertContains(t, script, "plugin-runner")
-		assertContains(t, script, "nodes")
+	})
+}
+
+func TestRundeckProjectPropertiesStandaloneNodeSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		OutputDir:            tmpDir,
+		APIGroup:             "petstore.example.com",
+		APIVersion:           "v1alpha1",
+		GeneratorVersion:     "test",
+		StandaloneNodeSource: true,
+	}
+	g := NewRundeckProjectGenerator(cfg)
+	crds := testCRDs(cfg)
+
+	if err := g.Generate(crds); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if err := g.GenerateDockerProject(crds); err != nil {
+		t.Fatalf("GenerateDockerProject failed: %v", err)
+	}
+	if err := g.GenerateK8sProject(crds); err != nil {
+		t.Fatalf("GenerateK8sProject failed: %v", err)
+	}
+
+	t.Run("native uses standalone provider", func(t *testing.T) {
+		content := readFile(t, filepath.Join(tmpDir, "rundeck-project", "project.properties"))
+		assertContains(t, content, "resources.source.1.type=k8s-workload-nodes")
+	})
+
+	t.Run("docker uses standalone provider", func(t *testing.T) {
+		content := readFile(t, filepath.Join(tmpDir, "rundeck-docker-project", "project.properties"))
+		assertContains(t, content, "resources.source.1.type=k8s-workload-nodes")
+	})
+
+	t.Run("k8s uses standalone provider", func(t *testing.T) {
+		content := readFile(t, filepath.Join(tmpDir, "rundeck-k8s-project", "project.properties"))
+		assertContains(t, content, "resources.source.1.type=k8s-workload-nodes")
 	})
 }
 

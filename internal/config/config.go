@@ -60,6 +60,11 @@ type Config struct {
 	// Requires GenerateKubectlPlugin to be true.
 	GenerateRundeckProject bool
 
+	// StandaloneNodeSource controls whether to use the standalone kubectl-rundeck-nodes
+	// Rundeck plugin for node sources instead of generating a per-API plugin.
+	// When true, skips node source plugin generation and uses the k8s-workload-nodes provider.
+	StandaloneNodeSource bool
+
 	// UpdateWithPost specifies which resources should use POST for updates when PUT is not available.
 	// Can be:
 	// - Empty: disabled (default)

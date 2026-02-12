@@ -491,6 +491,7 @@ idMerge:
 | `--bundle` | Generate an Inline Composition Bundle CRD (see [Bundle CRD](#bundle-crd)) | `false` |
 | `--kubectl-plugin` | Generate a kubectl plugin for operator management (see [Kubectl Plugin](#kubectl-plugin)) | `false` |
 | `--rundeck-project` | Generate a Rundeck project with jobs using the kubectl plugin (requires `--kubectl-plugin`; see [Rundeck Project](#rundeck-project)) | `false` |
+| `--standalone-node-source` | Use the standalone [kubectl-rundeck-nodes](https://github.com/bluecontainer/kubectl-rundeck-nodes) plugin for Rundeck node discovery instead of generating a per-API plugin (see [Standalone Node Source](#standalone-node-source)) | `false` |
 | `--target-api-image` | Container image for target REST API (generates Deployment+Service manifest and Docker Compose target API sections) | None |
 | `--target-api-port` | Container port for target REST API (overrides port from spec URL) | `8080` |
 
@@ -3412,7 +3413,8 @@ openapi-operator-gen generate \
   --version v1alpha1 \
   --module github.com/example/petstore-operator \
   --kubectl-plugin \
-  --rundeck-project
+  --rundeck-project \
+  --standalone-node-source
 ```
 
 Or in a config file:
@@ -3420,6 +3422,7 @@ Or in a config file:
 ```yaml
 kubectl-plugin: true
 rundeck-project: true
+standalone-node-source: true
 ```
 
 ### Generated Structure
@@ -3466,7 +3469,7 @@ config/rbac/
 kubectl-plugin/
 └── Dockerfile                      # Multi-stage build for plugin image
 
-rundeck-plugin/                     # Rundeck ResourceModelSource plugin
+rundeck-plugin/                     # Rundeck ResourceModelSource plugin (skipped with --standalone-node-source)
 ├── plugin.yaml                     # Plugin descriptor
 ├── contents/
 │   └── nodes.sh                    # Script that invokes kubectl plugin nodes
@@ -3615,9 +3618,22 @@ docker compose --profile k3s-deploy up -d rundeck-init --force-recreate
 
 ### ResourceModelSource Plugin
 
-The generator creates a Rundeck [ResourceModelSource](https://docs.rundeck.com/docs/developer/06-logging-plugins.html#resource-model-source-plugins) script plugin that discovers Kubernetes workloads and presents them as Rundeck nodes. This plugin is packaged as `rundeck-plugin/{app}-node-source.zip` and must be installed into Rundeck's `libext/` directory.
+The generator creates a Rundeck [ResourceModelSource](https://docs.rundeck.com/docs/developer/06-logging-plugins.html#resource-model-source-plugins) script plugin that discovers Kubernetes workloads and presents them as Rundeck nodes. By default, a per-API plugin is generated (e.g., `rundeck-plugin/petstore-node-source.zip`). Alternatively, the `--standalone-node-source` flag uses the generic [kubectl-rundeck-nodes](https://github.com/bluecontainer/kubectl-rundeck-nodes) plugin instead.
 
-**Plugin structure:**
+#### Standalone Node Source
+
+When `--standalone-node-source` is enabled:
+
+- The per-API node source plugin (`rundeck-plugin/`) is **not generated**
+- Projects use the `k8s-workload-nodes` provider from the standalone [kubectl-rundeck-nodes](https://github.com/bluecontainer/kubectl-rundeck-nodes) Rundeck plugin
+- In Docker Compose, the plugin is automatically downloaded from GitHub releases at startup
+- For docker/kubernetes execution modes, the `docker_image` defaults to `ghcr.io/bluecontainer/kubectl-rundeck-nodes:latest`
+
+This is useful when you want a single, shared node source plugin across multiple generated operators rather than a per-API plugin for each.
+
+#### Per-API Plugin (default)
+
+Without `--standalone-node-source`, the generator creates a per-API plugin with the kubectl plugin bundled inside:
 
 ```
 rundeck-plugin/
@@ -3627,7 +3643,20 @@ rundeck-plugin/
 └── petstore-node-source.zip        # Pre-built plugin archive ready for installation
 ```
 
-**Plugin configuration properties** (exposed in project settings):
+**Installation:**
+
+```bash
+# Copy the plugin to Rundeck's libext directory
+cp rundeck-plugin/petstore-node-source.zip /var/rundeck/libext/
+
+# Rundeck auto-loads plugins from libext/ — no restart required
+```
+
+In Docker Compose, the per-API plugin is automatically mounted via volume. With `--standalone-node-source`, the plugin is downloaded from GitHub releases instead.
+
+#### Plugin Configuration Properties
+
+Both standalone and per-API plugins expose the same configuration properties in project settings:
 
 | Property | Description | Default |
 |----------|-------------|---------|
@@ -3635,7 +3664,7 @@ rundeck-plugin/
 | `k8s_url` | Kubernetes API server URL | (required) |
 | `namespace` | Namespace to discover workloads in | `{app}-system` |
 | `execution_mode` | How to run the kubectl plugin: `native`, `docker`, or `kubernetes` | `native` |
-| `docker_image` | Docker image for `docker` mode | `{app}-kubectl-plugin:latest` |
+| `docker_image` | Docker image for `docker`/`kubernetes` mode | `ghcr.io/bluecontainer/kubectl-rundeck-nodes:latest` (standalone) or `{app}-kubectl-plugin:latest` (per-API) |
 | `docker_network` | Docker network for `docker` mode | `host` |
 | `plugin_namespace` | Namespace for ephemeral pods in `kubernetes` mode | `{app}-system` |
 | `service_account` | ServiceAccount for pods in `kubernetes` mode | `{app}-plugin-runner` |
@@ -3647,17 +3676,6 @@ The plugin uses Rundeck's `STORAGE_PATH_AUTOMATIC_READ` mechanism to retrieve th
 1. The `k8s_token` property contains a Key Storage path (e.g., `keys/project/petstore-operator/k8s-token`)
 2. Rundeck automatically reads the secret and passes it to the script via `RD_CONFIG_K8S_TOKEN`
 3. ACL policies must grant the project URN read access to the Key Storage path
-
-**Installation:**
-
-```bash
-# Copy the plugin to Rundeck's libext directory
-cp rundeck-plugin/petstore-node-source.zip /var/rundeck/libext/
-
-# Rundeck auto-loads plugins from libext/ — no restart required
-```
-
-In Docker Compose, the plugin is automatically mounted and available. The `rundeck-init` service configures the project settings and uploads the Kubernetes token to Key Storage.
 
 ### Workload Node Discovery
 
