@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -537,14 +536,8 @@ func (h *handlers) handleGenerate(_ context.Context, req mcp.CallToolRequest) (*
 		messages = append(messages, "Generated Rundeck projects")
 	}
 
-	// Write config file to the output directory for reproducibility
-	configPath := filepath.Join(cfg.OutputDir, ".openapi-operator-gen.yaml")
-	if err := config.WriteConfigFile(configPath, cfg); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Failed to write config file: %v", err)), nil
-	}
-	messages = append(messages, "Saved .openapi-operator-gen.yaml config")
-
 	// Build result summary
+	messages = append(messages, "Saved .openapi-operator-gen.yaml config")
 	var b strings.Builder
 	b.WriteString("Operator generated successfully!\n\n")
 	for _, msg := range messages {

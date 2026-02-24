@@ -229,6 +229,12 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 		return fmt.Errorf("failed to generate CLAUDE.md: %w", err)
 	}
 
+	// Save resolved config for reproducibility (openapi-operator-gen generate can re-use it)
+	configPath := filepath.Join(g.config.OutputDir, ".openapi-operator-gen.yaml")
+	if err := config.WriteConfigFile(configPath, g.config); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
 	// Generate hack/boilerplate.go.txt for controller-gen
 	if err := g.generateBoilerplate(); err != nil {
 		return fmt.Errorf("failed to generate boilerplate: %w", err)
