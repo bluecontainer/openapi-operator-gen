@@ -139,6 +139,11 @@ var KustomizationSamplesTemplate string
 //go:embed readme.md.tmpl
 var ReadmeTemplate string
 
+// ClaudeMdTemplate is the template for generating the CLAUDE.md file
+//
+//go:embed claude.md.tmpl
+var ClaudeMdTemplate string
+
 // SuiteTestTemplate is the template for generating the envtest suite_test.go file
 //
 //go:embed suite_test.go.tmpl

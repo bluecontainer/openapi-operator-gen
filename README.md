@@ -124,6 +124,17 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [ResourceModelSource Plugin](#resourcemodelsource-plugin)
   - [Workload Node Discovery](#workload-node-discovery)
   - [Hybrid Node-Attribute Targeting](#hybrid-node-attribute-targeting)
+- [Using with Claude Code](#using-with-claude-code)
+  - [Copy-Paste Prompt](#copy-paste-prompt)
+  - [Quick Start (with MCP already configured)](#quick-start-with-mcp-already-configured)
+  - [Quick Start (without MCP)](#quick-start-without-mcp)
+  - [Full Bootstrapping Prompt](#full-bootstrapping-prompt)
+- [MCP Server (AI Assistant Integration)](#mcp-server-ai-assistant-integration)
+  - [Installation](#mcp-installation)
+  - [Configuration](#mcp-configuration)
+  - [Workflow](#workflow)
+  - [Prompts](#prompts)
+  - [Available Tools](#available-tools)
 - [Releasing](#releasing)
 - [License](#license)
 
@@ -3850,21 +3861,293 @@ The `@node.xxx@` tokens are Rundeck's [node attribute expansion](https://docs.ru
 - **Single node** (e.g., `name: helm:petstore@default`): Job targets one specific workload
 - **Manual override**: Set `target_statefulset` or other explicit options in the job form to bypass node attributes entirely
 
+## Using with Claude Code
+
+openapi-operator-gen is designed to work with [Claude Code](https://docs.anthropic.com/en/docs/claude-code). You can use it to generate Kubernetes operators conversationally — describe your API, discuss options, and Claude handles the rest.
+
+### Copy-Paste Prompt
+
+Paste this into Claude Code to install openapi-operator-gen, configure the MCP server, and generate an operator — all in one go:
+
+> Install openapi-operator-gen (`go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest`), then run `openapi-operator-gen setup claude-code` to configure it as an MCP server. Once the MCP tools are available, use them to generate a Kubernetes operator from my OpenAPI spec at ./api/openapi.yaml — validate the spec, preview the resources, ask me about options, then generate and build.
+
+Replace `./api/openapi.yaml` with your actual spec path. Claude will handle the rest.
+
+### Quick Start (with MCP already configured)
+
+If you've already installed and configured the MCP server:
+
+```bash
+# One-time setup (already done)
+go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest
+openapi-operator-gen setup claude-code
+```
+
+Then in any project, just ask Claude:
+
+> I have an OpenAPI spec at ./api/openapi.yaml — generate me a Kubernetes operator
+
+Claude will validate the spec, preview the resources, discuss options with you, generate the operator, and build it.
+
+### Quick Start (without MCP)
+
+If you prefer not to use MCP, paste this into Claude Code:
+
+> Install openapi-operator-gen (`go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest`) and use it to generate a Kubernetes operator from my OpenAPI spec at ./api/openapi.yaml. Read the tool's README at https://github.com/bluecontainer/openapi-operator-gen for available options. After generating, run `go mod tidy && make generate && make build && make test` in the output directory.
+
+Or add instructions to your project's `CLAUDE.md` so Claude always knows about the tool (see [docs/claude-code-snippet.md](docs/claude-code-snippet.md) for a template).
+
+### Full Bootstrapping Prompt
+
+For maximum control over the workflow, copy this into your project's `CLAUDE.md` or paste it directly:
+
+<details>
+<summary>Click to expand</summary>
+
+```
+## Generating a Kubernetes Operator
+
+This project needs a Kubernetes operator generated from an OpenAPI specification
+using openapi-operator-gen (https://github.com/bluecontainer/openapi-operator-gen).
+
+### Setup
+1. Install: go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest
+2. (Optional) Configure MCP: openapi-operator-gen setup claude-code
+
+### OpenAPI Spec
+The OpenAPI specification is at: [PATH TO YOUR SPEC]
+
+### Workflow
+1. Validate the spec is parseable.
+   If MCP is configured, use the validate tool.
+   Otherwise: openapi-operator-gen generate --spec [SPEC] --output /dev/null
+
+2. Preview what CRDs would be generated (Resources, Queries, Actions).
+   If MCP is configured, use the preview tool.
+   Otherwise: read the spec and review openapi-operator-gen --help.
+
+3. Discuss options before generating:
+   - Output directory (e.g., ./operator)
+   - API group (e.g., myapp.example.com)
+   - Go module (e.g., github.com/myorg/myapp-operator)
+   - Optional features: --aggregate, --bundle, --kubectl-plugin
+   - Path/tag/operation filters if needed
+
+4. Generate:
+   openapi-operator-gen generate \
+     --spec [SPEC] --output [DIR] --group [GROUP] \
+     --version v1alpha1 --module [MODULE]
+
+5. Build and test:
+   cd [DIR] && go mod tidy && make generate && make manifests && make build && make test
+
+6. Save config for reproducibility:
+   openapi-operator-gen init -o [DIR]/.openapi-operator-gen.yaml
+
+### File Ownership
+Regenerated (do not edit): api/, internal/controller/, config/crd/, main.go, Dockerfile, Makefile
+Safe to customize: config/manager/, config/rbac/, config/samples/, config/default/
+```
+
+</details>
+
+## MCP Server (AI Assistant Integration)
+
+openapi-operator-gen includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes its capabilities as tools for AI assistants like Claude Code. This lets you generate operators conversationally — describe your API and the assistant handles the flags, previews the output, and runs generation.
+
+```
+openapi-operator-gen mcp
+```
+
+The server communicates over stdio (JSON-RPC) — no daemon, no ports. It's the same binary you already have.
+
+### <a name="mcp-installation"></a>Installation
+
+No separate installation required. The MCP server is built into the `openapi-operator-gen` binary:
+
+```bash
+# Install via go
+go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest
+
+# Or download from GitHub releases
+# https://github.com/bluecontainer/openapi-operator-gen/releases
+```
+
+### <a name="mcp-configuration"></a>Configuration
+
+**Project-level** (recommended — creates `.mcp.json` in the current directory):
+
+```bash
+openapi-operator-gen setup claude-code
+```
+
+This creates a `.mcp.json` file that Claude Code automatically discovers. Commit it to share with your team.
+
+**User-level** (registers globally via Claude Code CLI):
+
+```bash
+openapi-operator-gen setup claude-code --scope user
+```
+
+**Manual** — create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "openapi-operator-gen": {
+      "command": "openapi-operator-gen",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Workflow
+
+The typical workflow when using the MCP server with an AI assistant:
+
+1. **You** provide your OpenAPI spec path (or use the `generate-operator` prompt)
+2. **Assistant** calls `validate` to confirm the spec is parseable and shows a summary
+3. **Assistant** calls `preview` to show what CRDs would be generated — Resources, Queries, Actions
+4. **You** review the preview and discuss options: should the aggregate CRD be enabled? Exclude any paths? Add a kubectl plugin?
+5. **Assistant** calls `generate` with the confirmed options
+6. **Assistant** runs the post-generation build steps (`go mod tidy`, `make generate`, `make build`)
+
+Example conversation:
+
+> **You:** I have an OpenAPI spec at ./api/openapi.yaml — generate me a Kubernetes operator
+>
+> **Assistant:** Let me validate the spec first... It's a valid OpenAPI 3.0 spec with 5 resources, 2 query endpoints, and 1 action. Here's the preview:
+> - **User** (CRUD: GET, POST, PUT, DELETE)
+> - **Project** (CRUD: GET, POST, PUT, DELETE)
+> - ...
+>
+> Before I generate, what API group should I use (e.g., `myapp.example.com`)? And what Go module name? Also, would you like a kubectl plugin or status aggregator CRD?
+>
+> **You:** Group is myapp.example.com, module is github.com/myorg/myapp-operator. Enable the kubectl plugin and aggregate CRD.
+>
+> **Assistant:** Generating... Done! Created 8 CRDs in `./generated`. Running build steps now...
+
+### Prompts
+
+The MCP server provides prompt templates that guide the assistant through multi-step workflows. These can be invoked by the AI assistant or selected from a prompt picker.
+
+#### `generate-operator`
+
+Walk through the full operator generation workflow: validate, preview, discuss options, generate, and build.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `spec` | Yes | Path or URL to the OpenAPI specification file |
+| `output` | No | Output directory for generated operator code |
+| `group` | No | Kubernetes API group (e.g., `myapp.example.com`) |
+| `module` | No | Go module name (e.g., `github.com/myorg/myapp-operator`) |
+
+Any arguments not provided upfront will be asked about during the conversation.
+
+#### `preview-api`
+
+Explore an OpenAPI spec to understand what Kubernetes resources it would produce, without generating any files.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `spec` | Yes | Path or URL to the OpenAPI specification file |
+
+### Available Tools
+
+#### `validate`
+
+Check if an OpenAPI spec is parseable and show a summary of its contents.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `spec` | Yes | Path or URL to the OpenAPI specification file |
+
+Example output:
+```
+OpenAPI Specification: Valid
+
+Title: Swagger Petstore - OpenAPI 3.0
+Version: 1.0.27
+Base URL: https://petstore3.swagger.io/api/v3
+
+Resources (CRUD):        3
+Query Endpoints (GET):   5
+Action Endpoints (POST): 2
+```
+
+#### `preview`
+
+Parse a spec and show what CRDs would be generated without writing any files. Shows resource classification (Resources, Queries, Actions) with Kind names, paths, HTTP methods, and spec fields.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `spec` | Yes | Path or URL to the OpenAPI specification file |
+| `group` | No | Kubernetes API group for Kind name derivation |
+| `include_paths` | No | Comma-separated path patterns to include (glob supported) |
+| `exclude_paths` | No | Comma-separated path patterns to exclude (glob supported) |
+| `include_tags` | No | Comma-separated OpenAPI tags to include |
+| `exclude_tags` | No | Comma-separated OpenAPI tags to exclude |
+| `include_operations` | No | Comma-separated operationIds to include (glob supported) |
+| `exclude_operations` | No | Comma-separated operationIds to exclude (glob supported) |
+
+#### `generate`
+
+Generate a complete Kubernetes operator from an OpenAPI specification. Accepts all the same options as the CLI `generate` command.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `spec` | Yes | Path or URL to the OpenAPI specification file |
+| `output` | Yes | Output directory for generated operator code |
+| `group` | Yes | Kubernetes API group (e.g., `myapp.example.com`) |
+| `module` | Yes | Go module name (e.g., `github.com/myorg/myapp-operator`) |
+| `version` | No | API version (default: `v1alpha1`) |
+| `mapping` | No | `per-resource` (default) or `single-crd` |
+| `aggregate` | No | Generate Status Aggregator CRD |
+| `bundle` | No | Generate Bundle CRD |
+| `kubectl_plugin` | No | Generate kubectl plugin |
+| `rundeck_project` | No | Generate Rundeck projects (requires `kubectl_plugin`) |
+| `standalone_node_source` | No | Use standalone kubectl-rundeck-nodes plugin |
+| `generate_crds` | No | Generate CRD YAML directly |
+| `root_kind` | No | Kind name for root `/` endpoint |
+| `include_paths` | No | Comma-separated path patterns to include |
+| `exclude_paths` | No | Comma-separated path patterns to exclude |
+| `include_tags` | No | Comma-separated OpenAPI tags to include |
+| `exclude_tags` | No | Comma-separated OpenAPI tags to exclude |
+| `include_operations` | No | Comma-separated operationIds to include |
+| `exclude_operations` | No | Comma-separated operationIds to exclude |
+| `update_with_post` | No | Paths to use POST for updates (`*` for all) |
+| `no_id_merge` | No | Disable automatic ID field merging |
+| `id_field_map` | No | Explicit path-to-body field mappings (e.g., `orderId=id`) |
+| `target_api_image` | No | Container image for target REST API deployment |
+| `target_api_port` | No | Container port for target REST API |
+| `managed_crs` | No | Directory with CR YAML files for Rundeck lifecycle jobs |
+
 ## Releasing
 
 To create a new release:
 
-### 1. Update Version and Create Tag
+### 1. Create a Release with the Makefile
+
+The Makefile provides helpers for version management and releasing:
 
 ```bash
-# Ensure you're on main with latest changes
-git checkout main
-git pull origin main
+# Show the latest tag and the auto-incremented next patch version
+make next-version
 
-# Create an annotated tag
+# Create a release (auto-increments the patch version, e.g. v0.0.11 → v0.0.12)
+make release
+
+# Create a release with an explicit version
+make release RELEASE_VERSION=v1.0.0
+```
+
+`make release` will prompt for confirmation, then create an annotated git tag and push it to origin, which triggers the automated release workflow.
+
+You can also tag manually if you prefer:
+
+```bash
 git tag -a v0.1.0 -m "Release v0.1.0"
-
-# Push the tag
 git push origin v0.1.0
 ```
 

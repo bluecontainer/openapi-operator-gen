@@ -30,3 +30,4 @@ Thumbs.db
 # Generated examples (optional - uncomment to ignore)
 # examples/generated/
 examples/k3s-multi-output/
+/openapi-operator-gen
