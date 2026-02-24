@@ -102,6 +102,9 @@ type ControllerTemplateData struct {
 	// ExternalIDRef handling
 	NeedsExternalIDRef bool // True if externalIDRef field is needed (no path params to identify resource)
 
+	// Test helper fields
+	HasInt64PathParams bool // True if any path parameter (PathParams, QueryPathParams, ResourcePathParams) is int64
+
 	// Integration test fields
 	RequiredFields    []RequiredFieldInfo // Required fields that need sample values in tests
 	HasRequiredFields bool                // True if there are required fields
@@ -219,6 +222,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 	// Generate README.md
 	if err := g.generateReadme(crds, aggregate != nil, bundle != nil); err != nil {
 		return fmt.Errorf("failed to generate README: %w", err)
+	}
+
+	// Generate CLAUDE.md for Claude Code integration
+	if err := g.generateClaudeMd(crds, aggregate != nil, bundle != nil); err != nil {
+		return fmt.Errorf("failed to generate CLAUDE.md: %w", err)
 	}
 
 	// Generate hack/boilerplate.go.txt for controller-gen
@@ -420,6 +428,30 @@ func (g *ControllerGenerator) generateController(outputDir string, crd *mapper.C
 		// Use the NeedsExternalIDRef value from the CRD (set by mapper based on ResourcePath)
 		// This is true when there are no path parameters to identify the resource
 		data.NeedsExternalIDRef = crd.NeedsExternalIDRef
+	}
+
+	// Check if any path parameter is int64 (needed for fmt import in tests)
+	for _, p := range data.PathParams {
+		if p.GoType == "int64" {
+			data.HasInt64PathParams = true
+			break
+		}
+	}
+	if !data.HasInt64PathParams {
+		for _, p := range data.QueryPathParams {
+			if p.GoType == "int64" {
+				data.HasInt64PathParams = true
+				break
+			}
+		}
+	}
+	if !data.HasInt64PathParams {
+		for _, p := range data.ResourcePathParams {
+			if p.GoType == "int64" {
+				data.HasInt64PathParams = true
+				break
+			}
+		}
 	}
 
 	filename := fmt.Sprintf("%s_controller.go", strings.ToLower(crd.Kind))
@@ -727,29 +759,30 @@ func (g *ControllerGenerator) buildPseudoVersion() string {
 	commitHash := g.config.CommitHash
 	timestamp := g.config.CommitTimestamp
 
-	// Ensure commit hash is at least 12 characters
-	if len(commitHash) > 0 && len(timestamp) > 0 {
-		// Pad commit hash to 12 chars if needed
-		if len(commitHash) < 12 {
-			commitHash = commitHash + strings.Repeat("0", 12-len(commitHash))
-		} else if len(commitHash) > 12 {
-			commitHash = commitHash[:12]
-		}
-
-		// Convert timestamp to YYYYMMDDHHMMSS format if needed
-		// Input may be ISO format (2026-01-15T20:35:56Z) or already YYYYMMDDHHMMSS
-		timestamp = normalizeTimestamp(timestamp)
-
-		// Increment patch version for pseudo-version
-		// e.g., v0.0.7 -> v0.0.8
-		incrementedVersion := incrementPatchVersion(baseVersion)
-
-		// Format: vX.Y.Z-0.YYYYMMDDHHMMSS-COMMIT12
-		return fmt.Sprintf("%s-0.%s-%s", incrementedVersion, timestamp, commitHash)
+	// Validate commit hash is a hex string (not "none" or other placeholder)
+	if !isHexString(commitHash) {
+		return baseVersion
 	}
 
-	// Fallback to base version if no commit info available
-	return baseVersion
+	// Normalize and validate timestamp
+	normalizedTS := normalizeTimestamp(timestamp)
+	if !isAllDigits(normalizedTS) || len(normalizedTS) != 14 {
+		return baseVersion
+	}
+
+	// Ensure commit hash is exactly 12 hex characters
+	if len(commitHash) < 12 {
+		commitHash = commitHash + strings.Repeat("0", 12-len(commitHash))
+	} else if len(commitHash) > 12 {
+		commitHash = commitHash[:12]
+	}
+
+	// Increment patch version for pseudo-version
+	// e.g., v0.0.7 -> v0.0.8
+	incrementedVersion := incrementPatchVersion(baseVersion)
+
+	// Format: vX.Y.Z-0.YYYYMMDDHHMMSS-COMMIT12
+	return fmt.Sprintf("%s-0.%s-%s", incrementedVersion, normalizedTS, commitHash)
 }
 
 // normalizeTimestamp converts a timestamp to YYYYMMDDHHMMSS format.
@@ -772,6 +805,20 @@ func normalizeTimestamp(ts string) string {
 	}
 
 	return t.UTC().Format("20060102150405")
+}
+
+// isHexString checks if a string is a valid hexadecimal string (non-empty, only 0-9 and a-f).
+// Used to validate commit hashes before constructing Go module pseudo-versions.
+func isHexString(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // isAllDigits checks if a string contains only digits
@@ -968,6 +1015,68 @@ func (g *ControllerGenerator) generateReadme(crds []*mapper.CRDDefinition, hasAg
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "README.md")
 	return g.executeTemplate(templates.ReadmeTemplate, data, outputPath)
+}
+
+func (g *ControllerGenerator) generateClaudeMd(crds []*mapper.CRDDefinition, hasAggregate bool, hasBundle bool) error {
+	type CRDInfo struct {
+		Kind               string
+		IsQuery            bool
+		IsAction           bool
+		NeedsExternalIDRef bool
+	}
+	crdInfos := make([]CRDInfo, 0, len(crds))
+	for _, crd := range crds {
+		crdInfos = append(crdInfos, CRDInfo{
+			Kind:               crd.Kind,
+			IsQuery:            crd.IsQuery,
+			IsAction:           crd.IsAction,
+			NeedsExternalIDRef: crd.NeedsExternalIDRef,
+		})
+	}
+
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+	titleAppName := appName
+	if len(appName) > 0 {
+		titleAppName = strings.ToUpper(appName[:1]) + appName[1:]
+	}
+
+	generatorCmd := fmt.Sprintf("openapi-operator-gen generate \\\n  --spec %s \\\n  --output %s \\\n  --group %s \\\n  --version %s \\\n  --module %s",
+		g.config.SpecPath,
+		g.config.OutputDir,
+		g.config.APIGroup,
+		g.config.APIVersion,
+		g.config.ModuleName,
+	)
+	if hasAggregate {
+		generatorCmd += " \\\n  --aggregate"
+	}
+	if hasBundle {
+		generatorCmd += " \\\n  --bundle"
+	}
+
+	data := struct {
+		AppName          string
+		TitleAppName     string
+		APIGroup         string
+		APIVersion       string
+		CRDs             []CRDInfo
+		GeneratorCmd     string
+		HasAggregate     bool
+		HasBundle        bool
+		GeneratorVersion string
+	}{
+		AppName:          appName,
+		TitleAppName:     titleAppName,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		CRDs:             crdInfos,
+		GeneratorCmd:     generatorCmd,
+		HasAggregate:     hasAggregate,
+		HasBundle:        hasBundle,
+		GeneratorVersion: g.config.GeneratorVersion,
+	}
+	outputPath := filepath.Join(g.config.OutputDir, "CLAUDE.md")
+	return g.executeTemplate(templates.ClaudeMdTemplate, data, outputPath)
 }
 
 func (g *ControllerGenerator) generateBoilerplate() error {
