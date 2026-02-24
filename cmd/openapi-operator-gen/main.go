@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -14,12 +15,12 @@ import (
 )
 
 var (
-	// version is set at build time via -ldflags
+	// version, commit, and date are set at build time via -ldflags.
+	// When not set (e.g., go install), initBuildInfo populates them
+	// from Go's embedded module and VCS metadata.
 	version = "dev"
-	// commit is the git commit hash, set at build time via -ldflags
-	commit = "none"
-	// date is the build date, set at build time via -ldflags
-	date = "unknown"
+	commit  = "none"
+	date    = "unknown"
 
 	cfg = &config.Config{}
 
@@ -36,6 +37,36 @@ var (
 	updateWithPost    string
 	idFieldMap        string
 )
+
+func init() {
+	// If ldflags were not set (e.g., go install), fill in version info
+	// from Go's embedded build metadata.
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+		usedVCSCommit := false
+		var dirty bool
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				if commit == "none" && s.Value != "" {
+					commit = s.Value
+					usedVCSCommit = true
+				}
+			case "vcs.time":
+				if date == "unknown" && s.Value != "" {
+					date = s.Value
+				}
+			case "vcs.modified":
+				dirty = s.Value == "true"
+			}
+		}
+		if dirty && usedVCSCommit {
+			commit += " (dirty)"
+		}
+	}
+}
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {

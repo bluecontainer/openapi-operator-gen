@@ -349,6 +349,100 @@ idMerge:
 `
 }
 
+// WriteConfigFile writes a configuration file from the current Config values.
+// This saves the resolved configuration so it can be re-used with "openapi-operator-gen generate".
+func WriteConfigFile(path string, cfg *Config) error {
+	// Build ConfigFile from Config
+	file := ConfigFile{
+		Spec:    cfg.SpecPath,
+		Output:  cfg.OutputDir,
+		Group:   cfg.APIGroup,
+		Version: cfg.APIVersion,
+		Module:  cfg.ModuleName,
+	}
+
+	if cfg.MappingMode != PerResource {
+		file.Mapping = string(cfg.MappingMode)
+	}
+	if cfg.RootKind != "" {
+		file.RootKind = cfg.RootKind
+	}
+	if cfg.GenerateCRDs {
+		v := true
+		file.GenerateCRDs = &v
+	}
+	if cfg.GenerateAggregate {
+		v := true
+		file.Aggregate = &v
+	}
+	if cfg.GenerateBundle {
+		v := true
+		file.Bundle = &v
+	}
+	if cfg.GenerateKubectlPlugin {
+		v := true
+		file.KubectlPlugin = &v
+	}
+	if cfg.GenerateRundeckProject {
+		v := true
+		file.RundeckProject = &v
+	}
+	if len(cfg.UpdateWithPost) > 0 {
+		file.UpdateWithPost = cfg.UpdateWithPost
+	}
+	if cfg.TargetAPIImage != "" {
+		file.TargetAPIImage = cfg.TargetAPIImage
+	}
+	if cfg.TargetAPIPort != 0 {
+		file.TargetAPIPort = &cfg.TargetAPIPort
+	}
+	if cfg.ManagedCRsDir != "" {
+		file.ManagedCRs = cfg.ManagedCRsDir
+	}
+
+	// Filters
+	hasFilters := len(cfg.IncludePaths) > 0 || len(cfg.ExcludePaths) > 0 ||
+		len(cfg.IncludeTags) > 0 || len(cfg.ExcludeTags) > 0 ||
+		len(cfg.IncludeOperations) > 0 || len(cfg.ExcludeOperations) > 0
+	if hasFilters {
+		file.Filters = &FilterConfig{
+			IncludePaths:      cfg.IncludePaths,
+			ExcludePaths:      cfg.ExcludePaths,
+			IncludeTags:       cfg.IncludeTags,
+			ExcludeTags:       cfg.ExcludeTags,
+			IncludeOperations: cfg.IncludeOperations,
+			ExcludeOperations: cfg.ExcludeOperations,
+		}
+	}
+
+	// ID merge
+	if cfg.NoIDMerge || len(cfg.IDFieldMap) > 0 {
+		file.IDMerge = &IDMergeConfig{
+			Disabled: cfg.NoIDMerge,
+			FieldMap: cfg.IDFieldMap,
+		}
+	}
+
+	data, err := yaml.Marshal(&file)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Create parent directories if needed
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
 // WriteExampleConfig writes an example config file to the specified path
 func WriteExampleConfig(path string) error {
 	// Check if file already exists

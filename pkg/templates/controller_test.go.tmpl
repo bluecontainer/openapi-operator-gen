@@ -19,7 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
-{{- if and .IsAction .HasParentID (eq .ParentIDGoType "int64") }}
+{{- if or (and .IsAction .HasParentID (eq .ParentIDGoType "int64")) .HasInt64PathParams }}
 	"fmt"
 {{- end }}
 	"net/http"
@@ -135,7 +135,17 @@ func Test{{.Kind}}Reconciler_E2E(t *testing.T) {
 {{- if .QueryPathParams }}
 			// Set path parameters for query endpoint
 {{- range .QueryPathParams }}
+{{- if eq .GoType "int64" }}
+			{{ .Name }}: 0,
+{{- else if eq .GoType "int32" }}
+			{{ .Name }}: 0,
+{{- else if eq .GoType "float64" }}
+			{{ .Name }}: 0.0,
+{{- else if eq .GoType "bool" }}
+			{{ .Name }}: false,
+{{- else }}
 			{{ .Name }}: "test-value",
+{{- end }}
 {{- end }}
 {{- end }}
 {{- else if and .IsAction .HasBinaryBody }}
@@ -900,7 +910,11 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 {{- if .QueryPathParams }}
 			// Set path parameters for query endpoint
 {{- range .QueryPathParams }}
+{{- if eq .GoType "int64" }}
+			{{ .Name }}: testResourceIDNumeric,
+{{- else }}
 			{{ .Name }}: testResourceID,
+{{- end }}
 {{- end }}
 {{- else }}
 			// Query endpoints use query parameters
@@ -998,7 +1012,11 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 	expectedPath := "{{.QueryPath}}"
 	{{- range .QueryPathParams }}
 	// Replace path parameter placeholder with actual value
+	{{- if eq .GoType "int64" }}
+	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.JSONName}}{{"}"}}", fmt.Sprintf("%d", testResourceIDNumeric), 1)
+	{{- else }}
 	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.JSONName}}{{"}"}}", testResourceID, 1)
+	{{- end }}
 	{{- end }}
 {{- else if .IsAction }}
 	expectedPath := "{{.ActionPath}}"
@@ -1011,13 +1029,21 @@ func Test{{.Kind}}Reconciler_URLAndResponseConsistency(t *testing.T) {
 	{{- end }}
 	{{- end }}
 	{{- range .PathParams }}
+	{{- if eq .GoType "int64" }}
+	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.Name}}{{"}"}}", fmt.Sprintf("%d", testResourceIDNumeric), 1)
+	{{- else }}
 	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.Name}}{{"}"}}", testResourceID, 1)
+	{{- end }}
 	{{- end }}
 {{- else }}
 	expectedPath := "{{.BasePath}}"
 	{{- range .ResourcePathParams }}
 	// Replace path parameter placeholder with actual value
+	{{- if eq .GoType "int64" }}
+	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.Name}}{{"}"}}", fmt.Sprintf("%d", testResourceIDNumeric), 1)
+	{{- else }}
 	expectedPath = strings.Replace(expectedPath, "{{"{"}}{{.Name}}{{"}"}}", testResourceID, 1)
+	{{- end }}
 	{{- end }}
 {{- end }}
 

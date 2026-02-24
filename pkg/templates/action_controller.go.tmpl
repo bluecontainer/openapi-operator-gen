@@ -13,7 +13,9 @@ import (
 {{- if .HasBinaryBody }}
 	"encoding/base64"
 {{- end }}
+{{- if or .HasBinaryBody .HasRequestBody .HasTypedResults }}
 	"encoding/json"
+{{- end }}
 	"fmt"
 	"io"
 	"net/http"
