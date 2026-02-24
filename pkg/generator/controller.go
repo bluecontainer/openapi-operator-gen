@@ -524,6 +524,110 @@ func (g *ControllerGenerator) generateControllerTest(outputDir string, crd *mapp
 		HasPost:           crd.HasPost,
 	}
 
+	// Populate path params for action endpoints (excluding parent ID)
+	if crd.IsAction && crd.Spec != nil {
+		for _, field := range crd.Spec.Fields {
+			if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(crd.ParentIDParam)) {
+				continue
+			}
+			if field.JSONName == "targetPodOrdinal" || field.JSONName == "targetHelmRelease" ||
+				field.JSONName == "targetStatefulSet" || field.JSONName == "targetDeployment" ||
+				field.JSONName == "targetNamespace" {
+				continue
+			}
+			if strings.Contains(crd.ActionPath, "{"+field.JSONName+"}") {
+				goType := field.GoType
+				isPointer := strings.HasPrefix(goType, "*")
+				baseType := strings.TrimPrefix(goType, "*")
+				data.PathParams = append(data.PathParams, ActionPathParam{
+					Name:      field.JSONName,
+					GoName:    field.Name,
+					GoType:    goType,
+					IsPointer: isPointer,
+					BaseType:  baseType,
+				})
+			}
+		}
+	}
+
+	// Populate path params for resource endpoints
+	if !crd.IsQuery && !crd.IsAction {
+		pathParamsSeen := make(map[string]bool)
+		pathParamToFieldName := make(map[string]string)
+		for _, mapping := range crd.IDFieldMappings {
+			pathParamToFieldName[mapping.PathParam] = mapping.BodyField
+		}
+		for _, op := range crd.Operations {
+			for _, paramName := range op.PathParams {
+				if pathParamsSeen[paramName] {
+					continue
+				}
+				pathParamsSeen[paramName] = true
+				mergedFieldName := pathParamToFieldName[paramName]
+				goType := "string"
+				goName := strcase.ToCamel(paramName)
+				isPointer := false
+				baseType := goType
+				if crd.Spec != nil {
+					for _, field := range crd.Spec.Fields {
+						targetField := paramName
+						if mergedFieldName != "" {
+							targetField = mergedFieldName
+						}
+						if strings.EqualFold(field.JSONName, strcase.ToLowerCamel(targetField)) {
+							goType = field.GoType
+							goName = field.Name
+							if !field.Required {
+								switch goType {
+								case "int", "int32", "int64", "float32", "float64":
+									goType = "*" + goType
+								}
+							}
+							if strings.HasPrefix(goType, "*") {
+								isPointer = true
+								baseType = strings.TrimPrefix(goType, "*")
+							} else {
+								baseType = goType
+							}
+							break
+						}
+					}
+				}
+				data.ResourcePathParams = append(data.ResourcePathParams, ActionPathParam{
+					Name:      paramName,
+					GoName:    goName,
+					GoType:    goType,
+					IsPointer: isPointer,
+					BaseType:  baseType,
+				})
+			}
+		}
+	}
+
+	// Check if any path parameter is int64 (needed for fmt import in tests)
+	for _, p := range data.PathParams {
+		if p.GoType == "int64" {
+			data.HasInt64PathParams = true
+			break
+		}
+	}
+	if !data.HasInt64PathParams {
+		for _, p := range data.QueryPathParams {
+			if p.GoType == "int64" {
+				data.HasInt64PathParams = true
+				break
+			}
+		}
+	}
+	if !data.HasInt64PathParams {
+		for _, p := range data.ResourcePathParams {
+			if p.GoType == "int64" {
+				data.HasInt64PathParams = true
+				break
+			}
+		}
+	}
+
 	filename := fmt.Sprintf("%s_controller_test.go", strings.ToLower(crd.Kind))
 	fp := filepath.Join(outputDir, filename)
 
