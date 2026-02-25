@@ -68,6 +68,10 @@ type ConfigFile struct {
 
 	// ManagedCRs is the directory containing CR YAML files for managed Rundeck lifecycle jobs
 	ManagedCRs string `yaml:"managedCRs,omitempty"`
+
+	// SpecHash is the SHA-256 hash of the spec file content at generation time.
+	// Used for quick change detection without re-parsing the spec.
+	SpecHash string `yaml:"specHash,omitempty"`
 }
 
 // FilterConfig contains filtering options for paths, tags, and operations
@@ -150,6 +154,23 @@ func FindConfigFile() string {
 	}
 
 	return ""
+}
+
+// ConfigFromFile creates a Config from a ConfigFile.
+// This is useful when loading a saved config for tools like describe, regenerate, and diff
+// where there are no CLI flags to merge with.
+func ConfigFromFile(file *ConfigFile) *Config {
+	cfg := &Config{
+		OutputDir:   "./generated",
+		APIVersion:  "v1alpha1",
+		ModuleName:  "github.com/bluecontainer/generated-operator",
+		MappingMode: PerResource,
+	}
+	MergeConfigFile(cfg, file)
+	if file.SpecHash != "" {
+		cfg.SpecHash = file.SpecHash
+	}
+	return cfg
 }
 
 // MergeConfigFile merges config file values into the Config struct.
@@ -395,6 +416,9 @@ func WriteConfigFile(path string, cfg *Config) error {
 	}
 	if cfg.TargetAPIPort != 0 {
 		file.TargetAPIPort = &cfg.TargetAPIPort
+	}
+	if cfg.SpecHash != "" {
+		file.SpecHash = cfg.SpecHash
 	}
 	if cfg.ManagedCRsDir != "" {
 		file.ManagedCRs = cfg.ManagedCRsDir

@@ -234,6 +234,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 		return fmt.Errorf("failed to generate copilot-instructions.md: %w", err)
 	}
 
+	// Compute spec hash for change detection
+	if hash, err := config.HashSpecFile(g.config.SpecPath); err == nil {
+		g.config.SpecHash = hash
+	}
+
 	// Save resolved config for reproducibility (openapi-operator-gen generate can re-use it)
 	configPath := filepath.Join(g.config.OutputDir, ".openapi-operator-gen.yaml")
 	if err := config.WriteConfigFile(configPath, g.config); err != nil {

@@ -124,6 +124,11 @@ type Config struct {
 	// When set, generates per-CR apply/get/patch/delete/status jobs.
 	ManagedCRsDir string
 
+	// SpecHash is the SHA-256 hash of the spec file content at generation time.
+	// Used for quick change detection without re-parsing the spec.
+	// Format: "sha256:<hex>"
+	SpecHash string
+
 	// SpecBaseURL is the base URL extracted from the OpenAPI spec's servers field.
 	// Set programmatically after parsing, not from CLI flags.
 	SpecBaseURL string

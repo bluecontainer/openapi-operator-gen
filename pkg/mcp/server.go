@@ -3,6 +3,9 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -30,9 +33,13 @@ func NewServer(version, commit, date string) *server.MCPServer {
 	s.AddTool(validateTool, h.handleValidate)
 	s.AddTool(previewTool, h.handlePreview)
 	s.AddTool(generateTool, h.handleGenerate)
+	s.AddTool(describeTool, h.handleDescribe)
+	s.AddTool(regenerateTool, h.handleRegenerate)
+	s.AddTool(diffTool, h.handleDiff)
 
 	s.AddPrompt(generateOperatorPrompt, h.handleGenerateOperatorPrompt)
 	s.AddPrompt(previewAPIPrompt, h.handlePreviewAPIPrompt)
+	s.AddPrompt(evolveSpecPrompt, h.handleEvolveSpecPrompt)
 
 	return s
 }
@@ -165,6 +172,70 @@ var generateTool = mcp.NewTool("generate",
 	),
 )
 
+var describeTool = mcp.NewTool("describe",
+	mcp.WithDescription("Inspect a previously generated operator. Shows the CRDs, their fields and operations, configuration options used, and file ownership. Reads the saved .openapi-operator-gen.yaml config and re-parses the spec."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("directory",
+		mcp.Required(),
+		mcp.Description("Path to the generated operator directory (must contain .openapi-operator-gen.yaml)"),
+	),
+)
+
+var regenerateTool = mcp.NewTool("regenerate",
+	mcp.WithDescription("Re-run generation for an existing operator using its saved configuration. Reads .openapi-operator-gen.yaml from the directory and re-generates all files. Optional parameters override saved values. After regeneration, run: go mod tidy && make generate && make build && make test"),
+	mcp.WithString("directory",
+		mcp.Required(),
+		mcp.Description("Path to the generated operator directory (must contain .openapi-operator-gen.yaml)"),
+	),
+	mcp.WithString("spec",
+		mcp.Description("Override the OpenAPI spec path or URL"),
+	),
+	mcp.WithString("group",
+		mcp.Description("Override Kubernetes API group"),
+	),
+	mcp.WithString("module",
+		mcp.Description("Override Go module name"),
+	),
+	mcp.WithString("version",
+		mcp.Description("Override Kubernetes API version"),
+	),
+	mcp.WithString("mapping",
+		mcp.Description("Override resource mapping mode: 'per-resource' or 'single-crd'"),
+	),
+	mcp.WithBoolean("aggregate",
+		mcp.Description("Override: generate Status Aggregator CRD"),
+	),
+	mcp.WithBoolean("bundle",
+		mcp.Description("Override: generate Bundle CRD"),
+	),
+	mcp.WithBoolean("kubectl_plugin",
+		mcp.Description("Override: generate kubectl plugin"),
+	),
+	mcp.WithBoolean("rundeck_project",
+		mcp.Description("Override: generate Rundeck projects"),
+	),
+	mcp.WithString("include_paths",
+		mcp.Description("Override: path include patterns (comma-separated)"),
+	),
+	mcp.WithString("exclude_paths",
+		mcp.Description("Override: path exclude patterns (comma-separated)"),
+	),
+)
+
+var diffTool = mcp.NewTool("diff",
+	mcp.WithDescription("Compare the current OpenAPI spec against what was last generated from. Shows added, removed, and changed CRDs with field-level detail. Uses the spec hash for fast no-change detection, and git history or the embedded spec copy for detailed comparison."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("directory",
+		mcp.Required(),
+		mcp.Description("Path to the generated operator directory (must contain .openapi-operator-gen.yaml)"),
+	),
+	mcp.WithString("spec",
+		mcp.Description("Override the new spec path to compare against (default: uses spec path from saved config)"),
+	),
+)
+
 // Prompt definitions
 
 var generateOperatorPrompt = mcp.NewPrompt("generate-operator",
@@ -198,6 +269,17 @@ var previewAPIPrompt = mcp.NewPrompt("preview-api",
 	),
 	mcp.WithArgument("group",
 		mcp.ArgumentDescription("Kubernetes API group for Kind name derivation (e.g., myapp.example.com)"),
+	),
+)
+
+var evolveSpecPrompt = mcp.NewPrompt("evolve-spec",
+	mcp.WithPromptDescription("Walk through evolving an existing operator after spec changes. Describes the current state, diffs changes, regenerates, and builds."),
+	mcp.WithArgument("directory",
+		mcp.ArgumentDescription("Path to the generated operator directory"),
+		mcp.RequiredArgument(),
+	),
+	mcp.WithArgument("spec",
+		mcp.ArgumentDescription("Path to the updated OpenAPI spec (if different from the saved config)"),
 	),
 )
 
@@ -293,207 +375,31 @@ func (h *handlers) handlePreview(_ context.Context, req mcp.CallToolRequest) (*m
 		fmt.Fprintf(&b, "**Base URL:** `%s`\n\n", spec.BaseURL)
 	}
 
-	// Classify CRDs
-	var resources, queries, actions []*mapper.CRDDefinition
-	for _, crd := range crds {
-		switch {
-		case crd.IsQuery:
-			queries = append(queries, crd)
-		case crd.IsAction:
-			actions = append(actions, crd)
-		default:
-			resources = append(resources, crd)
-		}
-	}
-
-	// Resources (CRUD)
-	if len(resources) > 0 {
-		fmt.Fprintf(&b, "## Resources (CRUD) — %d\n", len(resources))
-		b.WriteString("Full lifecycle resources with GET, CREATE, UPDATE, DELETE operations.\n\n")
-		for _, crd := range resources {
-			fmt.Fprintf(&b, "### %s\n", crd.Kind)
-			fmt.Fprintf(&b, "**Plural:** %s | **Scope:** %s\n", crd.Plural, crd.Scope)
-			if crd.Description != "" {
-				fmt.Fprintf(&b, "%s\n", crd.Description)
-			}
-			b.WriteString("\n")
-
-			// Operations table
-			b.WriteString("| Operation | Method | Path |\n")
-			b.WriteString("|-----------|--------|------|\n")
-			for _, op := range crd.Operations {
-				fmt.Fprintf(&b, "| %s | %s | `%s` |\n", op.CRDAction, op.HTTPMethod, op.Path)
-			}
-			if crd.UpdateWithPost {
-				b.WriteString("\n> Uses POST for updates (PUT not available)\n")
-			}
-			b.WriteString("\n")
-
-			// Spec fields
-			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
-				b.WriteString("**Spec fields:**\n\n")
-				b.WriteString("| Field | Type | Required |\n")
-				b.WriteString("|-------|------|----------|\n")
-				for _, f := range crd.Spec.Fields {
-					req := ""
-					if f.Required {
-						req = "Yes"
-					}
-					goType := f.GoType
-					if len(f.Enum) > 0 {
-						goType += " enum: " + strings.Join(f.Enum, ", ")
-					}
-					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", f.JSONName, goType, req)
-				}
-				b.WriteString("\n")
-			}
-
-			// ID field mappings
-			if len(crd.IDFieldMappings) > 0 {
-				b.WriteString("**ID field mappings:** ")
-				mappings := make([]string, 0, len(crd.IDFieldMappings))
-				for _, m := range crd.IDFieldMappings {
-					mappings = append(mappings, fmt.Sprintf("`{%s}` -> `%s`", m.PathParam, m.BodyField))
-				}
-				b.WriteString(strings.Join(mappings, ", "))
-				b.WriteString("\n\n")
-			}
-
-			if crd.NeedsExternalIDRef {
-				b.WriteString("**Note:** Uses `externalIDRef` to reference existing resources (no path params for identification)\n\n")
-			}
-		}
-	}
-
-	// Query Endpoints
-	if len(queries) > 0 {
-		fmt.Fprintf(&b, "## Query Endpoints (GET-only) — %d\n", len(queries))
-		b.WriteString("Read-only endpoints that periodically fetch data.\n\n")
-		for _, crd := range queries {
-			fmt.Fprintf(&b, "### %s\n", crd.Kind)
-			fmt.Fprintf(&b, "**Path:** `GET %s`\n", crd.QueryPath)
-			if crd.Description != "" {
-				fmt.Fprintf(&b, "%s\n", crd.Description)
-			}
-			b.WriteString("\n")
-
-			if crd.ResponseType != "" {
-				fmt.Fprintf(&b, "**Response type:** `%s`", crd.ResponseType)
-				if crd.ResponseIsArray {
-					b.WriteString(" (array)")
-				}
-				b.WriteString("\n")
-				if crd.UsesSharedType {
-					fmt.Fprintf(&b, "**Reuses type from:** %s\n", crd.ResultItemType)
-				}
-				b.WriteString("\n")
-			}
-
-			// Query parameters
-			if len(crd.QueryParams) > 0 {
-				b.WriteString("**Query parameters:**\n\n")
-				b.WriteString("| Parameter | Type | Required |\n")
-				b.WriteString("|-----------|------|----------|\n")
-				for _, qp := range crd.QueryParams {
-					req := ""
-					if qp.Required {
-						req = "Yes"
-					}
-					goType := qp.GoType
-					if qp.IsArray {
-						goType = "[]" + qp.ItemType
-					}
-					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", qp.JSONName, goType, req)
-				}
-				b.WriteString("\n")
-			}
-
-			// Path parameters for query endpoints
-			if len(crd.QueryPathParams) > 0 {
-				b.WriteString("**Path parameters:**\n\n")
-				b.WriteString("| Parameter | Type | Required |\n")
-				b.WriteString("|-----------|------|----------|\n")
-				for _, pp := range crd.QueryPathParams {
-					req := ""
-					if pp.Required {
-						req = "Yes"
-					}
-					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", pp.JSONName, pp.GoType, req)
-				}
-				b.WriteString("\n")
-			}
-
-			// Result fields (when not using a shared type)
-			if !crd.UsesSharedType && len(crd.ResultFields) > 0 {
-				b.WriteString("**Result fields:**\n\n")
-				b.WriteString("| Field | Type |\n")
-				b.WriteString("|-------|------|\n")
-				for _, f := range crd.ResultFields {
-					fmt.Fprintf(&b, "| `%s` | `%s` |\n", f.JSONName, f.GoType)
-				}
-				b.WriteString("\n")
-			}
-		}
-	}
-
-	// Action Endpoints
-	if len(actions) > 0 {
-		fmt.Fprintf(&b, "## Action Endpoints (POST/PUT-only) — %d\n", len(actions))
-		b.WriteString("One-shot or periodic operations.\n\n")
-		for _, crd := range actions {
-			fmt.Fprintf(&b, "### %s\n", crd.Kind)
-			fmt.Fprintf(&b, "**Path:** `%s %s`\n", crd.ActionMethod, crd.ActionPath)
-			if crd.Description != "" {
-				fmt.Fprintf(&b, "%s\n", crd.Description)
-			}
-			b.WriteString("\n")
-
-			if crd.ParentResource != "" {
-				fmt.Fprintf(&b, "**Parent resource:** %s (via `%s`)\n", crd.ParentResource, crd.ParentIDParam)
-			}
-			if crd.HasBinaryBody {
-				fmt.Fprintf(&b, "**Binary upload:** `%s`\n", crd.BinaryContentType)
-			}
-
-			// Spec fields for action
-			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
-				b.WriteString("\n**Request fields:**\n\n")
-				b.WriteString("| Field | Type | Required |\n")
-				b.WriteString("|-------|------|----------|\n")
-				for _, f := range crd.Spec.Fields {
-					req := ""
-					if f.Required {
-						req = "Yes"
-					}
-					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", f.JSONName, f.GoType, req)
-				}
-			}
-			b.WriteString("\n")
-		}
-	}
-
-	// Summary
-	b.WriteString("---\n\n")
-	fmt.Fprintf(&b, "**Total CRDs:** %d", len(crds))
-	if len(resources) > 0 || len(queries) > 0 || len(actions) > 0 {
-		fmt.Fprintf(&b, " (%d resources, %d queries, %d actions)", len(resources), len(queries), len(actions))
-	}
-	b.WriteString("\n")
+	formatCRDs(&b, crds)
 
 	return mcp.NewToolResultText(b.String()), nil
 }
 
 // handleGenerate runs the full generation pipeline.
 func (h *handlers) handleGenerate(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// Build config from request parameters
 	cfg, err := h.configFromRequest(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	return h.runGeneration(cfg)
+}
 
+// runGeneration executes the full generation pipeline for a given config.
+// Used by both handleGenerate and handleRegenerate.
+func (h *handlers) runGeneration(cfg *config.Config) (*mcp.CallToolResult, error) {
 	// Validate
 	if err := cfg.Validate(); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Invalid configuration: %v", err)), nil
+	}
+
+	// Compute spec hash before generation
+	if hash, err := config.HashSpecFile(cfg.SpecPath); err == nil {
+		cfg.SpecHash = hash
 	}
 
 	// Parse spec
@@ -805,6 +711,548 @@ Follow these steps:
 	), nil
 }
 
+// handleDescribe inspects a previously generated operator.
+func (h *handlers) handleDescribe(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	directory := mcp.ParseString(req, "directory", "")
+	if directory == "" {
+		return mcp.NewToolResultError("'directory' parameter is required"), nil
+	}
+
+	// Load saved config
+	configPath := filepath.Join(directory, ".openapi-operator-gen.yaml")
+	file, err := config.LoadConfigFile(configPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to load config: %v", err)), nil
+	}
+	if file == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("No .openapi-operator-gen.yaml found in %s", directory)), nil
+	}
+
+	cfg := config.ConfigFromFile(file)
+	cfg.OutputDir = directory
+
+	// Parse spec and map to CRDs
+	filter := config.NewPathFilter(cfg)
+	p := parser.NewParserWithFilter(cfg.RootKind, filter)
+	spec, err := p.Parse(cfg.SpecPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to parse OpenAPI spec at %s: %v", cfg.SpecPath, err)), nil
+	}
+
+	m := mapper.NewMapper(cfg)
+	crds, err := m.MapResources(spec)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to map resources: %v", err)), nil
+	}
+
+	// Derive operator name from API group
+	appName := strings.Split(cfg.APIGroup, ".")[0]
+	titleAppName := appName
+	if len(appName) > 0 {
+		titleAppName = strings.ToUpper(appName[:1]) + appName[1:]
+	}
+
+	var b strings.Builder
+
+	// Header
+	fmt.Fprintf(&b, "# %s Operator\n\n", titleAppName)
+	fmt.Fprintf(&b, "**API Group:** `%s`\n", cfg.APIGroup)
+	fmt.Fprintf(&b, "**API Version:** `%s`\n", cfg.APIVersion)
+	fmt.Fprintf(&b, "**Module:** `%s`\n", cfg.ModuleName)
+	b.WriteString("\n")
+
+	// Spec status with hash comparison
+	fmt.Fprintf(&b, "**Spec:** `%s`", cfg.SpecPath)
+	if cfg.SpecHash != "" {
+		currentHash, hashErr := config.HashSpecFile(cfg.SpecPath)
+		if hashErr == nil {
+			if currentHash == cfg.SpecHash {
+				b.WriteString(" (unchanged since last generation)")
+			} else {
+				b.WriteString(" (modified since last generation — run `diff` to see changes)")
+			}
+		}
+	}
+	b.WriteString("\n\n")
+
+	// Configuration options
+	b.WriteString("## Configuration\n\n")
+	fmt.Fprintf(&b, "| Option | Value |\n")
+	fmt.Fprintf(&b, "|--------|-------|\n")
+	fmt.Fprintf(&b, "| Mapping mode | %s |\n", cfg.MappingMode)
+	if cfg.GenerateAggregate {
+		b.WriteString("| Aggregate CRD | enabled |\n")
+	}
+	if cfg.GenerateBundle {
+		b.WriteString("| Bundle CRD | enabled |\n")
+	}
+	if cfg.GenerateKubectlPlugin {
+		b.WriteString("| kubectl plugin | enabled |\n")
+	}
+	if cfg.GenerateRundeckProject {
+		b.WriteString("| Rundeck project | enabled |\n")
+	}
+	if cfg.GenerateCRDs {
+		b.WriteString("| CRD YAML generation | enabled |\n")
+	}
+	if len(cfg.UpdateWithPost) > 0 {
+		fmt.Fprintf(&b, "| Update with POST | %s |\n", strings.Join(cfg.UpdateWithPost, ", "))
+	}
+	if cfg.NoIDMerge {
+		b.WriteString("| ID merge | disabled |\n")
+	}
+	if len(cfg.IDFieldMap) > 0 {
+		pairs := make([]string, 0, len(cfg.IDFieldMap))
+		for k, v := range cfg.IDFieldMap {
+			pairs = append(pairs, k+"="+v)
+		}
+		fmt.Fprintf(&b, "| ID field map | %s |\n", strings.Join(pairs, ", "))
+	}
+	if cfg.TargetAPIImage != "" {
+		fmt.Fprintf(&b, "| Target API image | %s |\n", cfg.TargetAPIImage)
+	}
+	if len(cfg.IncludePaths) > 0 {
+		fmt.Fprintf(&b, "| Include paths | %s |\n", strings.Join(cfg.IncludePaths, ", "))
+	}
+	if len(cfg.ExcludePaths) > 0 {
+		fmt.Fprintf(&b, "| Exclude paths | %s |\n", strings.Join(cfg.ExcludePaths, ", "))
+	}
+	if len(cfg.IncludeTags) > 0 {
+		fmt.Fprintf(&b, "| Include tags | %s |\n", strings.Join(cfg.IncludeTags, ", "))
+	}
+	if len(cfg.ExcludeTags) > 0 {
+		fmt.Fprintf(&b, "| Exclude tags | %s |\n", strings.Join(cfg.ExcludeTags, ", "))
+	}
+	b.WriteString("\n")
+
+	// CRDs (reuse shared formatter)
+	formatCRDs(&b, crds)
+	b.WriteString("\n")
+
+	// File ownership
+	b.WriteString("## File Ownership\n\n")
+	b.WriteString("**Regenerated** (overwritten on re-generation — do not hand-edit):\n")
+	fmt.Fprintf(&b, "- `api/%s/` — CRD Go types with kubebuilder markers\n", cfg.APIVersion)
+	b.WriteString("- `internal/controller/` — Reconciliation logic for each CRD\n")
+	b.WriteString("- `config/crd/` — CRD YAML manifests\n")
+	b.WriteString("- `main.go` — Controller manager entrypoint\n")
+	b.WriteString("- `Dockerfile`, `Makefile`, `go.mod`\n\n")
+	b.WriteString("**Safe to customize:**\n")
+	b.WriteString("- `config/manager/` — Deployment resource limits, replicas, env vars\n")
+	b.WriteString("- `config/rbac/` — Additional RBAC rules\n")
+	b.WriteString("- `config/samples/` — Example CR YAML files\n")
+	b.WriteString("- `config/default/` — Kustomize overlays\n")
+
+	return mcp.NewToolResultText(b.String()), nil
+}
+
+// handleRegenerate re-runs generation using saved config with optional overrides.
+func (h *handlers) handleRegenerate(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	directory := mcp.ParseString(req, "directory", "")
+	if directory == "" {
+		return mcp.NewToolResultError("'directory' parameter is required"), nil
+	}
+
+	// Load saved config
+	configPath := filepath.Join(directory, ".openapi-operator-gen.yaml")
+	file, err := config.LoadConfigFile(configPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to load config: %v", err)), nil
+	}
+	if file == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("No .openapi-operator-gen.yaml found in %s", directory)), nil
+	}
+
+	cfg := config.ConfigFromFile(file)
+	cfg.OutputDir = directory
+	cfg.GeneratorVersion = h.version
+	cfg.CommitHash = h.commit
+	cfg.CommitTimestamp = h.date
+
+	// Apply overrides from request
+	if v := mcp.ParseString(req, "spec", ""); v != "" {
+		cfg.SpecPath = v
+	}
+	if v := mcp.ParseString(req, "group", ""); v != "" {
+		cfg.APIGroup = v
+	}
+	if v := mcp.ParseString(req, "module", ""); v != "" {
+		cfg.ModuleName = v
+	}
+	if v := mcp.ParseString(req, "version", ""); v != "" {
+		cfg.APIVersion = v
+	}
+	if v := mcp.ParseString(req, "mapping", ""); v != "" {
+		cfg.MappingMode = config.MappingMode(v)
+	}
+	if mcp.ParseBoolean(req, "aggregate", false) {
+		cfg.GenerateAggregate = true
+	}
+	if mcp.ParseBoolean(req, "bundle", false) {
+		cfg.GenerateBundle = true
+	}
+	if mcp.ParseBoolean(req, "kubectl_plugin", false) {
+		cfg.GenerateKubectlPlugin = true
+	}
+	if mcp.ParseBoolean(req, "rundeck_project", false) {
+		cfg.GenerateRundeckProject = true
+	}
+	if v := parseCommaSeparated(mcp.ParseString(req, "include_paths", "")); len(v) > 0 {
+		cfg.IncludePaths = v
+	}
+	if v := parseCommaSeparated(mcp.ParseString(req, "exclude_paths", "")); len(v) > 0 {
+		cfg.ExcludePaths = v
+	}
+
+	return h.runGeneration(cfg)
+}
+
+// handleDiff compares the current spec against what was last generated from.
+func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	directory := mcp.ParseString(req, "directory", "")
+	if directory == "" {
+		return mcp.NewToolResultError("'directory' parameter is required"), nil
+	}
+
+	// Load saved config
+	configPath := filepath.Join(directory, ".openapi-operator-gen.yaml")
+	file, err := config.LoadConfigFile(configPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to load config: %v", err)), nil
+	}
+	if file == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("No .openapi-operator-gen.yaml found in %s", directory)), nil
+	}
+
+	cfg := config.ConfigFromFile(file)
+	cfg.OutputDir = directory
+
+	// Determine new spec path
+	newSpecPath := mcp.ParseString(req, "spec", "")
+	if newSpecPath == "" {
+		newSpecPath = cfg.SpecPath
+	}
+
+	// Fast path: check spec hash
+	if cfg.SpecHash != "" {
+		currentHash, hashErr := config.HashSpecFile(newSpecPath)
+		if hashErr == nil && currentHash == cfg.SpecHash {
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"No changes detected. The spec is identical to what was last generated from.\n\nSpec: `%s`\nHash: `%s`",
+				newSpecPath, cfg.SpecHash)), nil
+		}
+	}
+
+	// Slow path: get old spec for detailed comparison
+	specBasename := filepath.Base(cfg.SpecPath)
+	embeddedSpecPath := filepath.Join(directory, specBasename)
+
+	// Try git first to get the committed version
+	var oldSpecPath string
+	gitRef := fmt.Sprintf("HEAD:%s", embeddedSpecPath)
+	gitCmd := exec.Command("git", "show", gitRef)
+	gitOutput, gitErr := gitCmd.Output()
+	if gitErr == nil && len(gitOutput) > 0 {
+		// Write git content to a temp file for parsing
+		tmpFile := filepath.Join(directory, ".openapi-operator-gen-diff-old-spec.tmp")
+		if writeErr := writeFile(tmpFile, gitOutput); writeErr == nil {
+			oldSpecPath = tmpFile
+			defer removeFile(tmpFile)
+		}
+	}
+
+	// Fall back to the embedded spec copy on disk
+	if oldSpecPath == "" {
+		if fileExists(embeddedSpecPath) {
+			oldSpecPath = embeddedSpecPath
+		}
+	}
+
+	if oldSpecPath == "" {
+		if cfg.SpecHash != "" {
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"Spec has changed (hash mismatch) but no previous spec copy found for detailed comparison.\n\n"+
+					"Saved hash: `%s`\nSpec: `%s`\n\nRun `regenerate` to update the operator.",
+				cfg.SpecHash, newSpecPath)), nil
+		}
+		return mcp.NewToolResultError("No previous spec found to compare against. Generate the operator first."), nil
+	}
+
+	// Parse old spec
+	oldFilter := config.NewPathFilter(cfg)
+	oldParser := parser.NewParserWithFilter(cfg.RootKind, oldFilter)
+	oldSpec, err := oldParser.Parse(oldSpecPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to parse old spec: %v", err)), nil
+	}
+	oldMapper := mapper.NewMapper(cfg)
+	oldCRDs, err := oldMapper.MapResources(oldSpec)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to map old resources: %v", err)), nil
+	}
+
+	// Parse new spec
+	newFilter := config.NewPathFilter(cfg)
+	newParser := parser.NewParserWithFilter(cfg.RootKind, newFilter)
+	newSpec, err := newParser.Parse(newSpecPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to parse new spec: %v", err)), nil
+	}
+	newMapper := mapper.NewMapper(cfg)
+	newCRDs, err := newMapper.MapResources(newSpec)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to map new resources: %v", err)), nil
+	}
+
+	// Build maps by Kind
+	oldByKind := make(map[string]*mapper.CRDDefinition)
+	for _, crd := range oldCRDs {
+		oldByKind[crd.Kind] = crd
+	}
+	newByKind := make(map[string]*mapper.CRDDefinition)
+	for _, crd := range newCRDs {
+		newByKind[crd.Kind] = crd
+	}
+
+	// Compute diff
+	var added, removed, changed, unchanged []string
+	for kind := range newByKind {
+		if _, ok := oldByKind[kind]; !ok {
+			added = append(added, kind)
+		}
+	}
+	for kind := range oldByKind {
+		if _, ok := newByKind[kind]; !ok {
+			removed = append(removed, kind)
+		}
+	}
+	for kind, newCRD := range newByKind {
+		oldCRD, ok := oldByKind[kind]
+		if !ok {
+			continue
+		}
+		changes := compareCRDs(oldCRD, newCRD)
+		if len(changes) > 0 {
+			changed = append(changed, kind)
+		} else {
+			unchanged = append(unchanged, kind)
+		}
+	}
+
+	// Format output
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Spec Diff: %s\n\n", filepath.Base(newSpecPath))
+	fmt.Fprintf(&b, "**Summary:** %d added, %d removed, %d changed, %d unchanged\n\n",
+		len(added), len(removed), len(changed), len(unchanged))
+
+	if len(added) == 0 && len(removed) == 0 && len(changed) == 0 {
+		b.WriteString("No changes detected. The spec matches the last generation.\n")
+		return mcp.NewToolResultText(b.String()), nil
+	}
+
+	if len(added) > 0 {
+		b.WriteString("## Added CRDs\n\n")
+		for _, kind := range added {
+			crd := newByKind[kind]
+			crdType := "Resource"
+			if crd.IsQuery {
+				crdType = "QueryEndpoint"
+			} else if crd.IsAction {
+				crdType = "ActionEndpoint"
+			}
+			fmt.Fprintf(&b, "- **%s** (%s)\n", kind, crdType)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(removed) > 0 {
+		b.WriteString("## Removed CRDs\n\n")
+		for _, kind := range removed {
+			fmt.Fprintf(&b, "- **%s**\n", kind)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(changed) > 0 {
+		b.WriteString("## Changed CRDs\n\n")
+		for _, kind := range changed {
+			changes := compareCRDs(oldByKind[kind], newByKind[kind])
+			fmt.Fprintf(&b, "### %s\n\n", kind)
+			for _, change := range changes {
+				fmt.Fprintf(&b, "- %s\n", change)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	return mcp.NewToolResultText(b.String()), nil
+}
+
+// handleEvolveSpecPrompt returns instructions for evolving an operator after spec changes.
+func (h *handlers) handleEvolveSpecPrompt(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	directory := req.Params.Arguments["directory"]
+	spec := req.Params.Arguments["spec"]
+
+	var b strings.Builder
+	b.WriteString("I want to update an existing Kubernetes operator after changes to the OpenAPI spec.\n\n")
+	fmt.Fprintf(&b, "The operator directory is: %s\n", directory)
+	if spec != "" {
+		fmt.Fprintf(&b, "The updated spec is at: %s\n", spec)
+	}
+
+	instructions := `Follow these steps:
+
+1. **Describe** the current operator using the describe tool to understand its current state (CRDs, configuration, spec status).
+
+2. **Discuss** what changes were made to the spec. If I haven't explained, ask me what changed and why.
+
+3. **Diff** the spec changes using the diff tool` + func() string {
+		if spec != "" {
+			return fmt.Sprintf(` with spec=%q`, spec)
+		}
+		return ""
+	}() + `. Show me what CRDs would be added, removed, or changed.
+
+4. **Review** the diff with me. Highlight any breaking changes (removed CRDs, changed field types) and ask if I want to proceed.
+
+5. **Regenerate** the operator using the regenerate tool` + func() string {
+		if spec != "" {
+			return fmt.Sprintf(` with spec=%q`, spec)
+		}
+		return ""
+	}() + `.
+
+6. **Build** the regenerated operator:
+   - go mod tidy
+   - make generate
+   - make build
+   - make test
+   Report the results of each step.`
+
+	return mcp.NewGetPromptResult(
+		"Update an operator after OpenAPI spec changes",
+		[]mcp.PromptMessage{
+			mcp.NewPromptMessage(
+				mcp.RoleUser,
+				mcp.NewTextContent(b.String()+"\n"+instructions),
+			),
+		},
+	), nil
+}
+
+// compareCRDs compares two CRD definitions and returns a list of human-readable changes.
+func compareCRDs(old, new *mapper.CRDDefinition) []string {
+	var changes []string
+
+	// Compare operations
+	oldOps := make(map[string]string)
+	for _, op := range old.Operations {
+		oldOps[op.CRDAction] = op.HTTPMethod + " " + op.Path
+	}
+	newOps := make(map[string]string)
+	for _, op := range new.Operations {
+		newOps[op.CRDAction] = op.HTTPMethod + " " + op.Path
+	}
+	for action, detail := range newOps {
+		if _, ok := oldOps[action]; !ok {
+			changes = append(changes, fmt.Sprintf("Added operation: %s (%s)", action, detail))
+		}
+	}
+	for action := range oldOps {
+		if _, ok := newOps[action]; !ok {
+			changes = append(changes, fmt.Sprintf("Removed operation: %s", action))
+		}
+	}
+
+	// Compare spec fields
+	oldFields := make(map[string]*mapper.FieldDefinition)
+	if old.Spec != nil {
+		for _, f := range old.Spec.Fields {
+			oldFields[f.JSONName] = f
+		}
+	}
+	newFields := make(map[string]*mapper.FieldDefinition)
+	if new.Spec != nil {
+		for _, f := range new.Spec.Fields {
+			newFields[f.JSONName] = f
+		}
+	}
+	for name, newF := range newFields {
+		oldF, ok := oldFields[name]
+		if !ok {
+			req := ""
+			if newF.Required {
+				req = " (required)"
+			}
+			changes = append(changes, fmt.Sprintf("Added field: `%s` (%s)%s", name, newF.GoType, req))
+			continue
+		}
+		if oldF.GoType != newF.GoType {
+			changes = append(changes, fmt.Sprintf("Changed field type: `%s` %s → %s", name, oldF.GoType, newF.GoType))
+		}
+		if oldF.Required != newF.Required {
+			if newF.Required {
+				changes = append(changes, fmt.Sprintf("Field now required: `%s`", name))
+			} else {
+				changes = append(changes, fmt.Sprintf("Field now optional: `%s`", name))
+			}
+		}
+	}
+	for name := range oldFields {
+		if _, ok := newFields[name]; !ok {
+			changes = append(changes, fmt.Sprintf("Removed field: `%s`", name))
+		}
+	}
+
+	// Compare query parameters (for query endpoints)
+	if old.IsQuery && new.IsQuery {
+		oldQP := make(map[string]string)
+		for _, qp := range old.QueryParams {
+			oldQP[qp.JSONName] = qp.GoType
+		}
+		newQP := make(map[string]string)
+		for _, qp := range new.QueryParams {
+			newQP[qp.JSONName] = qp.GoType
+		}
+		for name, newType := range newQP {
+			oldType, ok := oldQP[name]
+			if !ok {
+				changes = append(changes, fmt.Sprintf("Added query param: `%s` (%s)", name, newType))
+			} else if oldType != newType {
+				changes = append(changes, fmt.Sprintf("Changed query param type: `%s` %s → %s", name, oldType, newType))
+			}
+		}
+		for name := range oldQP {
+			if _, ok := newQP[name]; !ok {
+				changes = append(changes, fmt.Sprintf("Removed query param: `%s`", name))
+			}
+		}
+	}
+
+	// Compare response type (for query endpoints)
+	if old.IsQuery && new.IsQuery && old.ResponseType != new.ResponseType {
+		changes = append(changes, fmt.Sprintf("Changed response type: %s → %s", old.ResponseType, new.ResponseType))
+	}
+
+	return changes
+}
+
+// writeFile is a helper that writes data to a file.
+func writeFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0644)
+}
+
+// removeFile is a helper that removes a file, ignoring errors.
+func removeFile(path string) {
+	os.Remove(path)
+}
+
+// fileExists checks if a file exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // configFromRequest builds a config.Config from MCP request parameters.
 func (h *handlers) configFromRequest(req mcp.CallToolRequest) (*config.Config, error) {
 	specPath := mcp.ParseString(req, "spec", "")
@@ -860,6 +1308,197 @@ func (h *handlers) configFromRequest(req mcp.CallToolRequest) (*config.Config, e
 	cfg.IDFieldMap = parseIDFieldMap(mcp.ParseString(req, "id_field_map", ""))
 
 	return cfg, nil
+}
+
+// formatCRDs writes rich markdown output for a list of CRD definitions.
+// Used by handlePreview and handleDescribe.
+func formatCRDs(b *strings.Builder, crds []*mapper.CRDDefinition) {
+	// Classify CRDs
+	var resources, queries, actions []*mapper.CRDDefinition
+	for _, crd := range crds {
+		switch {
+		case crd.IsQuery:
+			queries = append(queries, crd)
+		case crd.IsAction:
+			actions = append(actions, crd)
+		default:
+			resources = append(resources, crd)
+		}
+	}
+
+	// Resources (CRUD)
+	if len(resources) > 0 {
+		fmt.Fprintf(b, "## Resources (CRUD) — %d\n", len(resources))
+		b.WriteString("Full lifecycle resources with GET, CREATE, UPDATE, DELETE operations.\n\n")
+		for _, crd := range resources {
+			fmt.Fprintf(b, "### %s\n", crd.Kind)
+			fmt.Fprintf(b, "**Plural:** %s | **Scope:** %s\n", crd.Plural, crd.Scope)
+			if crd.Description != "" {
+				fmt.Fprintf(b, "%s\n", crd.Description)
+			}
+			b.WriteString("\n")
+
+			// Operations table
+			b.WriteString("| Operation | Method | Path |\n")
+			b.WriteString("|-----------|--------|------|\n")
+			for _, op := range crd.Operations {
+				fmt.Fprintf(b, "| %s | %s | `%s` |\n", op.CRDAction, op.HTTPMethod, op.Path)
+			}
+			if crd.UpdateWithPost {
+				b.WriteString("\n> Uses POST for updates (PUT not available)\n")
+			}
+			b.WriteString("\n")
+
+			// Spec fields
+			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
+				b.WriteString("**Spec fields:**\n\n")
+				b.WriteString("| Field | Type | Required |\n")
+				b.WriteString("|-------|------|----------|\n")
+				for _, f := range crd.Spec.Fields {
+					req := ""
+					if f.Required {
+						req = "Yes"
+					}
+					goType := f.GoType
+					if len(f.Enum) > 0 {
+						goType += " enum: " + strings.Join(f.Enum, ", ")
+					}
+					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", f.JSONName, goType, req)
+				}
+				b.WriteString("\n")
+			}
+
+			// ID field mappings
+			if len(crd.IDFieldMappings) > 0 {
+				b.WriteString("**ID field mappings:** ")
+				mappings := make([]string, 0, len(crd.IDFieldMappings))
+				for _, m := range crd.IDFieldMappings {
+					mappings = append(mappings, fmt.Sprintf("`{%s}` -> `%s`", m.PathParam, m.BodyField))
+				}
+				b.WriteString(strings.Join(mappings, ", "))
+				b.WriteString("\n\n")
+			}
+
+			if crd.NeedsExternalIDRef {
+				b.WriteString("**Note:** Uses `externalIDRef` to reference existing resources (no path params for identification)\n\n")
+			}
+		}
+	}
+
+	// Query Endpoints
+	if len(queries) > 0 {
+		fmt.Fprintf(b, "## Query Endpoints (GET-only) — %d\n", len(queries))
+		b.WriteString("Read-only endpoints that periodically fetch data.\n\n")
+		for _, crd := range queries {
+			fmt.Fprintf(b, "### %s\n", crd.Kind)
+			fmt.Fprintf(b, "**Path:** `GET %s`\n", crd.QueryPath)
+			if crd.Description != "" {
+				fmt.Fprintf(b, "%s\n", crd.Description)
+			}
+			b.WriteString("\n")
+
+			if crd.ResponseType != "" {
+				fmt.Fprintf(b, "**Response type:** `%s`", crd.ResponseType)
+				if crd.ResponseIsArray {
+					b.WriteString(" (array)")
+				}
+				b.WriteString("\n")
+				if crd.UsesSharedType {
+					fmt.Fprintf(b, "**Reuses type from:** %s\n", crd.ResultItemType)
+				}
+				b.WriteString("\n")
+			}
+
+			// Query parameters
+			if len(crd.QueryParams) > 0 {
+				b.WriteString("**Query parameters:**\n\n")
+				b.WriteString("| Parameter | Type | Required |\n")
+				b.WriteString("|-----------|------|----------|\n")
+				for _, qp := range crd.QueryParams {
+					req := ""
+					if qp.Required {
+						req = "Yes"
+					}
+					goType := qp.GoType
+					if qp.IsArray {
+						goType = "[]" + qp.ItemType
+					}
+					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", qp.JSONName, goType, req)
+				}
+				b.WriteString("\n")
+			}
+
+			// Path parameters for query endpoints
+			if len(crd.QueryPathParams) > 0 {
+				b.WriteString("**Path parameters:**\n\n")
+				b.WriteString("| Parameter | Type | Required |\n")
+				b.WriteString("|-----------|------|----------|\n")
+				for _, pp := range crd.QueryPathParams {
+					req := ""
+					if pp.Required {
+						req = "Yes"
+					}
+					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", pp.JSONName, pp.GoType, req)
+				}
+				b.WriteString("\n")
+			}
+
+			// Result fields (when not using a shared type)
+			if !crd.UsesSharedType && len(crd.ResultFields) > 0 {
+				b.WriteString("**Result fields:**\n\n")
+				b.WriteString("| Field | Type |\n")
+				b.WriteString("|-------|------|\n")
+				for _, f := range crd.ResultFields {
+					fmt.Fprintf(b, "| `%s` | `%s` |\n", f.JSONName, f.GoType)
+				}
+				b.WriteString("\n")
+			}
+		}
+	}
+
+	// Action Endpoints
+	if len(actions) > 0 {
+		fmt.Fprintf(b, "## Action Endpoints (POST/PUT-only) — %d\n", len(actions))
+		b.WriteString("One-shot or periodic operations.\n\n")
+		for _, crd := range actions {
+			fmt.Fprintf(b, "### %s\n", crd.Kind)
+			fmt.Fprintf(b, "**Path:** `%s %s`\n", crd.ActionMethod, crd.ActionPath)
+			if crd.Description != "" {
+				fmt.Fprintf(b, "%s\n", crd.Description)
+			}
+			b.WriteString("\n")
+
+			if crd.ParentResource != "" {
+				fmt.Fprintf(b, "**Parent resource:** %s (via `%s`)\n", crd.ParentResource, crd.ParentIDParam)
+			}
+			if crd.HasBinaryBody {
+				fmt.Fprintf(b, "**Binary upload:** `%s`\n", crd.BinaryContentType)
+			}
+
+			// Spec fields for action
+			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
+				b.WriteString("\n**Request fields:**\n\n")
+				b.WriteString("| Field | Type | Required |\n")
+				b.WriteString("|-------|------|----------|\n")
+				for _, f := range crd.Spec.Fields {
+					req := ""
+					if f.Required {
+						req = "Yes"
+					}
+					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", f.JSONName, f.GoType, req)
+				}
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	// Summary
+	b.WriteString("---\n\n")
+	fmt.Fprintf(b, "**Total CRDs:** %d", len(crds))
+	if len(resources) > 0 || len(queries) > 0 || len(actions) > 0 {
+		fmt.Fprintf(b, " (%d resources, %d queries, %d actions)", len(resources), len(queries), len(actions))
+	}
+	b.WriteString("\n")
 }
 
 // parseCommaSeparated splits a comma-separated string into a slice, trimming whitespace.

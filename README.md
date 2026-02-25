@@ -136,6 +136,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Workflow](#workflow)
   - [Prompts](#prompts)
   - [Available Tools](#available-tools)
+  - [Operator Lifecycle Tools](#operator-lifecycle-tools)
 - [Releasing](#releasing)
 - [License](#license)
 
@@ -4085,6 +4086,8 @@ openapi-operator-gen setup copilot --scope user
 
 ### Workflow
 
+#### Initial Generation
+
 The typical workflow when using the MCP server with an AI assistant:
 
 1. **You** provide your OpenAPI spec path (or use the `generate-operator` prompt)
@@ -4108,6 +4111,134 @@ Example conversation:
 > **You:** Group is myapp.example.com, module is github.com/myorg/myapp-operator. Enable the kubectl plugin and aggregate CRD.
 >
 > **Assistant:** Generating... Done! Created 8 CRDs in `./generated`. Running build steps now...
+
+#### Evolving an Existing Operator
+
+After initial generation, the `describe`, `diff`, and `regenerate` tools support the ongoing lifecycle (or use the `evolve-spec` prompt to walk through it):
+
+1. **You** edit your OpenAPI spec (add endpoints, change schemas, etc.)
+2. **Assistant** calls `describe` to understand the current operator state
+3. **Assistant** calls `diff` to show what changed — added/removed/changed CRDs with field-level detail
+4. **You** review the diff and confirm the changes look right
+5. **Assistant** calls `regenerate` to re-generate the operator from the updated spec
+6. **Assistant** runs the post-generation build steps
+
+Example conversation:
+
+> **You:** I added a /notifications endpoint to the API spec — update the operator
+>
+> **Assistant:** Let me check what's changed... The diff shows 1 new CRD would be added:
+> - **Notification** (Resource: GET, POST, DELETE) — 4 spec fields: message, recipient, priority, channel
+>
+> Everything else is unchanged. Want me to regenerate?
+>
+> **You:** Yes, go ahead.
+>
+> **Assistant:** Regenerated. The operator now has 9 CRDs. Running build steps...
+
+#### End-to-End Example: Petstore API v1 to v2
+
+This walkthrough shows the full lifecycle — generating an operator from a remote OpenAPI spec URL, initializing git to track changes, then upgrading when a new spec version is released.
+
+**Step 1: Generate the initial operator**
+
+> **You:** Generate a Kubernetes operator from https://petstore3.swagger.io/api/v3/openapi.json — output to ./petstore-operator, group petstore.example.com, module github.com/myorg/petstore-operator. Enable the kubectl plugin and aggregate CRD.
+>
+> **Assistant:** *(calls `validate`)* Valid OpenAPI 3.0.2 spec — "Swagger Petstore" v1.0.27, base URL https://petstore3.swagger.io/api/v3. 3 resources, 5 query endpoints, 2 action endpoints.
+>
+> *(calls `preview`)* Here's what would be generated:
+> - **Pet** — CRUD resource (POST, GET, PUT, DELETE /pet, /pet/{petId})
+> - **Store** — CRUD resource (POST, GET, DELETE /store/order, /store/order/{orderId})
+> - **User** — CRUD resource (POST, GET, PUT, DELETE /user, /user/{username})
+> - **FindPetsByStatus** — Query endpoint (GET /pet/findByStatus)
+> - **FindPetsByTags** — Query endpoint (GET /pet/findByTags)
+> - ... plus 3 more queries and 2 actions
+>
+> Ready to generate?
+>
+> **You:** Yes.
+>
+> **Assistant:** *(calls `generate`)* Generated 10 CRDs in `./petstore-operator`. Running build steps...
+> ```
+> cd petstore-operator && go mod tidy && make generate && make build
+> ```
+> Build successful.
+
+**Step 2: Initialize git to track the generated output**
+
+> **You:** Initialize a git repo in petstore-operator and commit everything.
+>
+> **Assistant:**
+> ```
+> cd petstore-operator
+> git init
+> git add -A
+> git commit -m "Initial generation from Petstore OpenAPI v1.0.27"
+> ```
+> Done — 45 files committed. The repo now has a baseline for tracking future changes.
+
+This is important: the generator copies the OpenAPI spec into the output directory (e.g., `petstore-operator/openapi.json`). Committing it means `git diff` and the `diff` tool can compare the old spec against a new one.
+
+**Step 3: Upgrade to a new spec version**
+
+Some time later, the Petstore API releases v2 with new endpoints and schema changes. You have the new spec at `./petstore-v2.yaml`.
+
+> **You:** The Petstore API has a new version at ./petstore-v2.yaml. Use the evolve-spec prompt to update the operator.
+>
+> **Assistant:** *(uses the `evolve-spec` prompt with directory=./petstore-operator, spec=./petstore-v2.yaml)*
+>
+> *(calls `describe`)* Current operator: petstore.example.com/v1alpha1, 10 CRDs, generated from Petstore v1.0.27. Spec status: **modified** — the spec has changed since last generation.
+>
+> *(calls `diff`)* Comparing ./petstore-v2.yaml against the last generation:
+>
+> **Summary:** 2 added, 1 removed, 2 changed, 5 unchanged
+>
+> **Added:**
+> - **Vaccination** (Resource: POST, GET, PUT, DELETE) — 5 spec fields
+> - **FindPetsByBreed** (Query: GET /pet/findByBreed) — 1 query param
+>
+> **Removed:**
+> - **FindPetsByTags** — endpoint removed from spec
+>
+> **Changed:**
+> - **Pet** — Field added: `microchipId` (string), Field added: `breed` (string)
+> - **Store** — Field type changed: `quantity` int32 → int64
+>
+> Want me to regenerate?
+>
+> **You:** Yes, regenerate and build.
+>
+> **Assistant:** *(calls `regenerate` with spec=./petstore-v2.yaml)* Regenerated — 11 CRDs in `./petstore-operator`.
+> ```
+> cd petstore-operator && go mod tidy && make generate && make build && make test
+> ```
+> Build and tests passed.
+
+**Step 4: Review and commit the changes**
+
+> **You:** Show me what changed in git, then commit.
+>
+> **Assistant:**
+> ```
+> cd petstore-operator && git diff --stat
+> ```
+> ```
+>  api/v1alpha1/types.go                                       | 42 ++++++---
+>  config/crd/bases/petstore.example.com_pets.yaml             | 18 ++++-
+>  config/crd/bases/petstore.example.com_vaccinations.yaml     | new file
+>  internal/controller/vaccination_controller.go               | new file
+>  internal/controller/findpetsbytags_controller.go            | deleted
+>  openapi.json                                                | 200 +++++-----
+>  .openapi-operator-gen.yaml                                  |   2 +-
+>  ... 12 files changed
+> ```
+>
+> ```
+> git add -A
+> git commit -m "Upgrade to Petstore API v2: add Vaccination, FindPetsByBreed; remove FindPetsByTags"
+> ```
+>
+> Committed. You now have a clean diff between v1 and v2 of the operator in git history.
 
 ### Prompts
 
@@ -4133,6 +4264,15 @@ Explore an OpenAPI spec to understand what Kubernetes resources it would produce
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `spec` | Yes | Path or URL to the OpenAPI specification file |
+
+#### `evolve-spec`
+
+Walk through evolving an existing operator after spec changes. Guides you through describing the current state, diffing changes, regenerating, and building.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `directory` | Yes | Path to the generated operator directory |
+| `spec` | No | Path to the updated OpenAPI spec (if different from the saved config) |
 
 ### Available Tools
 
@@ -4203,6 +4343,99 @@ Generate a complete Kubernetes operator from an OpenAPI specification. Accepts a
 | `target_api_image` | No | Container image for target REST API deployment |
 | `target_api_port` | No | Container port for target REST API |
 | `managed_crs` | No | Directory with CR YAML files for Rundeck lifecycle jobs |
+
+### Operator Lifecycle Tools
+
+These tools work with previously generated operators — they read the saved `.openapi-operator-gen.yaml` config file from the output directory.
+
+#### `describe`
+
+Inspect a previously generated operator. Shows the CRDs, their fields and operations, configuration options used, and file ownership. Also detects whether the OpenAPI spec has changed since last generation (via SHA-256 hash comparison).
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `directory` | Yes | Path to the generated operator directory (must contain `.openapi-operator-gen.yaml`) |
+
+Example output:
+```
+# Operator: petstore.example.com
+
+**API Group:** petstore.example.com
+**API Version:** v1alpha1
+**Module:** github.com/example/petstore-operator
+**Spec:** examples/petstore.yaml (unchanged)
+
+## Configuration
+| Option | Value |
+|--------|-------|
+| Mapping Mode | per-resource |
+| Aggregate CRD | No |
+| ...
+
+## CRDs (8 total)
+### Resources (3)
+#### Pet
+| Operation | Method | Path |
+|-----------|--------|------|
+| Create | POST | /pet |
+| Read | GET | /pet/{petId} |
+...
+```
+
+#### `regenerate`
+
+Re-run generation for an existing operator using its saved configuration. Reads `.openapi-operator-gen.yaml` from the directory and re-generates all files. Any optional parameters override the saved values.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `directory` | Yes | Path to the generated operator directory (must contain `.openapi-operator-gen.yaml`) |
+| `spec` | No | Override the OpenAPI spec path or URL |
+| `group` | No | Override Kubernetes API group |
+| `module` | No | Override Go module name |
+| `version` | No | Override Kubernetes API version |
+| `mapping` | No | Override resource mapping mode: `per-resource` or `single-crd` |
+| `aggregate` | No | Override: generate Status Aggregator CRD |
+| `bundle` | No | Override: generate Bundle CRD |
+| `kubectl_plugin` | No | Override: generate kubectl plugin |
+| `rundeck_project` | No | Override: generate Rundeck projects |
+| `include_paths` | No | Override: path include patterns (comma-separated) |
+| `exclude_paths` | No | Override: path exclude patterns (comma-separated) |
+
+After regeneration, run: `go mod tidy && make generate && make build && make test`
+
+#### `diff`
+
+Compare the current OpenAPI spec against what was last generated from. Shows added, removed, and changed CRDs with field-level detail. Uses the saved spec hash for fast no-change detection, and git history or the embedded spec copy for detailed comparison.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `directory` | Yes | Path to the generated operator directory (must contain `.openapi-operator-gen.yaml`) |
+| `spec` | No | Override the new spec path to compare against (default: uses spec path from saved config) |
+
+Example output when changes are detected:
+```
+# Diff: petstore.yaml
+
+**Summary:** 1 added, 0 removed, 1 changed, 7 unchanged
+
+## Added CRDs
+
+### Notification (Resource)
+New resource with POST, GET, DELETE operations
+
+## Changed CRDs
+
+### Pet
+- Field added: `microchipId` (string)
+- Field removed: `photoUrl`
+- Operation added: PATCH /pet/{petId}
+```
+
+Example output when no changes:
+```
+No changes detected. The spec is identical to what was last generated from.
+Hash: sha256:abc123...
+```
 
 ## Releasing
 
