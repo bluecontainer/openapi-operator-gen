@@ -81,7 +81,7 @@ var previewTool = mcp.NewTool("preview",
 )
 
 var generateTool = mcp.NewTool("generate",
-	mcp.WithDescription("Generate a complete Kubernetes operator from an OpenAPI specification. Creates Go types, CRD manifests, controllers, Dockerfile, Makefile, and optionally kubectl plugins, Rundeck projects, aggregate/bundle CRDs. After generation, run: cd <output> && go mod tidy && make generate && make build"),
+	mcp.WithDescription("Generate a complete Kubernetes operator from an OpenAPI specification. Creates Go types, CRD manifests, controllers, Dockerfile, Makefile, and optionally kubectl plugins, Rundeck projects, aggregate/bundle CRDs. After generation, run: cd <output> && go mod tidy && make generate && make build && make test"),
 	// Required parameters
 	mcp.WithString("spec",
 		mcp.Required(),
@@ -679,8 +679,9 @@ func (h *handlers) handleGenerate(_ context.Context, req mcp.CallToolRequest) (*
 	b.WriteString("  2. go mod tidy\n")
 	b.WriteString("  3. make generate  # Generate deep copy methods and CRD manifests\n")
 	b.WriteString("  4. make build     # Build the operator binary\n")
-	b.WriteString("  5. make install   # Install CRDs to cluster\n")
-	b.WriteString("  6. make run       # Run the operator locally\n")
+	b.WriteString("  5. make test      # Run tests\n")
+	b.WriteString("  6. make install   # Install CRDs to cluster\n")
+	b.WriteString("  7. make run       # Run the operator locally\n")
 	if cfg.GenerateKubectlPlugin {
 		b.WriteString("\nTo build the kubectl plugin:\n")
 		fmt.Fprintf(&b, "  cd %s/kubectl-plugin && make install\n", cfg.OutputDir)
@@ -752,6 +753,7 @@ func (h *handlers) handleGenerateOperatorPrompt(_ context.Context, req mcp.GetPr
    - go mod tidy
    - make generate
    - make build
+   - make test
    Report the results of each step.`
 
 	return mcp.NewGetPromptResult(
