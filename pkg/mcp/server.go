@@ -182,6 +182,12 @@ var generateOperatorPrompt = mcp.NewPrompt("generate-operator",
 	mcp.WithArgument("module",
 		mcp.ArgumentDescription("Go module name (e.g., github.com/myorg/myapp-operator)"),
 	),
+	mcp.WithArgument("version",
+		mcp.ArgumentDescription("Kubernetes API version (default: v1alpha1)"),
+	),
+	mcp.WithArgument("mapping",
+		mcp.ArgumentDescription("Resource mapping mode: 'per-resource' (one CRD per REST resource) or 'single-crd' (one CRD for entire API)"),
+	),
 )
 
 var previewAPIPrompt = mcp.NewPrompt("preview-api",
@@ -189,6 +195,9 @@ var previewAPIPrompt = mcp.NewPrompt("preview-api",
 	mcp.WithArgument("spec",
 		mcp.ArgumentDescription("Path or URL to the OpenAPI specification file"),
 		mcp.RequiredArgument(),
+	),
+	mcp.WithArgument("group",
+		mcp.ArgumentDescription("Kubernetes API group for Kind name derivation (e.g., myapp.example.com)"),
 	),
 )
 
@@ -268,6 +277,8 @@ func (h *handlers) handlePreview(_ context.Context, req mcp.CallToolRequest) (*m
 	}
 
 	var b strings.Builder
+
+	// Header with spec metadata
 	if spec.Title != "" {
 		fmt.Fprintf(&b, "# %s", spec.Title)
 		if spec.Version != "" {
@@ -275,8 +286,14 @@ func (h *handlers) handlePreview(_ context.Context, req mcp.CallToolRequest) (*m
 		}
 		b.WriteString("\n\n")
 	}
+	if spec.Description != "" {
+		fmt.Fprintf(&b, "%s\n\n", spec.Description)
+	}
+	if spec.BaseURL != "" {
+		fmt.Fprintf(&b, "**Base URL:** `%s`\n\n", spec.BaseURL)
+	}
 
-	// Resources (CRUD)
+	// Classify CRDs
 	var resources, queries, actions []*mapper.CRDDefinition
 	for _, crd := range crds {
 		switch {
@@ -289,69 +306,179 @@ func (h *handlers) handlePreview(_ context.Context, req mcp.CallToolRequest) (*m
 		}
 	}
 
+	// Resources (CRUD)
 	if len(resources) > 0 {
 		fmt.Fprintf(&b, "## Resources (CRUD) — %d\n", len(resources))
 		b.WriteString("Full lifecycle resources with GET, CREATE, UPDATE, DELETE operations.\n\n")
 		for _, crd := range resources {
-			fmt.Fprintf(&b, "- **%s** (kind: %s, plural: %s)\n", crd.Kind, crd.Kind, crd.Plural)
-			fmt.Fprintf(&b, "  Path: %s\n", crd.ResourcePath)
-			var methods []string
-			if crd.GetPath != "" {
-				methods = append(methods, "GET")
+			fmt.Fprintf(&b, "### %s\n", crd.Kind)
+			fmt.Fprintf(&b, "**Plural:** %s | **Scope:** %s\n", crd.Plural, crd.Scope)
+			if crd.Description != "" {
+				fmt.Fprintf(&b, "%s\n", crd.Description)
 			}
-			if crd.HasPost {
-				methods = append(methods, "POST")
+			b.WriteString("\n")
+
+			// Operations table
+			b.WriteString("| Operation | Method | Path |\n")
+			b.WriteString("|-----------|--------|------|\n")
+			for _, op := range crd.Operations {
+				fmt.Fprintf(&b, "| %s | %s | `%s` |\n", op.CRDAction, op.HTTPMethod, op.Path)
 			}
-			if crd.HasPut {
-				methods = append(methods, "PUT")
+			if crd.UpdateWithPost {
+				b.WriteString("\n> Uses POST for updates (PUT not available)\n")
 			}
-			if crd.HasPatch {
-				methods = append(methods, "PATCH")
-			}
-			if crd.HasDelete {
-				methods = append(methods, "DELETE")
-			}
-			fmt.Fprintf(&b, "  Methods: %s\n", strings.Join(methods, ", "))
+			b.WriteString("\n")
+
+			// Spec fields
 			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
-				b.WriteString("  Spec fields: ")
-				fieldNames := make([]string, 0, len(crd.Spec.Fields))
+				b.WriteString("**Spec fields:**\n\n")
+				b.WriteString("| Field | Type | Required |\n")
+				b.WriteString("|-------|------|----------|\n")
 				for _, f := range crd.Spec.Fields {
-					fieldNames = append(fieldNames, f.JSONName)
+					req := ""
+					if f.Required {
+						req = "Yes"
+					}
+					goType := f.GoType
+					if len(f.Enum) > 0 {
+						goType += " enum: " + strings.Join(f.Enum, ", ")
+					}
+					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", f.JSONName, goType, req)
 				}
-				b.WriteString(strings.Join(fieldNames, ", "))
 				b.WriteString("\n")
 			}
+
+			// ID field mappings
+			if len(crd.IDFieldMappings) > 0 {
+				b.WriteString("**ID field mappings:** ")
+				mappings := make([]string, 0, len(crd.IDFieldMappings))
+				for _, m := range crd.IDFieldMappings {
+					mappings = append(mappings, fmt.Sprintf("`{%s}` -> `%s`", m.PathParam, m.BodyField))
+				}
+				b.WriteString(strings.Join(mappings, ", "))
+				b.WriteString("\n\n")
+			}
+
+			if crd.NeedsExternalIDRef {
+				b.WriteString("**Note:** Uses `externalIDRef` to reference existing resources (no path params for identification)\n\n")
+			}
 		}
-		b.WriteString("\n")
 	}
 
+	// Query Endpoints
 	if len(queries) > 0 {
 		fmt.Fprintf(&b, "## Query Endpoints (GET-only) — %d\n", len(queries))
 		b.WriteString("Read-only endpoints that periodically fetch data.\n\n")
 		for _, crd := range queries {
-			fmt.Fprintf(&b, "- **%s** (kind: %s)\n", crd.Kind, crd.Kind)
-			fmt.Fprintf(&b, "  Path: GET %s\n", crd.QueryPath)
+			fmt.Fprintf(&b, "### %s\n", crd.Kind)
+			fmt.Fprintf(&b, "**Path:** `GET %s`\n", crd.QueryPath)
+			if crd.Description != "" {
+				fmt.Fprintf(&b, "%s\n", crd.Description)
+			}
+			b.WriteString("\n")
+
 			if crd.ResponseType != "" {
-				fmt.Fprintf(&b, "  Response: %s\n", crd.ResponseType)
+				fmt.Fprintf(&b, "**Response type:** `%s`", crd.ResponseType)
+				if crd.ResponseIsArray {
+					b.WriteString(" (array)")
+				}
+				b.WriteString("\n")
+				if crd.UsesSharedType {
+					fmt.Fprintf(&b, "**Reuses type from:** %s\n", crd.ResultItemType)
+				}
+				b.WriteString("\n")
+			}
+
+			// Query parameters
+			if len(crd.QueryParams) > 0 {
+				b.WriteString("**Query parameters:**\n\n")
+				b.WriteString("| Parameter | Type | Required |\n")
+				b.WriteString("|-----------|------|----------|\n")
+				for _, qp := range crd.QueryParams {
+					req := ""
+					if qp.Required {
+						req = "Yes"
+					}
+					goType := qp.GoType
+					if qp.IsArray {
+						goType = "[]" + qp.ItemType
+					}
+					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", qp.JSONName, goType, req)
+				}
+				b.WriteString("\n")
+			}
+
+			// Path parameters for query endpoints
+			if len(crd.QueryPathParams) > 0 {
+				b.WriteString("**Path parameters:**\n\n")
+				b.WriteString("| Parameter | Type | Required |\n")
+				b.WriteString("|-----------|------|----------|\n")
+				for _, pp := range crd.QueryPathParams {
+					req := ""
+					if pp.Required {
+						req = "Yes"
+					}
+					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", pp.JSONName, pp.GoType, req)
+				}
+				b.WriteString("\n")
+			}
+
+			// Result fields (when not using a shared type)
+			if !crd.UsesSharedType && len(crd.ResultFields) > 0 {
+				b.WriteString("**Result fields:**\n\n")
+				b.WriteString("| Field | Type |\n")
+				b.WriteString("|-------|------|\n")
+				for _, f := range crd.ResultFields {
+					fmt.Fprintf(&b, "| `%s` | `%s` |\n", f.JSONName, f.GoType)
+				}
+				b.WriteString("\n")
 			}
 		}
-		b.WriteString("\n")
 	}
 
+	// Action Endpoints
 	if len(actions) > 0 {
 		fmt.Fprintf(&b, "## Action Endpoints (POST/PUT-only) — %d\n", len(actions))
 		b.WriteString("One-shot or periodic operations.\n\n")
 		for _, crd := range actions {
-			fmt.Fprintf(&b, "- **%s** (kind: %s)\n", crd.Kind, crd.Kind)
-			fmt.Fprintf(&b, "  Path: %s %s\n", crd.ActionMethod, crd.ActionPath)
-			if crd.ParentResource != "" {
-				fmt.Fprintf(&b, "  Parent: %s\n", crd.ParentResource)
+			fmt.Fprintf(&b, "### %s\n", crd.Kind)
+			fmt.Fprintf(&b, "**Path:** `%s %s`\n", crd.ActionMethod, crd.ActionPath)
+			if crd.Description != "" {
+				fmt.Fprintf(&b, "%s\n", crd.Description)
 			}
+			b.WriteString("\n")
+
+			if crd.ParentResource != "" {
+				fmt.Fprintf(&b, "**Parent resource:** %s (via `%s`)\n", crd.ParentResource, crd.ParentIDParam)
+			}
+			if crd.HasBinaryBody {
+				fmt.Fprintf(&b, "**Binary upload:** `%s`\n", crd.BinaryContentType)
+			}
+
+			// Spec fields for action
+			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
+				b.WriteString("\n**Request fields:**\n\n")
+				b.WriteString("| Field | Type | Required |\n")
+				b.WriteString("|-------|------|----------|\n")
+				for _, f := range crd.Spec.Fields {
+					req := ""
+					if f.Required {
+						req = "Yes"
+					}
+					fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", f.JSONName, f.GoType, req)
+				}
+			}
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
-	fmt.Fprintf(&b, "Total CRDs: %d\n", len(crds))
+	// Summary
+	b.WriteString("---\n\n")
+	fmt.Fprintf(&b, "**Total CRDs:** %d", len(crds))
+	if len(resources) > 0 || len(queries) > 0 || len(actions) > 0 {
+		fmt.Fprintf(&b, " (%d resources, %d queries, %d actions)", len(resources), len(queries), len(actions))
+	}
+	b.WriteString("\n")
 
 	return mcp.NewToolResultText(b.String()), nil
 }
@@ -569,6 +696,8 @@ func (h *handlers) handleGenerateOperatorPrompt(_ context.Context, req mcp.GetPr
 	output := req.Params.Arguments["output"]
 	group := req.Params.Arguments["group"]
 	module := req.Params.Arguments["module"]
+	version := req.Params.Arguments["version"]
+	mapping := req.Params.Arguments["mapping"]
 
 	var b strings.Builder
 	b.WriteString("I want to generate a Kubernetes operator from an OpenAPI specification.\n\n")
@@ -581,6 +710,12 @@ func (h *handlers) handleGenerateOperatorPrompt(_ context.Context, req mcp.GetPr
 	}
 	if module != "" {
 		fmt.Fprintf(&b, "Go module: %s\n", module)
+	}
+	if version != "" {
+		fmt.Fprintf(&b, "API version: %s\n", version)
+	}
+	if mapping != "" {
+		fmt.Fprintf(&b, "Mapping mode: %s\n", mapping)
 	}
 
 	instructions := `Follow these steps to generate the operator:
@@ -597,13 +732,19 @@ func (h *handlers) handleGenerateOperatorPrompt(_ context.Context, req mcp.GetPr
 3. **Discuss options** before generating. Ask me about:
    - Which output directory and Go module name to use (if not already provided)
    - Which API group and version to use (if not already provided)
+   - **Mapping mode** (if not already provided): "per-resource" creates one CRD per REST resource (default), "single-crd" creates a single CRD for the entire API
    - Whether to enable optional features:
      - **aggregate**: A Status Aggregator CRD that monitors health across all resources
      - **bundle**: A Bundle CRD for creating multiple resources as a unit
+     - **generate_crds**: Generate CRD YAML manifests directly (default: use controller-gen via 'make generate')
      - **kubectl_plugin**: A kubectl plugin for managing the operator
      - **rundeck_project**: Rundeck job definitions for web-based management (requires kubectl_plugin)
-   - Whether any paths or operations should be excluded
-   - Whether a target API container image should be included for local testing
+     - **standalone_node_source**: Use the generic kubectl-rundeck-nodes plugin instead of generating a per-API node source (only with rundeck_project)
+   - Whether any paths, tags, or operations should be filtered (include or exclude patterns)
+   - **update_with_post**: Whether any resources should use POST for updates because the API lacks PUT endpoints (can be "*" for all, or specific paths)
+   - **ID field handling**: Whether to disable automatic merging of path ID parameters with body 'id' fields (no_id_merge), or provide explicit mappings (id_field_map)
+   - **Target API deployment**: Whether to include a container image and port for the target REST API (generates a Deployment+Service manifest for local testing)
+   - **managed_crs**: A directory of CR YAML files to generate managed Rundeck lifecycle jobs (only with rundeck_project)
 
 4. **Generate** the operator using the generate tool with the confirmed options.
 
@@ -627,6 +768,12 @@ func (h *handlers) handleGenerateOperatorPrompt(_ context.Context, req mcp.GetPr
 // handlePreviewAPIPrompt returns instructions for exploring an API spec.
 func (h *handlers) handlePreviewAPIPrompt(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	spec := req.Params.Arguments["spec"]
+	group := req.Params.Arguments["group"]
+
+	var previewArgs string
+	if group != "" {
+		previewArgs = fmt.Sprintf(" with group=%q", group)
+	}
 
 	text := fmt.Sprintf(`I want to explore what Kubernetes resources would be generated from an OpenAPI spec before committing to generation.
 
@@ -636,12 +783,14 @@ Follow these steps:
 
 1. **Validate** the spec using the validate tool. Show me the title, version, and endpoint counts.
 
-2. **Preview** the resources using the preview tool. Show me the full breakdown:
+2. **Preview** the resources using the preview tool%s. Show me the full breakdown:
    - Resources (CRUD) — what Kind names, paths, HTTP methods, and spec fields each would have
    - Query Endpoints (GET-only) — read-only data fetchers
    - Action Endpoints (POST/PUT-only) — one-shot operations
 
-3. **Summarize** the findings: how many CRDs total, any notable patterns (e.g., resources without DELETE, actions tied to parent resources), and what optional features (aggregate, bundle, kubectl plugin) might be useful for this API.`, spec)
+3. **Summarize** the findings: how many CRDs total, any notable patterns (e.g., resources without DELETE, actions tied to parent resources), and what optional features (aggregate, bundle, kubectl plugin) might be useful for this API.
+
+4. If the preview looks noisy, suggest filtering options: include/exclude paths, tags, or operationIds to narrow the scope.`, spec, previewArgs)
 
 	return mcp.NewGetPromptResult(
 		"Preview what CRDs an OpenAPI spec would produce",
