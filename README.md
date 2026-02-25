@@ -129,6 +129,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Quick Start (with MCP already configured)](#quick-start-with-mcp-already-configured)
   - [Quick Start (without MCP)](#quick-start-without-mcp)
   - [Full Bootstrapping Prompt](#full-bootstrapping-prompt)
+- [Using with GitHub Copilot](#using-with-github-copilot)
 - [MCP Server (AI Assistant Integration)](#mcp-server-ai-assistant-integration)
   - [Installation](#mcp-installation)
   - [Configuration](#mcp-configuration)
@@ -3951,9 +3952,59 @@ Safe to customize: config/manager/, config/rbac/, config/samples/, config/defaul
 
 </details>
 
+## Using with GitHub Copilot
+
+openapi-operator-gen works with [GitHub Copilot](https://github.com/features/copilot) in VS Code via the same MCP server used by Claude Code. Copilot can validate specs, preview resources, and generate operators using the MCP tools.
+
+### Setup
+
+**Automatic** (recommended):
+
+```bash
+# Install the tool
+go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-gen@latest
+
+# Configure MCP server for VS Code (creates .vscode/mcp.json)
+openapi-operator-gen setup copilot
+```
+
+Commit `.vscode/mcp.json` to share the configuration with your team.
+
+**User-level** (available in all VS Code workspaces):
+
+```bash
+openapi-operator-gen setup copilot --scope user
+```
+
+**Manual** — create `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "openapi-operator-gen": {
+      "type": "stdio",
+      "command": "openapi-operator-gen",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Copilot Instructions
+
+When you generate an operator, a `.github/copilot-instructions.md` file is automatically created in the output directory. This gives Copilot context about the generated operator's build commands, CRD types, file ownership, and architecture.
+
+For projects that use openapi-operator-gen but haven't generated yet, see [docs/copilot-snippet.md](docs/copilot-snippet.md) for a template you can copy into your `.github/copilot-instructions.md`.
+
+### MCP Tools
+
+Once configured, Copilot has access to the same MCP tools as Claude Code — `validate`, `preview`, and `generate`. See [Available Tools](#available-tools) below for details.
+
+> **Note:** MCP prompts (`generate-operator`, `preview-api`) are a Claude Code feature and are not available in Copilot. Use the tools directly instead.
+
 ## MCP Server (AI Assistant Integration)
 
-openapi-operator-gen includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes its capabilities as tools for AI assistants like Claude Code. This lets you generate operators conversationally — describe your API and the assistant handles the flags, previews the output, and runs generation.
+openapi-operator-gen includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes its capabilities as tools for AI assistants like Claude Code and GitHub Copilot. This lets you generate operators conversationally — describe your API and the assistant handles the flags, previews the output, and runs generation.
 
 ```
 openapi-operator-gen mcp
@@ -3975,6 +4026,8 @@ go install github.com/bluecontainer/openapi-operator-gen/cmd/openapi-operator-ge
 
 ### <a name="mcp-configuration"></a>Configuration
 
+#### Claude Code
+
 **Project-level** (recommended — creates `.mcp.json` in the current directory):
 
 ```bash
@@ -3995,6 +4048,34 @@ openapi-operator-gen setup claude-code --scope user
 {
   "mcpServers": {
     "openapi-operator-gen": {
+      "command": "openapi-operator-gen",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+#### GitHub Copilot (VS Code)
+
+**Project-level** (recommended — creates `.vscode/mcp.json`):
+
+```bash
+openapi-operator-gen setup copilot
+```
+
+**User-level** (available in all VS Code workspaces):
+
+```bash
+openapi-operator-gen setup copilot --scope user
+```
+
+**Manual** — create `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "openapi-operator-gen": {
+      "type": "stdio",
       "command": "openapi-operator-gen",
       "args": ["mcp"]
     }

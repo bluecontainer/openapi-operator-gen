@@ -229,6 +229,11 @@ func (g *ControllerGenerator) Generate(crds []*mapper.CRDDefinition, aggregate *
 		return fmt.Errorf("failed to generate CLAUDE.md: %w", err)
 	}
 
+	// Generate .github/copilot-instructions.md for GitHub Copilot integration
+	if err := g.generateCopilotInstructions(crds, aggregate != nil, bundle != nil); err != nil {
+		return fmt.Errorf("failed to generate copilot-instructions.md: %w", err)
+	}
+
 	// Save resolved config for reproducibility (openapi-operator-gen generate can re-use it)
 	configPath := filepath.Join(g.config.OutputDir, ".openapi-operator-gen.yaml")
 	if err := config.WriteConfigFile(configPath, g.config); err != nil {
@@ -1187,6 +1192,73 @@ func (g *ControllerGenerator) generateClaudeMd(crds []*mapper.CRDDefinition, has
 	}
 	outputPath := filepath.Join(g.config.OutputDir, "CLAUDE.md")
 	return g.executeTemplate(templates.ClaudeMdTemplate, data, outputPath)
+}
+
+func (g *ControllerGenerator) generateCopilotInstructions(crds []*mapper.CRDDefinition, hasAggregate bool, hasBundle bool) error {
+	type CRDInfo struct {
+		Kind               string
+		IsQuery            bool
+		IsAction           bool
+		NeedsExternalIDRef bool
+	}
+	crdInfos := make([]CRDInfo, 0, len(crds))
+	for _, crd := range crds {
+		crdInfos = append(crdInfos, CRDInfo{
+			Kind:               crd.Kind,
+			IsQuery:            crd.IsQuery,
+			IsAction:           crd.IsAction,
+			NeedsExternalIDRef: crd.NeedsExternalIDRef,
+		})
+	}
+
+	appName := strings.Split(g.config.APIGroup, ".")[0]
+	titleAppName := appName
+	if len(appName) > 0 {
+		titleAppName = strings.ToUpper(appName[:1]) + appName[1:]
+	}
+
+	generatorCmd := fmt.Sprintf("openapi-operator-gen generate \\\n  --spec %s \\\n  --output %s \\\n  --group %s \\\n  --version %s \\\n  --module %s",
+		g.config.SpecPath,
+		g.config.OutputDir,
+		g.config.APIGroup,
+		g.config.APIVersion,
+		g.config.ModuleName,
+	)
+	if hasAggregate {
+		generatorCmd += " \\\n  --aggregate"
+	}
+	if hasBundle {
+		generatorCmd += " \\\n  --bundle"
+	}
+
+	data := struct {
+		AppName          string
+		TitleAppName     string
+		APIGroup         string
+		APIVersion       string
+		CRDs             []CRDInfo
+		GeneratorCmd     string
+		HasAggregate     bool
+		HasBundle        bool
+		GeneratorVersion string
+	}{
+		AppName:          appName,
+		TitleAppName:     titleAppName,
+		APIGroup:         g.config.APIGroup,
+		APIVersion:       g.config.APIVersion,
+		CRDs:             crdInfos,
+		GeneratorCmd:     generatorCmd,
+		HasAggregate:     hasAggregate,
+		HasBundle:        hasBundle,
+		GeneratorVersion: g.config.GeneratorVersion,
+	}
+
+	githubDir := filepath.Join(g.config.OutputDir, ".github")
+	if err := os.MkdirAll(githubDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .github directory: %w", err)
+	}
+	outputPath := filepath.Join(githubDir, "copilot-instructions.md")
+	return g.executeTemplate(templates.CopilotInstructionsTemplate, data, outputPath)
 }
 
 func (g *ControllerGenerator) generateBoilerplate() error {

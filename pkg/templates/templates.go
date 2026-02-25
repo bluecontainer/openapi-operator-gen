@@ -144,6 +144,11 @@ var ReadmeTemplate string
 //go:embed claude.md.tmpl
 var ClaudeMdTemplate string
 
+// CopilotInstructionsTemplate is the template for generating .github/copilot-instructions.md
+//
+//go:embed copilot-instructions.md.tmpl
+var CopilotInstructionsTemplate string
+
 // SuiteTestTemplate is the template for generating the envtest suite_test.go file
 //
 //go:embed suite_test.go.tmpl
