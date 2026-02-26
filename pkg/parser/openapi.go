@@ -341,7 +341,13 @@ func (p *Parser) Parse(specPath string) (*ParsedSpec, error) {
 			return nil, fmt.Errorf("invalid OpenAPI spec: no paths defined")
 		}
 	} else {
-		if err := doc.Validate(context.Background()); err != nil {
+		// Disable example validation - example values don't affect code generation
+		// and many real-world specs have type mismatches in examples (e.g. numeric zip codes
+		// declared as string type)
+		ctx := openapi3.WithValidationOptions(context.Background(),
+			openapi3.DisableExamplesValidation(),
+		)
+		if err := doc.Validate(ctx); err != nil {
 			return nil, fmt.Errorf("invalid OpenAPI spec: %w", err)
 		}
 	}

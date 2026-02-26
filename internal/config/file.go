@@ -72,6 +72,9 @@ type ConfigFile struct {
 	// SpecHash is the SHA-256 hash of the spec file content at generation time.
 	// Used for quick change detection without re-parsing the spec.
 	SpecHash string `yaml:"specHash,omitempty"`
+
+	// GeneratorVersion is the version of openapi-operator-gen that last generated this operator.
+	GeneratorVersion string `yaml:"generatorVersion,omitempty"`
 }
 
 // FilterConfig contains filtering options for paths, tags, and operations
@@ -169,6 +172,9 @@ func ConfigFromFile(file *ConfigFile) *Config {
 	MergeConfigFile(cfg, file)
 	if file.SpecHash != "" {
 		cfg.SpecHash = file.SpecHash
+	}
+	if file.GeneratorVersion != "" {
+		cfg.GeneratorVersion = file.GeneratorVersion
 	}
 	return cfg
 }
@@ -419,6 +425,9 @@ func WriteConfigFile(path string, cfg *Config) error {
 	}
 	if cfg.SpecHash != "" {
 		file.SpecHash = cfg.SpecHash
+	}
+	if cfg.GeneratorVersion != "" {
+		file.GeneratorVersion = cfg.GeneratorVersion
 	}
 	if cfg.ManagedCRsDir != "" {
 		file.ManagedCRs = cfg.ManagedCRsDir

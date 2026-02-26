@@ -273,7 +273,7 @@ var previewAPIPrompt = mcp.NewPrompt("preview-api",
 )
 
 var evolveSpecPrompt = mcp.NewPrompt("evolve-spec",
-	mcp.WithPromptDescription("Walk through evolving an existing operator after spec changes. Describes the current state, diffs changes, regenerates, and builds."),
+	mcp.WithPromptDescription("Walk through evolving an existing operator after spec or generator changes. Describes the current state, diffs changes, regenerates, builds, and reviews file-level changes in git."),
 	mcp.WithArgument("directory",
 		mcp.ArgumentDescription("Path to the generated operator directory"),
 		mcp.RequiredArgument(),
@@ -306,21 +306,21 @@ func (h *handlers) handleValidate(_ context.Context, req mcp.CallToolRequest) (*
 	var b strings.Builder
 	b.WriteString("OpenAPI Specification: Valid\n\n")
 	if spec.Title != "" {
-		fmt.Fprintf(&b, "Title: %s\n", spec.Title)
+		fmt.Fprintf(&b, "  Title:       %s\n", spec.Title)
 	}
 	if spec.Version != "" {
-		fmt.Fprintf(&b, "Version: %s\n", spec.Version)
+		fmt.Fprintf(&b, "  Version:     %s\n", spec.Version)
 	}
 	if spec.Description != "" {
-		fmt.Fprintf(&b, "Description: %s\n", spec.Description)
+		fmt.Fprintf(&b, "  Description: %s\n", spec.Description)
 	}
 	if spec.BaseURL != "" {
-		fmt.Fprintf(&b, "Base URL: %s\n", spec.BaseURL)
+		fmt.Fprintf(&b, "  Base URL:    %s\n", spec.BaseURL)
 	}
 	b.WriteString("\n")
-	fmt.Fprintf(&b, "Resources (CRUD):        %d\n", len(spec.Resources))
-	fmt.Fprintf(&b, "Query Endpoints (GET):   %d\n", len(spec.QueryEndpoints))
-	fmt.Fprintf(&b, "Action Endpoints (POST): %d\n", len(spec.ActionEndpoints))
+	fmt.Fprintf(&b, "  Resources (CRUD):        %d\n", len(spec.Resources))
+	fmt.Fprintf(&b, "  Query Endpoints (GET):   %d\n", len(spec.QueryEndpoints))
+	fmt.Fprintf(&b, "  Action Endpoints (POST): %d\n", len(spec.ActionEndpoints))
 
 	return mcp.NewToolResultText(b.String()), nil
 }
@@ -362,18 +362,19 @@ func (h *handlers) handlePreview(_ context.Context, req mcp.CallToolRequest) (*m
 
 	// Header with spec metadata
 	if spec.Title != "" {
-		fmt.Fprintf(&b, "# %s", spec.Title)
+		fmt.Fprintf(&b, "%s", spec.Title)
 		if spec.Version != "" {
 			fmt.Fprintf(&b, " (v%s)", spec.Version)
 		}
-		b.WriteString("\n\n")
+		b.WriteString("\n")
 	}
 	if spec.Description != "" {
-		fmt.Fprintf(&b, "%s\n\n", spec.Description)
+		fmt.Fprintf(&b, "%s\n", spec.Description)
 	}
 	if spec.BaseURL != "" {
-		fmt.Fprintf(&b, "**Base URL:** `%s`\n\n", spec.BaseURL)
+		fmt.Fprintf(&b, "Base URL: %s\n", spec.BaseURL)
 	}
+	b.WriteString("\n")
 
 	formatCRDs(&b, crds)
 
@@ -745,83 +746,106 @@ func (h *handlers) handleDescribe(_ context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to map resources: %v", err)), nil
 	}
 
-	// Derive operator name from API group
-	appName := strings.Split(cfg.APIGroup, ".")[0]
-	titleAppName := appName
-	if len(appName) > 0 {
-		titleAppName = strings.ToUpper(appName[:1]) + appName[1:]
-	}
-
 	var b strings.Builder
 
-	// Header
-	fmt.Fprintf(&b, "# %s Operator\n\n", titleAppName)
-	fmt.Fprintf(&b, "**API Group:** `%s`\n", cfg.APIGroup)
-	fmt.Fprintf(&b, "**API Version:** `%s`\n", cfg.APIVersion)
-	fmt.Fprintf(&b, "**Module:** `%s`\n", cfg.ModuleName)
+	// Header with spec metadata
+	if spec.Title != "" {
+		fmt.Fprintf(&b, "%s", spec.Title)
+		if spec.Version != "" {
+			fmt.Fprintf(&b, " (v%s)", spec.Version)
+		}
+		b.WriteString("\n")
+	} else {
+		appName := strings.Split(cfg.APIGroup, ".")[0]
+		titleAppName := appName
+		if len(appName) > 0 {
+			titleAppName = strings.ToUpper(appName[:1]) + appName[1:]
+		}
+		fmt.Fprintf(&b, "%s Operator\n", titleAppName)
+	}
+	if spec.Description != "" {
+		fmt.Fprintf(&b, "%s\n", spec.Description)
+	}
 	b.WriteString("\n")
 
+	fmt.Fprintf(&b, "  API Group:   %s\n", cfg.APIGroup)
+	fmt.Fprintf(&b, "  API Version: %s\n", cfg.APIVersion)
+	fmt.Fprintf(&b, "  Module:      %s\n", cfg.ModuleName)
+	if spec.BaseURL != "" {
+		fmt.Fprintf(&b, "  Base URL:    %s\n", spec.BaseURL)
+	}
+
 	// Spec status with hash comparison
-	fmt.Fprintf(&b, "**Spec:** `%s`", cfg.SpecPath)
+	fmt.Fprintf(&b, "  Spec:        %s", cfg.SpecPath)
 	if cfg.SpecHash != "" {
 		currentHash, hashErr := config.HashSpecFile(cfg.SpecPath)
 		if hashErr == nil {
 			if currentHash == cfg.SpecHash {
 				b.WriteString(" (unchanged since last generation)")
 			} else {
-				b.WriteString(" (modified since last generation — run `diff` to see changes)")
+				b.WriteString(" (MODIFIED since last generation — run diff to see changes)")
 			}
 		}
 	}
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// Generator version status
+	if cfg.GeneratorVersion != "" {
+		if cfg.GeneratorVersion == h.version {
+			fmt.Fprintf(&b, "  Generator:   %s (current)\n", cfg.GeneratorVersion)
+		} else {
+			fmt.Fprintf(&b, "  Generator:   %s → %s available (run regenerate to upgrade)\n", cfg.GeneratorVersion, h.version)
+		}
+	} else {
+		fmt.Fprintf(&b, "  Generator:   unknown (generated before version tracking was added)\n")
+	}
+	b.WriteString("\n")
 
 	// Configuration options
-	b.WriteString("## Configuration\n\n")
-	fmt.Fprintf(&b, "| Option | Value |\n")
-	fmt.Fprintf(&b, "|--------|-------|\n")
-	fmt.Fprintf(&b, "| Mapping mode | %s |\n", cfg.MappingMode)
+	b.WriteString("CONFIGURATION:\n")
+	fmt.Fprintf(&b, "  Mapping mode:       %s\n", cfg.MappingMode)
 	if cfg.GenerateAggregate {
-		b.WriteString("| Aggregate CRD | enabled |\n")
+		b.WriteString("  Aggregate CRD:      enabled\n")
 	}
 	if cfg.GenerateBundle {
-		b.WriteString("| Bundle CRD | enabled |\n")
+		b.WriteString("  Bundle CRD:         enabled\n")
 	}
 	if cfg.GenerateKubectlPlugin {
-		b.WriteString("| kubectl plugin | enabled |\n")
+		b.WriteString("  kubectl plugin:     enabled\n")
 	}
 	if cfg.GenerateRundeckProject {
-		b.WriteString("| Rundeck project | enabled |\n")
+		b.WriteString("  Rundeck project:    enabled\n")
 	}
 	if cfg.GenerateCRDs {
-		b.WriteString("| CRD YAML generation | enabled |\n")
+		b.WriteString("  CRD YAML gen:       enabled\n")
 	}
 	if len(cfg.UpdateWithPost) > 0 {
-		fmt.Fprintf(&b, "| Update with POST | %s |\n", strings.Join(cfg.UpdateWithPost, ", "))
+		fmt.Fprintf(&b, "  Update with POST:   %s\n", strings.Join(cfg.UpdateWithPost, ", "))
 	}
 	if cfg.NoIDMerge {
-		b.WriteString("| ID merge | disabled |\n")
+		b.WriteString("  ID merge:           disabled\n")
 	}
 	if len(cfg.IDFieldMap) > 0 {
 		pairs := make([]string, 0, len(cfg.IDFieldMap))
 		for k, v := range cfg.IDFieldMap {
 			pairs = append(pairs, k+"="+v)
 		}
-		fmt.Fprintf(&b, "| ID field map | %s |\n", strings.Join(pairs, ", "))
+		fmt.Fprintf(&b, "  ID field map:       %s\n", strings.Join(pairs, ", "))
 	}
 	if cfg.TargetAPIImage != "" {
-		fmt.Fprintf(&b, "| Target API image | %s |\n", cfg.TargetAPIImage)
+		fmt.Fprintf(&b, "  Target API image:   %s\n", cfg.TargetAPIImage)
 	}
 	if len(cfg.IncludePaths) > 0 {
-		fmt.Fprintf(&b, "| Include paths | %s |\n", strings.Join(cfg.IncludePaths, ", "))
+		fmt.Fprintf(&b, "  Include paths:      %s\n", strings.Join(cfg.IncludePaths, ", "))
 	}
 	if len(cfg.ExcludePaths) > 0 {
-		fmt.Fprintf(&b, "| Exclude paths | %s |\n", strings.Join(cfg.ExcludePaths, ", "))
+		fmt.Fprintf(&b, "  Exclude paths:      %s\n", strings.Join(cfg.ExcludePaths, ", "))
 	}
 	if len(cfg.IncludeTags) > 0 {
-		fmt.Fprintf(&b, "| Include tags | %s |\n", strings.Join(cfg.IncludeTags, ", "))
+		fmt.Fprintf(&b, "  Include tags:       %s\n", strings.Join(cfg.IncludeTags, ", "))
 	}
 	if len(cfg.ExcludeTags) > 0 {
-		fmt.Fprintf(&b, "| Exclude tags | %s |\n", strings.Join(cfg.ExcludeTags, ", "))
+		fmt.Fprintf(&b, "  Exclude tags:       %s\n", strings.Join(cfg.ExcludeTags, ", "))
 	}
 	b.WriteString("\n")
 
@@ -830,18 +854,18 @@ func (h *handlers) handleDescribe(_ context.Context, req mcp.CallToolRequest) (*
 	b.WriteString("\n")
 
 	// File ownership
-	b.WriteString("## File Ownership\n\n")
-	b.WriteString("**Regenerated** (overwritten on re-generation — do not hand-edit):\n")
-	fmt.Fprintf(&b, "- `api/%s/` — CRD Go types with kubebuilder markers\n", cfg.APIVersion)
-	b.WriteString("- `internal/controller/` — Reconciliation logic for each CRD\n")
-	b.WriteString("- `config/crd/` — CRD YAML manifests\n")
-	b.WriteString("- `main.go` — Controller manager entrypoint\n")
-	b.WriteString("- `Dockerfile`, `Makefile`, `go.mod`\n\n")
-	b.WriteString("**Safe to customize:**\n")
-	b.WriteString("- `config/manager/` — Deployment resource limits, replicas, env vars\n")
-	b.WriteString("- `config/rbac/` — Additional RBAC rules\n")
-	b.WriteString("- `config/samples/` — Example CR YAML files\n")
-	b.WriteString("- `config/default/` — Kustomize overlays\n")
+	b.WriteString("FILE OWNERSHIP:\n\n")
+	b.WriteString("  Regenerated (overwritten on re-generation — do not hand-edit):\n")
+	fmt.Fprintf(&b, "    api/%s/              CRD Go types with kubebuilder markers\n", cfg.APIVersion)
+	b.WriteString("    internal/controller/   Reconciliation logic for each CRD\n")
+	b.WriteString("    config/crd/            CRD YAML manifests\n")
+	b.WriteString("    main.go                Controller manager entrypoint\n")
+	b.WriteString("    Dockerfile, Makefile, go.mod\n\n")
+	b.WriteString("  Safe to customize:\n")
+	b.WriteString("    config/manager/        Deployment resource limits, replicas, env vars\n")
+	b.WriteString("    config/rbac/           Additional RBAC rules\n")
+	b.WriteString("    config/samples/        Example CR YAML files\n")
+	b.WriteString("    config/default/        Kustomize overlays\n")
 
 	return mcp.NewToolResultText(b.String()), nil
 }
@@ -937,9 +961,14 @@ func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.
 	if cfg.SpecHash != "" {
 		currentHash, hashErr := config.HashSpecFile(newSpecPath)
 		if hashErr == nil && currentHash == cfg.SpecHash {
-			return mcp.NewToolResultText(fmt.Sprintf(
-				"No changes detected. The spec is identical to what was last generated from.\n\nSpec: `%s`\nHash: `%s`",
-				newSpecPath, cfg.SpecHash)), nil
+			msg := fmt.Sprintf(
+				"No changes detected. The spec is identical to what was last generated from.\n\nSpec: %s\nHash: %s",
+				newSpecPath, cfg.SpecHash)
+			if cfg.GeneratorVersion != "" && cfg.GeneratorVersion != h.version {
+				msg += fmt.Sprintf("\n\nNote: Generator version has changed (%s → %s). Run regenerate to update generated code.",
+					cfg.GeneratorVersion, h.version)
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
 	}
 
@@ -972,7 +1001,7 @@ func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.
 		if cfg.SpecHash != "" {
 			return mcp.NewToolResultText(fmt.Sprintf(
 				"Spec has changed (hash mismatch) but no previous spec copy found for detailed comparison.\n\n"+
-					"Saved hash: `%s`\nSpec: `%s`\n\nRun `regenerate` to update the operator.",
+					"Saved hash: %s\nSpec: %s\n\nRun regenerate to update the operator.",
 				cfg.SpecHash, newSpecPath)), nil
 		}
 		return mcp.NewToolResultError("No previous spec found to compare against. Generate the operator first."), nil
@@ -1041,9 +1070,15 @@ func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.
 
 	// Format output
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Spec Diff: %s\n\n", filepath.Base(newSpecPath))
-	fmt.Fprintf(&b, "**Summary:** %d added, %d removed, %d changed, %d unchanged\n\n",
+	fmt.Fprintf(&b, "Spec Diff: %s\n", filepath.Base(newSpecPath))
+	fmt.Fprintf(&b, "Summary: %d added, %d removed, %d changed, %d unchanged\n",
 		len(added), len(removed), len(changed), len(unchanged))
+
+	if cfg.GeneratorVersion != "" && cfg.GeneratorVersion != h.version {
+		fmt.Fprintf(&b, "\nNote: Generator version has also changed (%s → %s). Regeneration will update both spec changes and generated code templates.\n",
+			cfg.GeneratorVersion, h.version)
+	}
+	b.WriteString("\n")
 
 	if len(added) == 0 && len(removed) == 0 && len(changed) == 0 {
 		b.WriteString("No changes detected. The spec matches the last generation.\n")
@@ -1051,7 +1086,7 @@ func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.
 	}
 
 	if len(added) > 0 {
-		b.WriteString("## Added CRDs\n\n")
+		b.WriteString("ADDED CRDs:\n")
 		for _, kind := range added {
 			crd := newByKind[kind]
 			crdType := "Resource"
@@ -1060,29 +1095,29 @@ func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.
 			} else if crd.IsAction {
 				crdType = "ActionEndpoint"
 			}
-			fmt.Fprintf(&b, "- **%s** (%s)\n", kind, crdType)
+			fmt.Fprintf(&b, "  + %s (%s)\n", kind, crdType)
 		}
 		b.WriteString("\n")
 	}
 
 	if len(removed) > 0 {
-		b.WriteString("## Removed CRDs\n\n")
+		b.WriteString("REMOVED CRDs:\n")
 		for _, kind := range removed {
-			fmt.Fprintf(&b, "- **%s**\n", kind)
+			fmt.Fprintf(&b, "  - %s\n", kind)
 		}
 		b.WriteString("\n")
 	}
 
 	if len(changed) > 0 {
-		b.WriteString("## Changed CRDs\n\n")
+		b.WriteString("CHANGED CRDs:\n")
 		for _, kind := range changed {
 			changes := compareCRDs(oldByKind[kind], newByKind[kind])
-			fmt.Fprintf(&b, "### %s\n\n", kind)
+			fmt.Fprintf(&b, "\n  %s:\n", kind)
 			for _, change := range changes {
-				fmt.Fprintf(&b, "- %s\n", change)
+				fmt.Fprintf(&b, "    ~ %s\n", change)
 			}
-			b.WriteString("\n")
 		}
+		b.WriteString("\n")
 	}
 
 	return mcp.NewToolResultText(b.String()), nil
@@ -1127,7 +1162,12 @@ func (h *handlers) handleEvolveSpecPrompt(_ context.Context, req mcp.GetPromptRe
    - make generate
    - make build
    - make test
-   Report the results of each step.`
+   Report the results of each step.
+
+7. **Review** the file-level changes using git (if the directory is a git repo):
+   - Run ` + "`git diff --stat`" + ` to show which files changed
+   - Run ` + "`git diff`" + ` on key files if I want to see details
+   - Highlight any files with unexpected changes`
 
 	return mcp.NewGetPromptResult(
 		"Update an operator after OpenAPI spec changes",
@@ -1184,23 +1224,23 @@ func compareCRDs(old, new *mapper.CRDDefinition) []string {
 			if newF.Required {
 				req = " (required)"
 			}
-			changes = append(changes, fmt.Sprintf("Added field: `%s` (%s)%s", name, newF.GoType, req))
+			changes = append(changes, fmt.Sprintf("Added field: %s (%s)%s", name, newF.GoType, req))
 			continue
 		}
 		if oldF.GoType != newF.GoType {
-			changes = append(changes, fmt.Sprintf("Changed field type: `%s` %s → %s", name, oldF.GoType, newF.GoType))
+			changes = append(changes, fmt.Sprintf("Changed field type: %s %s -> %s", name, oldF.GoType, newF.GoType))
 		}
 		if oldF.Required != newF.Required {
 			if newF.Required {
-				changes = append(changes, fmt.Sprintf("Field now required: `%s`", name))
+				changes = append(changes, fmt.Sprintf("Field now required: %s", name))
 			} else {
-				changes = append(changes, fmt.Sprintf("Field now optional: `%s`", name))
+				changes = append(changes, fmt.Sprintf("Field now optional: %s", name))
 			}
 		}
 	}
 	for name := range oldFields {
 		if _, ok := newFields[name]; !ok {
-			changes = append(changes, fmt.Sprintf("Removed field: `%s`", name))
+			changes = append(changes, fmt.Sprintf("Removed field: %s", name))
 		}
 	}
 
@@ -1217,21 +1257,21 @@ func compareCRDs(old, new *mapper.CRDDefinition) []string {
 		for name, newType := range newQP {
 			oldType, ok := oldQP[name]
 			if !ok {
-				changes = append(changes, fmt.Sprintf("Added query param: `%s` (%s)", name, newType))
+				changes = append(changes, fmt.Sprintf("Added query param: %s (%s)", name, newType))
 			} else if oldType != newType {
-				changes = append(changes, fmt.Sprintf("Changed query param type: `%s` %s → %s", name, oldType, newType))
+				changes = append(changes, fmt.Sprintf("Changed query param type: %s %s -> %s", name, oldType, newType))
 			}
 		}
 		for name := range oldQP {
 			if _, ok := newQP[name]; !ok {
-				changes = append(changes, fmt.Sprintf("Removed query param: `%s`", name))
+				changes = append(changes, fmt.Sprintf("Removed query param: %s", name))
 			}
 		}
 	}
 
 	// Compare response type (for query endpoints)
 	if old.IsQuery && new.IsQuery && old.ResponseType != new.ResponseType {
-		changes = append(changes, fmt.Sprintf("Changed response type: %s → %s", old.ResponseType, new.ResponseType))
+		changes = append(changes, fmt.Sprintf("Changed response type: %s -> %s", old.ResponseType, new.ResponseType))
 	}
 
 	return changes
@@ -1326,179 +1366,151 @@ func formatCRDs(b *strings.Builder, crds []*mapper.CRDDefinition) {
 		}
 	}
 
+	// Summary
+	fmt.Fprintf(b, "CRDs: %d total (%d resources, %d queries, %d actions)\n\n",
+		len(crds), len(resources), len(queries), len(actions))
+
 	// Resources (CRUD)
 	if len(resources) > 0 {
-		fmt.Fprintf(b, "## Resources (CRUD) — %d\n", len(resources))
-		b.WriteString("Full lifecycle resources with GET, CREATE, UPDATE, DELETE operations.\n\n")
+		fmt.Fprintf(b, "RESOURCES (CRUD) — %d:\n\n", len(resources))
 		for _, crd := range resources {
-			fmt.Fprintf(b, "### %s\n", crd.Kind)
-			fmt.Fprintf(b, "**Plural:** %s | **Scope:** %s\n", crd.Plural, crd.Scope)
+			fmt.Fprintf(b, "  %s (%s)  scope=%s\n", crd.Kind, crd.Plural, crd.Scope)
 			if crd.Description != "" {
-				fmt.Fprintf(b, "%s\n", crd.Description)
+				fmt.Fprintf(b, "    %s\n", crd.Description)
 			}
-			b.WriteString("\n")
 
-			// Operations table
-			b.WriteString("| Operation | Method | Path |\n")
-			b.WriteString("|-----------|--------|------|\n")
+			// Operations
+			b.WriteString("    Operations:\n")
 			for _, op := range crd.Operations {
-				fmt.Fprintf(b, "| %s | %s | `%s` |\n", op.CRDAction, op.HTTPMethod, op.Path)
+				fmt.Fprintf(b, "      %-8s %s %s\n", op.CRDAction, op.HTTPMethod, op.Path)
 			}
 			if crd.UpdateWithPost {
-				b.WriteString("\n> Uses POST for updates (PUT not available)\n")
+				b.WriteString("      (uses POST for updates — PUT not available)\n")
 			}
-			b.WriteString("\n")
 
 			// Spec fields
 			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
-				b.WriteString("**Spec fields:**\n\n")
-				b.WriteString("| Field | Type | Required |\n")
-				b.WriteString("|-------|------|----------|\n")
+				b.WriteString("    Spec fields:\n")
 				for _, f := range crd.Spec.Fields {
 					req := ""
 					if f.Required {
-						req = "Yes"
+						req = " (required)"
 					}
 					goType := f.GoType
 					if len(f.Enum) > 0 {
 						goType += " enum: " + strings.Join(f.Enum, ", ")
 					}
-					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", f.JSONName, goType, req)
+					fmt.Fprintf(b, "      %-20s %s%s\n", f.JSONName, goType, req)
 				}
-				b.WriteString("\n")
 			}
 
 			// ID field mappings
 			if len(crd.IDFieldMappings) > 0 {
-				b.WriteString("**ID field mappings:** ")
+				b.WriteString("    ID field mappings: ")
 				mappings := make([]string, 0, len(crd.IDFieldMappings))
 				for _, m := range crd.IDFieldMappings {
-					mappings = append(mappings, fmt.Sprintf("`{%s}` -> `%s`", m.PathParam, m.BodyField))
+					mappings = append(mappings, fmt.Sprintf("{%s} -> %s", m.PathParam, m.BodyField))
 				}
 				b.WriteString(strings.Join(mappings, ", "))
-				b.WriteString("\n\n")
+				b.WriteString("\n")
 			}
 
 			if crd.NeedsExternalIDRef {
-				b.WriteString("**Note:** Uses `externalIDRef` to reference existing resources (no path params for identification)\n\n")
+				b.WriteString("    Note: uses externalIDRef to reference existing resources (no path params for identification)\n")
 			}
+			b.WriteString("\n")
 		}
 	}
 
 	// Query Endpoints
 	if len(queries) > 0 {
-		fmt.Fprintf(b, "## Query Endpoints (GET-only) — %d\n", len(queries))
-		b.WriteString("Read-only endpoints that periodically fetch data.\n\n")
+		fmt.Fprintf(b, "QUERY ENDPOINTS (GET-only) — %d:\n\n", len(queries))
 		for _, crd := range queries {
-			fmt.Fprintf(b, "### %s\n", crd.Kind)
-			fmt.Fprintf(b, "**Path:** `GET %s`\n", crd.QueryPath)
+			fmt.Fprintf(b, "  %s (%s)  GET %s\n", crd.Kind, crd.Plural, crd.QueryPath)
 			if crd.Description != "" {
-				fmt.Fprintf(b, "%s\n", crd.Description)
+				fmt.Fprintf(b, "    %s\n", crd.Description)
 			}
-			b.WriteString("\n")
 
 			if crd.ResponseType != "" {
-				fmt.Fprintf(b, "**Response type:** `%s`", crd.ResponseType)
+				fmt.Fprintf(b, "    Response type: %s", crd.ResponseType)
 				if crd.ResponseIsArray {
 					b.WriteString(" (array)")
 				}
 				b.WriteString("\n")
 				if crd.UsesSharedType {
-					fmt.Fprintf(b, "**Reuses type from:** %s\n", crd.ResultItemType)
+					fmt.Fprintf(b, "    Reuses type from: %s\n", crd.ResultItemType)
 				}
-				b.WriteString("\n")
 			}
 
 			// Query parameters
 			if len(crd.QueryParams) > 0 {
-				b.WriteString("**Query parameters:**\n\n")
-				b.WriteString("| Parameter | Type | Required |\n")
-				b.WriteString("|-----------|------|----------|\n")
+				b.WriteString("    Query parameters:\n")
 				for _, qp := range crd.QueryParams {
 					req := ""
 					if qp.Required {
-						req = "Yes"
+						req = " (required)"
 					}
 					goType := qp.GoType
 					if qp.IsArray {
 						goType = "[]" + qp.ItemType
 					}
-					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", qp.JSONName, goType, req)
+					fmt.Fprintf(b, "      %-20s %s%s\n", qp.JSONName, goType, req)
 				}
-				b.WriteString("\n")
 			}
 
 			// Path parameters for query endpoints
 			if len(crd.QueryPathParams) > 0 {
-				b.WriteString("**Path parameters:**\n\n")
-				b.WriteString("| Parameter | Type | Required |\n")
-				b.WriteString("|-----------|------|----------|\n")
+				b.WriteString("    Path parameters:\n")
 				for _, pp := range crd.QueryPathParams {
 					req := ""
 					if pp.Required {
-						req = "Yes"
+						req = " (required)"
 					}
-					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", pp.JSONName, pp.GoType, req)
+					fmt.Fprintf(b, "      %-20s %s%s\n", pp.JSONName, pp.GoType, req)
 				}
-				b.WriteString("\n")
 			}
 
 			// Result fields (when not using a shared type)
 			if !crd.UsesSharedType && len(crd.ResultFields) > 0 {
-				b.WriteString("**Result fields:**\n\n")
-				b.WriteString("| Field | Type |\n")
-				b.WriteString("|-------|------|\n")
+				b.WriteString("    Result fields:\n")
 				for _, f := range crd.ResultFields {
-					fmt.Fprintf(b, "| `%s` | `%s` |\n", f.JSONName, f.GoType)
+					fmt.Fprintf(b, "      %-20s %s\n", f.JSONName, f.GoType)
 				}
-				b.WriteString("\n")
 			}
+			b.WriteString("\n")
 		}
 	}
 
 	// Action Endpoints
 	if len(actions) > 0 {
-		fmt.Fprintf(b, "## Action Endpoints (POST/PUT-only) — %d\n", len(actions))
-		b.WriteString("One-shot or periodic operations.\n\n")
+		fmt.Fprintf(b, "ACTION ENDPOINTS (POST/PUT-only) — %d:\n\n", len(actions))
 		for _, crd := range actions {
-			fmt.Fprintf(b, "### %s\n", crd.Kind)
-			fmt.Fprintf(b, "**Path:** `%s %s`\n", crd.ActionMethod, crd.ActionPath)
+			fmt.Fprintf(b, "  %s (%s)  %s %s\n", crd.Kind, crd.Plural, crd.ActionMethod, crd.ActionPath)
 			if crd.Description != "" {
-				fmt.Fprintf(b, "%s\n", crd.Description)
+				fmt.Fprintf(b, "    %s\n", crd.Description)
 			}
-			b.WriteString("\n")
 
 			if crd.ParentResource != "" {
-				fmt.Fprintf(b, "**Parent resource:** %s (via `%s`)\n", crd.ParentResource, crd.ParentIDParam)
+				fmt.Fprintf(b, "    Parent resource: %s (via %s)\n", crd.ParentResource, crd.ParentIDParam)
 			}
 			if crd.HasBinaryBody {
-				fmt.Fprintf(b, "**Binary upload:** `%s`\n", crd.BinaryContentType)
+				fmt.Fprintf(b, "    Binary upload: %s\n", crd.BinaryContentType)
 			}
 
 			// Spec fields for action
 			if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
-				b.WriteString("\n**Request fields:**\n\n")
-				b.WriteString("| Field | Type | Required |\n")
-				b.WriteString("|-------|------|----------|\n")
+				b.WriteString("    Request fields:\n")
 				for _, f := range crd.Spec.Fields {
 					req := ""
 					if f.Required {
-						req = "Yes"
+						req = " (required)"
 					}
-					fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", f.JSONName, f.GoType, req)
+					fmt.Fprintf(b, "      %-20s %s%s\n", f.JSONName, f.GoType, req)
 				}
 			}
 			b.WriteString("\n")
 		}
 	}
-
-	// Summary
-	b.WriteString("---\n\n")
-	fmt.Fprintf(b, "**Total CRDs:** %d", len(crds))
-	if len(resources) > 0 || len(queries) > 0 || len(actions) > 0 {
-		fmt.Fprintf(b, " (%d resources, %d queries, %d actions)", len(resources), len(queries), len(actions))
-	}
-	b.WriteString("\n")
 }
 
 // parseCommaSeparated splits a comma-separated string into a slice, trimming whitespace.

@@ -336,7 +336,7 @@ func setupUserMCP(binaryPath string) error {
 		return fmt.Errorf("claude CLI not found in PATH: %w\n\nInstall Claude Code first: https://docs.anthropic.com/en/docs/claude-code", err)
 	}
 
-	cmd := exec.Command(claudePath, "mcp", "add", "openapi-operator-gen", "--transport", "stdio", "--", binaryPath, "mcp")
+	cmd := exec.Command(claudePath, "mcp", "add", "openapi-operator-gen", "-s", "user", "--transport", "stdio", "--", binaryPath, "mcp")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
