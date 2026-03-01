@@ -25,11 +25,11 @@ Compare the current OpenAPI spec against what was last generated from. Show:
 
 Answers "what would change if I regenerate now?"
 
-### `explain`
-Given a CRD kind name, explain its reconciliation logic in plain language: what HTTP calls it makes, how it handles create vs update vs delete, what the finalizer does, how drift detection works. Reads the generated controller source and summarizes it.
+### `explain` ✅
+Given a CRD kind name, explain its reconciliation logic in plain language: what HTTP calls it makes, how it handles create vs update vs delete, what the finalizer does, how drift detection works. Derives the explanation from the CRD definition (spec-driven, not source-reading).
 
-### `sample`
-Generate example CR YAML for a given CRD kind, pre-populated with realistic field values from the OpenAPI spec (using enum values, examples, defaults). Tailored to a specific scenario the user describes.
+### `sample` ✅
+Generate example CR YAML for a given CRD kind, pre-populated with realistic field values from the OpenAPI spec (using example values, enum values, type heuristics). Includes comments for endpoint targeting and execution control.
 
 ## Resources (Passive Context)
 

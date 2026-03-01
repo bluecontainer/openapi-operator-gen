@@ -187,6 +187,7 @@ type Schema struct {
 	Ref         string
 	Enum        []interface{}
 	Default     interface{}
+	Example     interface{}
 	Nullable    bool
 	MinLength   *int64
 	MaxLength   *int64
@@ -1458,6 +1459,7 @@ func (p *Parser) convertSchema(name string, schema *openapi3.Schema) *Schema {
 	// Handle enum
 	s.Enum = schema.Enum
 	s.Default = schema.Default
+	s.Example = schema.Example
 
 	// Handle properties for objects
 	if schema.Properties != nil {

@@ -137,6 +137,7 @@ type FieldDefinition struct {
 	Fields      []*FieldDefinition // nested fields for structs
 	ItemType    *FieldDefinition   // for arrays/slices
 	Enum        []string
+	Example     interface{} // OpenAPI example value for this field
 	// PathParamName is set when this field is merged with a path parameter.
 	// The controller uses this to substitute the field value into the URL path.
 	// e.g., for orderId -> id merge, the "id" field will have PathParamName = "orderId"
@@ -1408,6 +1409,11 @@ func (m *Mapper) schemaToFieldDefinition(name string, schema *parser.Schema, isR
 				field.Enum = append(field.Enum, s)
 			}
 		}
+	}
+
+	// Propagate example value from OpenAPI spec
+	if schema.Example != nil {
+		field.Example = schema.Example
 	}
 
 	return field

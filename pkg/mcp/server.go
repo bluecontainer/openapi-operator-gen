@@ -36,6 +36,8 @@ func NewServer(version, commit, date string) *server.MCPServer {
 	s.AddTool(describeTool, h.handleDescribe)
 	s.AddTool(regenerateTool, h.handleRegenerate)
 	s.AddTool(diffTool, h.handleDiff)
+	s.AddTool(explainTool, h.handleExplain)
+	s.AddTool(sampleTool, h.handleSample)
 
 	s.AddPrompt(generateOperatorPrompt, h.handleGenerateOperatorPrompt)
 	s.AddPrompt(previewAPIPrompt, h.handlePreviewAPIPrompt)
@@ -233,6 +235,34 @@ var diffTool = mcp.NewTool("diff",
 	),
 	mcp.WithString("spec",
 		mcp.Description("Override the new spec path to compare against (default: uses spec path from saved config)"),
+	),
+)
+
+var explainTool = mcp.NewTool("explain",
+	mcp.WithDescription("Explain the reconciliation logic for a CRD kind in plain language. Shows what HTTP calls it makes, how create/update/delete work, finalizer behavior, drift detection, and status conditions. Works from the spec — does not require reading generated source code."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("directory",
+		mcp.Required(),
+		mcp.Description("Path to the generated operator directory (must contain .openapi-operator-gen.yaml)"),
+	),
+	mcp.WithString("kind",
+		mcp.Required(),
+		mcp.Description("CRD Kind name to explain (e.g., Pet, FindPetsByStatusQuery)"),
+	),
+)
+
+var sampleTool = mcp.NewTool("sample",
+	mcp.WithDescription("Generate example CR YAML for a CRD kind, pre-populated with realistic field values derived from the OpenAPI spec (example values, enum values, types). Includes comments explaining each field."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("directory",
+		mcp.Required(),
+		mcp.Description("Path to the generated operator directory (must contain .openapi-operator-gen.yaml)"),
+	),
+	mcp.WithString("kind",
+		mcp.Required(),
+		mcp.Description("CRD Kind name to generate a sample for (e.g., Pet, FindPetsByStatusQuery)"),
 	),
 )
 
@@ -1121,6 +1151,512 @@ func (h *handlers) handleDiff(_ context.Context, req mcp.CallToolRequest) (*mcp.
 	}
 
 	return mcp.NewToolResultText(b.String()), nil
+}
+
+// loadCRD loads the config from a generated operator directory, parses the spec,
+// maps to CRDs, and returns the CRD matching the given kind name.
+func (h *handlers) loadCRD(directory, kind string) (*config.Config, *mapper.CRDDefinition, error) {
+	configPath := filepath.Join(directory, ".openapi-operator-gen.yaml")
+	file, err := config.LoadConfigFile(configPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if file == nil {
+		return nil, nil, fmt.Errorf("no .openapi-operator-gen.yaml found in %s", directory)
+	}
+
+	cfg := config.ConfigFromFile(file)
+	cfg.OutputDir = directory
+
+	filter := config.NewPathFilter(cfg)
+	p := parser.NewParserWithFilter(cfg.RootKind, filter)
+	spec, err := p.Parse(cfg.SpecPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse spec at %s: %w", cfg.SpecPath, err)
+	}
+
+	m := mapper.NewMapper(cfg)
+	crds, err := m.MapResources(spec)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to map resources: %w", err)
+	}
+
+	// Find the requested kind (case-insensitive)
+	lowerKind := strings.ToLower(kind)
+	var available []string
+	for _, crd := range crds {
+		available = append(available, crd.Kind)
+		if strings.ToLower(crd.Kind) == lowerKind {
+			return cfg, crd, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf("kind %q not found. Available kinds: %s", kind, strings.Join(available, ", "))
+}
+
+// handleExplain explains the reconciliation logic for a CRD kind in plain language.
+func (h *handlers) handleExplain(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	directory := mcp.ParseString(req, "directory", "")
+	if directory == "" {
+		return mcp.NewToolResultError("'directory' parameter is required"), nil
+	}
+	kind := mcp.ParseString(req, "kind", "")
+	if kind == "" {
+		return mcp.NewToolResultError("'kind' parameter is required"), nil
+	}
+
+	cfg, crd, err := h.loadCRD(directory, kind)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	var b strings.Builder
+
+	switch {
+	case crd.IsQuery:
+		h.explainQuery(&b, cfg, crd)
+	case crd.IsAction:
+		h.explainAction(&b, cfg, crd)
+	default:
+		h.explainResource(&b, cfg, crd)
+	}
+
+	return mcp.NewToolResultText(b.String()), nil
+}
+
+func (h *handlers) explainResource(b *strings.Builder, cfg *config.Config, crd *mapper.CRDDefinition) {
+	fmt.Fprintf(b, "%s (Resource)\n\n", crd.Kind)
+	fmt.Fprintf(b, "API: %s/%s\n", cfg.APIGroup, cfg.APIVersion)
+	if crd.Description != "" {
+		fmt.Fprintf(b, "Description: %s\n", crd.Description)
+	}
+	b.WriteString("\n")
+
+	// Operations
+	b.WriteString("OPERATIONS:\n")
+	for _, op := range crd.Operations {
+		fmt.Fprintf(b, "  %-8s %s %s\n", op.CRDAction, op.HTTPMethod, op.Path)
+	}
+	b.WriteString("\n")
+
+	// Reconciliation flow
+	b.WriteString("RECONCILIATION FLOW:\n\n")
+	step := 1
+
+	fmt.Fprintf(b, "  %d. Fetch the %s CR from Kubernetes.\n", step, crd.Kind)
+	step++
+
+	if crd.HasDelete {
+		fmt.Fprintf(b, "  %d. If the CR is being deleted:\n", step)
+		fmt.Fprintf(b, "     - Send DELETE %s to the REST API to remove the external resource.\n", crd.DeletePath)
+		fmt.Fprintf(b, "     - Remove the finalizer so Kubernetes can complete deletion.\n")
+		step++
+	}
+
+	fmt.Fprintf(b, "  %d. Add a finalizer (if not already present) to ensure cleanup on deletion.\n", step)
+	step++
+
+	fmt.Fprintf(b, "  %d. If spec.paused is true, skip reconciliation and requeue.\n", step)
+	step++
+
+	fmt.Fprintf(b, "  %d. Resolve the target endpoint (static URL, StatefulSet, Deployment, or Helm release).\n", step)
+	step++
+
+	if crd.GetPath != "" {
+		fmt.Fprintf(b, "  %d. GET %s — fetch current state from the REST API (drift detection).\n", step, crd.GetPath)
+		step++
+
+		if crd.HasPost {
+			fmt.Fprintf(b, "  %d. If the resource does not exist, POST to create it.\n", step)
+			step++
+		}
+
+		updateMethod := ""
+		if crd.HasPatch {
+			updateMethod = "PATCH"
+		} else if crd.HasPut {
+			updateMethod = "PUT"
+		} else if crd.UpdateWithPost {
+			updateMethod = "POST (update-with-post mode)"
+		}
+		if updateMethod != "" {
+			fmt.Fprintf(b, "  %d. If drift is detected (CR spec differs from API state), update via %s.\n", step, updateMethod)
+			step++
+		}
+	} else if crd.HasPost {
+		fmt.Fprintf(b, "  %d. POST to create the resource (no GET available for state checking).\n", step)
+		step++
+	}
+
+	fmt.Fprintf(b, "  %d. Update the CR status with the current state and conditions.\n", step)
+	b.WriteString("\n")
+
+	// ID field mappings
+	if len(crd.IDFieldMappings) > 0 {
+		b.WriteString("ID FIELD MAPPINGS:\n")
+		for _, m := range crd.IDFieldMappings {
+			fmt.Fprintf(b, "  Path parameter {%s} maps to spec field \"%s\".\n", m.PathParam, m.BodyField)
+			fmt.Fprintf(b, "  The controller substitutes the field value into the URL when making API calls.\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if crd.UpdateWithPost {
+		b.WriteString("UPDATE WITH POST:\n")
+		b.WriteString("  This resource uses POST for updates because the API does not provide PUT.\n")
+		b.WriteString("  The controller sends the full resource body via POST when drift is detected.\n\n")
+	}
+
+	// Status conditions
+	b.WriteString("STATUS CONDITIONS:\n")
+	b.WriteString("  Ready        — The external resource exists and matches the CR spec (no drift).\n")
+	b.WriteString("  Reconciling  — The controller is actively creating or updating the resource.\n")
+	b.WriteString("  Stalled      — An error occurred (API returned an error, endpoint unreachable).\n\n")
+
+	b.WriteString("STATUS FIELDS:\n")
+	b.WriteString("  state              — Current state: Creating, Active, Updating, Deleting, Failed, Paused\n")
+	b.WriteString("  externalID         — The ID of the resource in the external REST API\n")
+	b.WriteString("  lastSyncTime       — When the controller last successfully synced with the API\n")
+	b.WriteString("  observedGeneration — The CR generation that was last reconciled\n")
+	b.WriteString("  conditions         — Standard Kubernetes conditions (Ready, Reconciling, Stalled)\n")
+}
+
+func (h *handlers) explainQuery(b *strings.Builder, cfg *config.Config, crd *mapper.CRDDefinition) {
+	fmt.Fprintf(b, "%s (Query Endpoint)\n\n", crd.Kind)
+	fmt.Fprintf(b, "API: %s/%s\n", cfg.APIGroup, cfg.APIVersion)
+	fmt.Fprintf(b, "Endpoint: GET %s\n", crd.QueryPath)
+	if crd.Description != "" {
+		fmt.Fprintf(b, "Description: %s\n", crd.Description)
+	}
+	b.WriteString("\n")
+
+	b.WriteString("WHAT THIS DOES:\n")
+	b.WriteString("  Executes a GET query against the REST API and stores the results in the CR status.\n")
+	b.WriteString("  This is a read-only operation — it never creates or modifies external resources.\n\n")
+
+	b.WriteString("EXECUTION FLOW:\n\n")
+	b.WriteString("  1. First execution happens immediately when the CR is created.\n")
+	b.WriteString("  2. If spec.executionInterval is set (e.g., \"5m\"), the query re-executes periodically.\n")
+	b.WriteString("     Without an interval, the query executes once and stops.\n")
+	b.WriteString("  3. Changing the CR spec triggers an immediate re-execution (via observedGeneration tracking).\n")
+	b.WriteString("  4. Set spec.paused to true to stop execution; set to false to resume.\n\n")
+
+	// Parameters
+	if len(crd.QueryPathParams) > 0 {
+		b.WriteString("PATH PARAMETERS (substituted into the URL):\n")
+		for _, pp := range crd.QueryPathParams {
+			req := ""
+			if pp.Required {
+				req = " (required)"
+			}
+			fmt.Fprintf(b, "  %-20s %s%s\n", pp.JSONName, pp.GoType, req)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(crd.QueryParams) > 0 {
+		b.WriteString("QUERY PARAMETERS (appended as ?key=value):\n")
+		for _, qp := range crd.QueryParams {
+			req := ""
+			if qp.Required {
+				req = " (required)"
+			}
+			goType := qp.GoType
+			if qp.IsArray {
+				goType = "[]" + qp.ItemType
+			}
+			fmt.Fprintf(b, "  %-20s %s%s\n", qp.JSONName, goType, req)
+		}
+		b.WriteString("\n")
+	}
+
+	// Response
+	if crd.ResponseType != "" {
+		fmt.Fprintf(b, "RESPONSE TYPE: %s", crd.ResponseType)
+		if crd.ResponseIsArray {
+			b.WriteString(" (array)")
+		}
+		b.WriteString("\n")
+		if len(crd.ResultFields) > 0 && !crd.UsesSharedType {
+			b.WriteString("Result fields:\n")
+			for _, f := range crd.ResultFields {
+				fmt.Fprintf(b, "  %-20s %s\n", f.JSONName, f.GoType)
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("MULTI-ENDPOINT BEHAVIOR:\n")
+	b.WriteString("  When targeting multiple endpoints (fan-out), the query is sent to all endpoints.\n")
+	b.WriteString("  Results from each endpoint are stored separately in status.results.\n\n")
+
+	b.WriteString("STATUS FIELDS:\n")
+	b.WriteString("  state              — Current state: Pending, Queried, Failed, Paused\n")
+	b.WriteString("  results            — Query results per endpoint (typed if response schema is defined)\n")
+	b.WriteString("  lastQueryTime      — When the last query was executed\n")
+	b.WriteString("  nextExecutionTime  — When the next periodic execution is scheduled\n")
+	b.WriteString("  executionCount     — Total number of times the query has executed\n")
+	b.WriteString("  observedGeneration — The CR generation that was last processed\n")
+	b.WriteString("  conditions         — Ready, Reconciling, Stalled\n")
+}
+
+func (h *handlers) explainAction(b *strings.Builder, cfg *config.Config, crd *mapper.CRDDefinition) {
+	fmt.Fprintf(b, "%s (Action Endpoint)\n\n", crd.Kind)
+	fmt.Fprintf(b, "API: %s/%s\n", cfg.APIGroup, cfg.APIVersion)
+	fmt.Fprintf(b, "Endpoint: %s %s\n", crd.ActionMethod, crd.ActionPath)
+	if crd.Description != "" {
+		fmt.Fprintf(b, "Description: %s\n", crd.Description)
+	}
+	b.WriteString("\n")
+
+	b.WriteString("WHAT THIS DOES:\n")
+	fmt.Fprintf(b, "  Executes a %s request against the REST API.\n", crd.ActionMethod)
+	b.WriteString("  This is a one-shot or periodic action — it does not track ongoing resource state.\n\n")
+
+	if crd.ParentResource != "" {
+		b.WriteString("PARENT RESOURCE:\n")
+		fmt.Fprintf(b, "  This action operates on a %s resource, identified by spec.%s.\n",
+			crd.ParentResource, crd.ParentIDParam)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("EXECUTION FLOW:\n\n")
+	b.WriteString("  1. First execution happens immediately when the CR is created.\n")
+	b.WriteString("  2. If spec.executionInterval is set, the action re-executes periodically.\n")
+	b.WriteString("     Without an interval, the action executes once (one-shot mode).\n")
+	b.WriteString("  3. Changing the CR spec triggers an immediate re-execution.\n")
+	b.WriteString("  4. Set spec.paused to true to stop execution; set to false to resume.\n\n")
+
+	if crd.HasBinaryBody {
+		b.WriteString("BINARY UPLOAD:\n")
+		fmt.Fprintf(b, "  Content type: %s\n", crd.BinaryContentType)
+		b.WriteString("  Binary data can be provided from 4 sources (mutually exclusive):\n")
+		b.WriteString("    spec.data         — Inline base64-encoded data\n")
+		b.WriteString("    spec.dataFrom     — Reference to a ConfigMap or Secret key\n")
+		b.WriteString("    spec.dataURL      — URL to fetch the data from\n")
+		b.WriteString("    spec.dataFromFile — Local file path on the operator pod\n\n")
+	}
+
+	// Request fields
+	if crd.Spec != nil && len(crd.Spec.Fields) > 0 {
+		b.WriteString("REQUEST FIELDS:\n")
+		for _, f := range crd.Spec.Fields {
+			req := ""
+			if f.Required {
+				req = " (required)"
+			}
+			fmt.Fprintf(b, "  %-20s %s%s\n", f.JSONName, f.GoType, req)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("STATUS FIELDS:\n")
+	b.WriteString("  state              — Current state: Pending, Executing, Completed, Failed\n")
+	b.WriteString("  result             — Action response per endpoint\n")
+	b.WriteString("  executedAt         — When the action was last executed\n")
+	b.WriteString("  completedAt        — When the action last completed\n")
+	b.WriteString("  httpStatusCode     — HTTP status code from the API response\n")
+	b.WriteString("  executionCount     — Total number of times the action has executed\n")
+	b.WriteString("  observedGeneration — The CR generation that was last processed\n")
+	b.WriteString("  conditions         — Ready, Reconciling, Stalled\n")
+}
+
+// handleSample generates example CR YAML for a CRD kind.
+func (h *handlers) handleSample(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	directory := mcp.ParseString(req, "directory", "")
+	if directory == "" {
+		return mcp.NewToolResultError("'directory' parameter is required"), nil
+	}
+	kind := mcp.ParseString(req, "kind", "")
+	if kind == "" {
+		return mcp.NewToolResultError("'kind' parameter is required"), nil
+	}
+
+	cfg, crd, err := h.loadCRD(directory, kind)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	var b strings.Builder
+
+	// YAML header
+	fmt.Fprintf(&b, "apiVersion: %s/%s\n", cfg.APIGroup, cfg.APIVersion)
+	fmt.Fprintf(&b, "kind: %s\n", crd.Kind)
+	b.WriteString("metadata:\n")
+	fmt.Fprintf(&b, "  name: %s-sample\n", strings.ToLower(crd.Kind))
+	b.WriteString("  namespace: default\n")
+	b.WriteString("spec:\n")
+
+	// Spec fields
+	if crd.Spec != nil {
+		for _, f := range crd.Spec.Fields {
+			// Skip targeting fields — show them as comments at the end
+			if isTargetField(f.JSONName) {
+				continue
+			}
+			// Skip binary data fields for actions — show them as comments
+			if crd.IsAction && crd.HasBinaryBody && isBinaryField(f.JSONName) {
+				continue
+			}
+
+			val := sampleValue(f)
+			if f.Description != "" {
+				fmt.Fprintf(&b, "  # %s\n", f.Description)
+			}
+			if len(f.Enum) > 0 {
+				fmt.Fprintf(&b, "  # Allowed values: %s\n", strings.Join(f.Enum, ", "))
+			}
+			fmt.Fprintf(&b, "  %s: %s\n", f.JSONName, val)
+		}
+	}
+
+	// Query/Action-specific commented fields
+	if crd.IsQuery || crd.IsAction {
+		b.WriteString("\n  # Execution control\n")
+		b.WriteString("  # executionInterval: 5m  # Re-execute periodically (omit for one-shot)\n")
+		b.WriteString("  # paused: false          # Set to true to pause execution\n")
+	}
+
+	// Binary upload fields for actions
+	if crd.IsAction && crd.HasBinaryBody {
+		b.WriteString("\n  # Binary upload (choose one source)\n")
+		b.WriteString("  # data: \"<base64-encoded-data>\"\n")
+		b.WriteString("  # dataFrom:\n")
+		b.WriteString("  #   configMapRef:\n")
+		b.WriteString("  #     name: my-data\n")
+		b.WriteString("  #     key: file.bin\n")
+		b.WriteString("  # dataURL: \"https://example.com/file.bin\"\n")
+		b.WriteString("  # dataFromFile:\n")
+		b.WriteString("  #   path: /data/file.bin\n")
+		if crd.BinaryContentType != "" {
+			fmt.Fprintf(&b, "  # contentType: %q\n", crd.BinaryContentType)
+		}
+	}
+
+	// Endpoint targeting (commented)
+	b.WriteString("\n  # Endpoint targeting (optional)\n")
+	b.WriteString("  # target:\n")
+	b.WriteString("  #   namespace: target-namespace\n")
+	b.WriteString("  #   statefulSet: my-statefulset\n")
+	b.WriteString("  #   deployment: my-deployment\n")
+	b.WriteString("  #   helmRelease: my-release\n")
+	b.WriteString("  #   podOrdinal: 0\n")
+	b.WriteString("  #   baseURL: \"http://api.example.com:8080\"\n")
+
+	return mcp.NewToolResultText(b.String()), nil
+}
+
+// sampleValue returns an example YAML value for a field, using the priority:
+// spec example → enum → type heuristic.
+func sampleValue(f *mapper.FieldDefinition) string {
+	// 1. Use OpenAPI example value if available
+	if f.Example != nil {
+		return formatExampleValue(f.Example)
+	}
+
+	// 2. Use first enum value
+	if len(f.Enum) > 0 {
+		return fmt.Sprintf("%q", f.Enum[0])
+	}
+
+	// 3. Type-based heuristics
+	goType := strings.TrimPrefix(f.GoType, "*")
+
+	switch goType {
+	case "string":
+		return fmt.Sprintf("%q", "example-"+f.JSONName)
+	case "int", "int32", "int64":
+		return "1"
+	case "float32", "float64":
+		return "1.5"
+	case "bool":
+		return "true"
+	case "metav1.Time":
+		return `"2024-01-15T09:30:00Z"`
+	case "metav1.Duration":
+		return `"5m"`
+	case "[]string":
+		return `["item1", "item2"]`
+	case "[]int", "[]int32", "[]int64":
+		return "[1, 2, 3]"
+	default:
+		if strings.HasPrefix(goType, "[]") {
+			// Array of objects — render one example item
+			if f.ItemType != nil && len(f.ItemType.Fields) > 0 {
+				return sampleNestedArray(f.ItemType.Fields)
+			}
+			return "[]"
+		}
+		// Nested object
+		if len(f.Fields) > 0 {
+			return sampleNestedObject(f.Fields, "  ")
+		}
+		return "{}"
+	}
+}
+
+func sampleNestedObject(fields []*mapper.FieldDefinition, indent string) string {
+	var b strings.Builder
+	b.WriteString("\n")
+	for _, f := range fields {
+		val := sampleValue(f)
+		fmt.Fprintf(&b, "%s  %s: %s\n", indent, f.JSONName, val)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func sampleNestedArray(fields []*mapper.FieldDefinition) string {
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString("    - ")
+	for i, f := range fields {
+		val := sampleValue(f)
+		if i == 0 {
+			fmt.Fprintf(&b, "%s: %s\n", f.JSONName, val)
+		} else {
+			fmt.Fprintf(&b, "      %s: %s\n", f.JSONName, val)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// formatExampleValue formats an OpenAPI example value for YAML output.
+func formatExampleValue(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return fmt.Sprintf("%q", val)
+	case float64:
+		if val == float64(int64(val)) {
+			return fmt.Sprintf("%d", int64(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case nil:
+		return "null"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+func isTargetField(name string) bool {
+	switch name {
+	case "target", "targetNamespace", "targetStatefulSet", "targetDeployment",
+		"targetHelmRelease", "targetPodOrdinal":
+		return true
+	}
+	return false
+}
+
+func isBinaryField(name string) bool {
+	switch name {
+	case "data", "dataFrom", "dataURL", "dataFromFile", "contentType":
+		return true
+	}
+	return false
 }
 
 // handleEvolveSpecPrompt returns instructions for evolving an operator after spec changes.
