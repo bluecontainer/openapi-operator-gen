@@ -89,4 +89,13 @@ Before committing changes, always:
 
 1. Run `make build` to ensure code compiles cleanly
 2. Run `make test` to verify all tests pass
-3. **Evaluate whether `README.md` needs updates** — if your changes affect user-facing behavior, CLI flags, configuration options, supported features, architecture, or usage instructions, update `README.md` accordingly before committing
+3. Run `make example` to regenerate the petstore example operator
+4. Build the generated example:
+   ```bash
+   cd examples/generated && go mod tidy && make generate manifests && cd ../..
+   ```
+5. Test the generated example:
+   ```bash
+   cd examples/generated && make test && cd ../..
+   ```
+6. **Evaluate whether `README.md` needs updates** — if your changes affect user-facing behavior, CLI flags, configuration options, supported features, architecture, or usage instructions, update `README.md` accordingly before committing

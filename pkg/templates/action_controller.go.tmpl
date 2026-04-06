@@ -316,12 +316,13 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 			if target != nil {
 				podOrdinal = target.PodOrdinal
 			}
-			// Build narrowing options from co-specified StatefulSet/Deployment/Labels
+			// Build narrowing options from co-specified StatefulSet/Deployment/DaemonSet/Labels
 			var opts *endpoint.HelmReleaseDiscoveryOptions
-			if target.StatefulSet != "" || target.Deployment != "" || len(target.Labels) > 0 {
+			if target.StatefulSet != "" || target.Deployment != "" || target.DaemonSet != "" || len(target.Labels) > 0 {
 				opts = &endpoint.HelmReleaseDiscoveryOptions{
 					StatefulSetName: target.StatefulSet,
 					DeploymentName:  target.Deployment,
+					DaemonSetName:   target.DaemonSet,
 					Labels:          target.Labels,
 				}
 			}
@@ -338,6 +339,11 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 
 		if target != nil && target.Deployment != "" {
 			return r.EndpointResolver.GetEndpointForDeployment(ctx, target.Deployment, namespace)
+		}
+
+		// Per-CR DaemonSet targeting (standalone, without Helm release)
+		if target != nil && target.DaemonSet != "" {
+			return r.EndpointResolver.GetEndpointForDaemonSet(ctx, target.DaemonSet, namespace, "")
 		}
 
 		// Global pod-name targeting (from operator flags)
@@ -359,22 +365,32 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 
 // resolveAllHealthyEndpoints returns all healthy endpoint URLs based on CR targeting fields.
 // This is used for all-healthy strategy fan-out operations.
-func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]string, error) {
+func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]endpoint.ResolvedEndpoint, error) {
 	target := instance.Spec.Target
 
 	// Per-CR static base URLs array takes highest priority (fan-out to all)
 	if target != nil && len(target.BaseURLs) > 0 {
-		return target.BaseURLs, nil
+		eps := make([]endpoint.ResolvedEndpoint, len(target.BaseURLs))
+		for i, u := range target.BaseURLs {
+			eps[i] = endpoint.ResolvedEndpoint{URL: u}
+		}
+		return eps, nil
 	}
 
 	// Per-CR static base URL (single endpoint)
 	if target != nil && target.BaseURL != "" {
-		return []string{target.BaseURL}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: target.BaseURL},
+		}, nil
 	}
 
 	// Global static base URLs (from --base-urls flag or REST_API_BASE_URLS env var)
 	if len(r.BaseURLs) > 0 {
-		return r.BaseURLs, nil
+		eps := make([]endpoint.ResolvedEndpoint, len(r.BaseURLs))
+		for i, u := range r.BaseURLs {
+			eps[i] = endpoint.ResolvedEndpoint{URL: u}
+		}
+		return eps, nil
 	}
 
 	if r.EndpointResolver == nil {
@@ -383,7 +399,9 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		return []string{url}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: url},
+		}, nil
 	}
 
 	namespace := instance.Namespace
@@ -397,16 +415,19 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		return []string{url}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: url, PodName: target.Pod},
+		}, nil
 	}
 
 	// Per-CR Helm release targeting
 	if target != nil && target.HelmRelease != "" {
 		var opts *endpoint.HelmReleaseDiscoveryOptions
-		if target.StatefulSet != "" || target.Deployment != "" || len(target.Labels) > 0 {
+		if target.StatefulSet != "" || target.Deployment != "" || target.DaemonSet != "" || len(target.Labels) > 0 {
 			opts = &endpoint.HelmReleaseDiscoveryOptions{
 				StatefulSetName: target.StatefulSet,
 				DeploymentName:  target.Deployment,
+				DaemonSetName:   target.DaemonSet,
 				Labels:          target.Labels,
 			}
 		}
@@ -423,13 +444,21 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		return r.EndpointResolver.GetAllEndpointsForDeployment(ctx, target.Deployment, namespace)
 	}
 
+	// Per-CR DaemonSet targeting (standalone, without Helm release)
+	if target != nil && target.DaemonSet != "" {
+		return r.EndpointResolver.GetAllEndpointsForDaemonSet(ctx, target.DaemonSet, namespace)
+	}
+
 	// Global pod-name targeting (returns single endpoint)
 	if r.EndpointResolver.IsPodConfigured() {
-		url, err := r.EndpointResolver.GetEndpointForPod(ctx, r.EndpointResolver.GetConfiguredPodName(), namespace)
+		podName := r.EndpointResolver.GetConfiguredPodName()
+		url, err := r.EndpointResolver.GetEndpointForPod(ctx, podName, namespace)
 		if err != nil {
 			return nil, err
 		}
-		return []string{url}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: url, PodName: podName},
+		}, nil
 	}
 
 	// Fall back to global all-healthy endpoints
@@ -742,13 +771,13 @@ func (r *{{ .Kind }}Reconciler) executeAction(ctx context.Context, instance *{{ 
 		(target != nil && len(target.BaseURLs) > 1) ||
 		len(r.BaseURLs) > 1
 	if usesFanOut {
-		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
+		resolvedEndpoints, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			r.updateStatus(ctx, instance, "Failed", fmt.Sprintf("Failed to get all healthy endpoints: %v", err), 0, 0, 0)
 			return err
 		}
 
-		if len(baseURLs) > 1 {
+		if len(resolvedEndpoints) > 1 {
 			// Multiple endpoints - execute on all
 			responses := make(map[string]{{ .APIVersion }}.{{ .Kind }}EndpointResponse)
 			successCount := 0
@@ -761,17 +790,17 @@ func (r *{{ .Kind }}Reconciler) executeAction(ctx context.Context, instance *{{ 
 {{- end }}
 {{- end }}
 
-			for _, baseURL := range baseURLs {
+			for _, ep := range resolvedEndpoints {
 				endpointResp := {{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					ExecutedAt: &now,
 				}
 
-				respBody, statusCode, err := r.executeActionToEndpoint(ctx, instance, baseURL, body)
+				respBody, statusCode, err := r.executeActionToEndpoint(ctx, instance, ep.URL, body)
 				if err != nil {
 					endpointResp.Success = false
 					endpointResp.StatusCode = statusCode
 					endpointResp.Error = err.Error()
-					logger.Info("Action failed for endpoint", "endpoint", baseURL, "error", err)
+					logger.Info("Action failed for endpoint", "endpoint", ep.URL, "pod", ep.PodName, "error", err)
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = statusCode
@@ -781,7 +810,7 @@ func (r *{{ .Kind }}Reconciler) executeAction(ctx context.Context, instance *{{ 
 					if parseErr != nil {
 						endpointResp.Success = false
 						endpointResp.Error = parseErr.Error()
-						logger.Info("Action succeeded but failed to parse response", "endpoint", baseURL, "error", parseErr)
+						logger.Info("Action succeeded but failed to parse response", "endpoint", ep.URL, "pod", ep.PodName, "error", parseErr)
 					} else {
 						endpointResp.Data = data
 						successCount++
@@ -789,7 +818,7 @@ func (r *{{ .Kind }}Reconciler) executeAction(ctx context.Context, instance *{{ 
 							firstStatusCode = statusCode
 							firstResult = data
 						}
-						logger.Info("Action succeeded for endpoint", "endpoint", baseURL, "statusCode", statusCode)
+						logger.Info("Action succeeded for endpoint", "endpoint", ep.URL, "pod", ep.PodName, "statusCode", statusCode)
 					}
 {{- else }}
 					endpointResp.Data = &k8sruntime.RawExtension{Raw: respBody}
@@ -797,17 +826,21 @@ func (r *{{ .Kind }}Reconciler) executeAction(ctx context.Context, instance *{{ 
 					if firstStatusCode == 0 {
 						firstStatusCode = statusCode
 					}
-					logger.Info("Action succeeded for endpoint", "endpoint", baseURL, "statusCode", statusCode)
+					logger.Info("Action succeeded for endpoint", "endpoint", ep.URL, "pod", ep.PodName, "statusCode", statusCode)
 {{- end }}
 				}
 
-				responses[baseURL] = endpointResp
+				key := ep.PodName
+				if key == "" {
+					key = ep.URL
+				}
+				responses[key] = endpointResp
 			}
 
 			// Update status with all responses
 			instance.Status.Responses = responses
 			instance.Status.SuccessCount = successCount
-			instance.Status.TotalEndpoints = len(baseURLs)
+			instance.Status.TotalEndpoints = len(resolvedEndpoints)
 
 			// Store first successful result as EndpointResponse
 			if firstStatusCode != 0 {
@@ -824,12 +857,12 @@ func (r *{{ .Kind }}Reconciler) executeAction(ctx context.Context, instance *{{ 
 			}
 
 			if successCount == 0 {
-				r.updateStatus(ctx, instance, "Failed", fmt.Sprintf("Action failed on all %d endpoints", len(baseURLs)), 0, successCount, len(baseURLs))
+				r.updateStatus(ctx, instance, "Failed", fmt.Sprintf("Action failed on all %d endpoints", len(resolvedEndpoints)), 0, successCount, len(resolvedEndpoints))
 				return fmt.Errorf("action failed on all endpoints")
 			}
 
-			message := fmt.Sprintf("Action executed on %d/%d endpoints", successCount, len(baseURLs))
-			r.updateStatus(ctx, instance, "Completed", message, firstStatusCode, successCount, len(baseURLs))
+			message := fmt.Sprintf("Action executed on %d/%d endpoints", successCount, len(resolvedEndpoints))
+			r.updateStatus(ctx, instance, "Completed", message, firstStatusCode, successCount, len(resolvedEndpoints))
 			return nil
 		}
 	}

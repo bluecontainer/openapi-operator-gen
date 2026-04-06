@@ -1,0 +1,19 @@
+spec: examples/petstore.1.0.27.yaml
+output: examples/generated
+group: petstore.example.com
+version: v1alpha1
+module: github.com/bluecontainer/petstore-operator
+rootKind: Petstore
+aggregate: true
+bundle: true
+filters:
+    excludeOperations:
+        - updatePetWithForm
+updateWithPost:
+    - /store/order
+kubectlPlugin: true
+rundeckProject: true
+targetAPIImage: docker.io/swaggerapi/petstore3:unstable
+managedCRs: examples/managed-crs
+specHash: sha256:389a6ea70534f209a045c51c3afde822d48936a4d812362feb6c19c9b7e52c16
+generatorVersion: v0.0.17-4-g57d58f3-dirty

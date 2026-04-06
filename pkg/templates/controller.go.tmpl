@@ -961,32 +961,32 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 		(target != nil && len(target.BaseURLs) > 1) ||
 		len(r.BaseURLs) > 1
 	if usesFanOut {
-		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
+		resolvedEndpoints, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
 
-		if len(baseURLs) > 1 {
+		if len(resolvedEndpoints) > 1 {
 			// Multiple endpoints - collect responses from all
 			responses := make(map[string]{{ .APIVersion }}.{{ .Kind }}EndpointResponse)
 			successCount := 0
 			var firstSuccessBody []byte
 
-			for _, baseURL := range baseURLs {
+			for _, ep := range resolvedEndpoints {
 				endpointResp := {{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					LastUpdated: &now,
 				}
 
-				respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
+				respData, body, err := r.getResource(ctx, ep.URL, externalID, instance)
 				if err != nil {
 					endpointResp.Success = false
 					endpointResp.Error = err.Error()
-					logger.Info("Failed to observe from endpoint", "endpoint", baseURL, "error", err)
+					logger.Info("Failed to observe from endpoint", "endpoint", ep.URL, "pod", ep.PodName, "error", err)
 				} else if respData == nil {
 					endpointResp.Success = false
 					endpointResp.StatusCode = 404
 					endpointResp.Error = fmt.Sprintf("resource %s not found", externalID)
-					logger.Info("Resource not found at endpoint", "endpoint", baseURL, "externalID", externalID)
+					logger.Info("Resource not found at endpoint", "endpoint", ep.URL, "pod", ep.PodName, "externalID", externalID)
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = 200
@@ -995,10 +995,14 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 					if firstSuccessBody == nil {
 						firstSuccessBody = body
 					}
-					logger.Info("Successfully observed from endpoint", "endpoint", baseURL, "externalID", externalID)
+					logger.Info("Successfully observed from endpoint", "endpoint", ep.URL, "pod", ep.PodName, "externalID", externalID)
 				}
 
-				responses[baseURL] = endpointResp
+				key := ep.PodName
+				if key == "" {
+					key = ep.URL
+				}
+				responses[key] = endpointResp
 			}
 
 			// Update status with all responses
@@ -1020,11 +1024,11 @@ func (r *{{ .Kind }}Reconciler) observeResource(ctx context.Context, instance *{
 			}
 
 			if successCount == 0 {
-				r.updateStatus(ctx, instance, "NotFound", fmt.Sprintf("Resource %s not found in any endpoint (%d endpoints queried)", externalID, len(baseURLs)))
+				r.updateStatus(ctx, instance, "NotFound", fmt.Sprintf("Resource %s not found in any endpoint (%d endpoints queried)", externalID, len(resolvedEndpoints)))
 				return nil
 			}
 
-			message := fmt.Sprintf("Successfully observed from %d/%d endpoints", successCount, len(baseURLs))
+			message := fmt.Sprintf("Successfully observed from %d/%d endpoints", successCount, len(resolvedEndpoints))
 			logger.Info(message, "externalID", externalID)
 			r.updateStatus(ctx, instance, "Observed", message)
 			return nil
@@ -1098,12 +1102,12 @@ func (r *{{ .Kind }}Reconciler) observeResourceForDrift(ctx context.Context, ins
 		(target != nil && len(target.BaseURLs) > 1) ||
 		len(r.BaseURLs) > 1
 	if usesFanOut {
-		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
+		resolvedEndpoints, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			return false, fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
 
-		if len(baseURLs) > 1 {
+		if len(resolvedEndpoints) > 1 {
 			// Multiple endpoints - collect responses from all and detect drift
 			responses := make(map[string]{{ .APIVersion }}.{{ .Kind }}EndpointResponse)
 			successCount := 0
@@ -1111,21 +1115,21 @@ func (r *{{ .Kind }}Reconciler) observeResourceForDrift(ctx context.Context, ins
 			var firstSuccessBody []byte
 			anyDrift := false
 
-			for _, baseURL := range baseURLs {
+			for _, ep := range resolvedEndpoints {
 				endpointResp := {{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					LastUpdated: &now,
 				}
 
-				respData, body, err := r.getResource(ctx, baseURL, externalID, instance)
+				respData, body, err := r.getResource(ctx, ep.URL, externalID, instance)
 				if err != nil {
 					endpointResp.Success = false
 					endpointResp.Error = err.Error()
-					logger.Info("Failed to observe from endpoint while paused", "endpoint", baseURL, "error", err)
+					logger.Info("Failed to observe from endpoint while paused", "endpoint", ep.URL, "pod", ep.PodName, "error", err)
 				} else if respData == nil {
 					endpointResp.Success = false
 					endpointResp.StatusCode = 404
 					endpointResp.Error = fmt.Sprintf("resource %s not found", externalID)
-					logger.Info("Resource not found at endpoint while paused", "endpoint", baseURL, "externalID", externalID)
+					logger.Info("Resource not found at endpoint while paused", "endpoint", ep.URL, "pod", ep.PodName, "externalID", externalID)
 				} else {
 					endpointResp.Success = true
 					endpointResp.StatusCode = 200
@@ -1140,11 +1144,15 @@ func (r *{{ .Kind }}Reconciler) observeResourceForDrift(ctx context.Context, ins
 					hasDriftForEndpoint := r.compareSpecWithResponse(instance, respData)
 					if hasDriftForEndpoint {
 						anyDrift = true
-						logger.Info("Drift detected at endpoint while paused", "endpoint", baseURL, "externalID", externalID)
+						logger.Info("Drift detected at endpoint while paused", "endpoint", ep.URL, "pod", ep.PodName, "externalID", externalID)
 					}
 				}
 
-				responses[baseURL] = endpointResp
+				key := ep.PodName
+				if key == "" {
+					key = ep.URL
+				}
+				responses[key] = endpointResp
 			}
 
 			// Update status with all responses
@@ -1173,7 +1181,7 @@ func (r *{{ .Kind }}Reconciler) observeResourceForDrift(ctx context.Context, ins
 							attribute.String("resource.name", instance.Name),
 							attribute.String("resource.namespace", instance.Namespace),
 						))
-					logger.Info("Drift detected while paused (multi-endpoint)", "externalID", externalID, "endpoints", len(baseURLs))
+					logger.Info("Drift detected while paused (multi-endpoint)", "externalID", externalID, "endpoints", len(resolvedEndpoints))
 				} else {
 					logger.Info("Drift cleared while paused (multi-endpoint)", "externalID", externalID)
 				}
@@ -1279,12 +1287,13 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 			if target != nil {
 				podOrdinal = target.PodOrdinal
 			}
-			// Build narrowing options from co-specified StatefulSet/Deployment/Labels
+			// Build narrowing options from co-specified StatefulSet/Deployment/DaemonSet/Labels
 			var opts *endpoint.HelmReleaseDiscoveryOptions
-			if target.StatefulSet != "" || target.Deployment != "" || len(target.Labels) > 0 {
+			if target.StatefulSet != "" || target.Deployment != "" || target.DaemonSet != "" || len(target.Labels) > 0 {
 				opts = &endpoint.HelmReleaseDiscoveryOptions{
 					StatefulSetName: target.StatefulSet,
 					DeploymentName:  target.Deployment,
+					DaemonSetName:   target.DaemonSet,
 					Labels:          target.Labels,
 				}
 			}
@@ -1305,6 +1314,11 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 			return r.EndpointResolver.GetEndpointForDeployment(ctx, target.Deployment, namespace)
 		}
 
+		// Per-CR DaemonSet targeting (standalone, without Helm release)
+		if target != nil && target.DaemonSet != "" {
+			return r.EndpointResolver.GetEndpointForDaemonSet(ctx, target.DaemonSet, namespace, "")
+		}
+
 		// Global pod-name targeting (from operator flags)
 		if r.EndpointResolver.IsPodConfigured() {
 			return r.EndpointResolver.GetEndpointForPod(ctx, r.EndpointResolver.GetConfiguredPodName(), namespace)
@@ -1323,24 +1337,35 @@ func (r *{{ .Kind }}Reconciler) resolveBaseURL(ctx context.Context, instance *{{
 	return r.getBaseURL(ctx)
 }
 
-// resolveAllHealthyEndpoints returns all healthy endpoint URLs based on CR targeting fields.
+// resolveAllHealthyEndpoints returns all healthy endpoints based on CR targeting fields.
 // This is used for all-healthy strategy fan-out operations.
-func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]string, error) {
+// Each ResolvedEndpoint carries both the URL (for HTTP calls) and the PodName (for map keys).
+func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, instance *{{ .APIVersion }}.{{ .Kind }}) ([]endpoint.ResolvedEndpoint, error) {
 	target := instance.Spec.Target
 
 	// Per-CR static base URLs array takes highest priority (fan-out to all)
 	if target != nil && len(target.BaseURLs) > 0 {
-		return target.BaseURLs, nil
+		eps := make([]endpoint.ResolvedEndpoint, len(target.BaseURLs))
+		for i, u := range target.BaseURLs {
+			eps[i] = endpoint.ResolvedEndpoint{URL: u}
+		}
+		return eps, nil
 	}
 
 	// Per-CR static base URL (single endpoint)
 	if target != nil && target.BaseURL != "" {
-		return []string{target.BaseURL}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: target.BaseURL},
+		}, nil
 	}
 
 	// Global static base URLs (from --base-urls flag or REST_API_BASE_URLS env var)
 	if len(r.BaseURLs) > 0 {
-		return r.BaseURLs, nil
+		eps := make([]endpoint.ResolvedEndpoint, len(r.BaseURLs))
+		for i, u := range r.BaseURLs {
+			eps[i] = endpoint.ResolvedEndpoint{URL: u}
+		}
+		return eps, nil
 	}
 
 	if r.EndpointResolver == nil {
@@ -1349,7 +1374,9 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		return []string{url}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: url},
+		}, nil
 	}
 
 	namespace := instance.Namespace
@@ -1363,16 +1390,19 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		return []string{url}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: url, PodName: target.Pod},
+		}, nil
 	}
 
 	// Per-CR Helm release targeting
 	if target != nil && target.HelmRelease != "" {
 		var opts *endpoint.HelmReleaseDiscoveryOptions
-		if target.StatefulSet != "" || target.Deployment != "" || len(target.Labels) > 0 {
+		if target.StatefulSet != "" || target.Deployment != "" || target.DaemonSet != "" || len(target.Labels) > 0 {
 			opts = &endpoint.HelmReleaseDiscoveryOptions{
 				StatefulSetName: target.StatefulSet,
 				DeploymentName:  target.Deployment,
+				DaemonSetName:   target.DaemonSet,
 				Labels:          target.Labels,
 			}
 		}
@@ -1389,13 +1419,21 @@ func (r *{{ .Kind }}Reconciler) resolveAllHealthyEndpoints(ctx context.Context, 
 		return r.EndpointResolver.GetAllEndpointsForDeployment(ctx, target.Deployment, namespace)
 	}
 
+	// Per-CR DaemonSet targeting (standalone, without Helm release)
+	if target != nil && target.DaemonSet != "" {
+		return r.EndpointResolver.GetAllEndpointsForDaemonSet(ctx, target.DaemonSet, namespace)
+	}
+
 	// Global pod-name targeting (returns single endpoint)
 	if r.EndpointResolver.IsPodConfigured() {
-		url, err := r.EndpointResolver.GetEndpointForPod(ctx, r.EndpointResolver.GetConfiguredPodName(), namespace)
+		podName := r.EndpointResolver.GetConfiguredPodName()
+		url, err := r.EndpointResolver.GetEndpointForPod(ctx, podName, namespace)
 		if err != nil {
 			return nil, err
 		}
-		return []string{url}, nil
+		return []endpoint.ResolvedEndpoint{
+			{URL: url, PodName: podName},
+		}, nil
 	}
 
 	// Fall back to global all-healthy endpoints
@@ -2114,12 +2152,12 @@ func (r *{{ .Kind }}Reconciler) syncResource(ctx context.Context, instance *{{ .
 		(target != nil && len(target.BaseURLs) > 1) ||
 		len(r.BaseURLs) > 1
 	if usesFanOut {
-		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
+		resolvedEndpoints, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
 
-		if len(baseURLs) > 1 {
+		if len(resolvedEndpoints) > 1 {
 			// Multiple endpoints - fan out to all and collect responses
 			now := metav1.Now()
 			responses := make(map[string]{{ .APIVersion }}.{{ .Kind }}EndpointResponse)
@@ -2127,15 +2165,15 @@ func (r *{{ .Kind }}Reconciler) syncResource(ctx context.Context, instance *{{ .
 			successCount := 0
 			var firstSuccessResponse *{{ .APIVersion }}.{{ .Kind }}EndpointResponse
 
-			for _, baseURL := range baseURLs {
+			for _, ep := range resolvedEndpoints {
 				endpointResp := {{ .APIVersion }}.{{ .Kind }}EndpointResponse{
 					LastUpdated: &now,
 				}
 
-				if err := r.syncToEndpoint(ctx, instance, baseURL); err != nil {
+				if err := r.syncToEndpoint(ctx, instance, ep.URL); err != nil {
 					endpointResp.Success = false
 					endpointResp.Error = err.Error()
-					syncErrors = append(syncErrors, fmt.Errorf("%s: %w", baseURL, err))
+					syncErrors = append(syncErrors, fmt.Errorf("%s: %w", ep.URL, err))
 				} else {
 					successCount++
 					// Copy the response that was set by syncToEndpoint
@@ -2149,7 +2187,11 @@ func (r *{{ .Kind }}Reconciler) syncResource(ctx context.Context, instance *{{ .
 						endpointResp.StatusCode = 200
 					}
 				}
-				responses[baseURL] = endpointResp
+				key := ep.PodName
+				if key == "" {
+					key = ep.URL
+				}
+				responses[key] = endpointResp
 			}
 
 			// Store all endpoint responses
@@ -2170,7 +2212,7 @@ func (r *{{ .Kind }}Reconciler) syncResource(ctx context.Context, instance *{{ .
 				logger.Info("Some sync requests failed", "successCount", successCount, "errors", syncErrors)
 			}
 
-			r.updateStatus(ctx, instance, "Synced", fmt.Sprintf("Successfully synced to %d/%d endpoints", successCount, len(baseURLs)))
+			r.updateStatus(ctx, instance, "Synced", fmt.Sprintf("Successfully synced to %d/%d endpoints", successCount, len(resolvedEndpoints)))
 			return nil
 		}
 	}
@@ -2315,19 +2357,19 @@ func (r *{{ .Kind }}Reconciler) finalizeResource(ctx context.Context, instance *
 		(target != nil && len(target.BaseURLs) > 1) ||
 		len(r.BaseURLs) > 1
 	if usesFanOut {
-		baseURLs, err := r.resolveAllHealthyEndpoints(ctx, instance)
+		resolvedEndpoints, err := r.resolveAllHealthyEndpoints(ctx, instance)
 		if err != nil {
 			return fmt.Errorf("failed to get all healthy endpoints: %w", err)
 		}
 
-		if len(baseURLs) > 1 {
+		if len(resolvedEndpoints) > 1 {
 			// Multiple endpoints - fan out delete to all
 			var deleteErrors []error
 			successCount := 0
 
-			for _, baseURL := range baseURLs {
-				if err := r.deleteFromEndpoint(ctx, instance, baseURL); err != nil {
-					deleteErrors = append(deleteErrors, fmt.Errorf("%s: %w", baseURL, err))
+			for _, ep := range resolvedEndpoints {
+				if err := r.deleteFromEndpoint(ctx, instance, ep.URL); err != nil {
+					deleteErrors = append(deleteErrors, fmt.Errorf("%s: %w", ep.URL, err))
 				} else {
 					successCount++
 				}

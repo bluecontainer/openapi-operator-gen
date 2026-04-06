@@ -321,19 +321,23 @@ func TestGetAllHealthyEndpoints(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllHealthyEndpoints()
+	eps, err := resolver.GetAllHealthyEndpoints()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 2 {
-		t.Errorf("expected 2 healthy endpoints, got %d", len(urls))
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 healthy endpoints, got %d", len(eps))
 	}
 
-	expected := []string{"http://pod-0:8080/api", "http://pod-2:8080/api"}
-	for i, url := range urls {
-		if url != expected[i] {
-			t.Errorf("expected %s, got %s", expected[i], url)
+	expectedURLs := []string{"http://pod-0:8080/api", "http://pod-2:8080/api"}
+	expectedPods := []string{"sts-0", "sts-2"}
+	for i, ep := range eps {
+		if ep.URL != expectedURLs[i] {
+			t.Errorf("endpoint %d: expected URL %s, got %s", i, expectedURLs[i], ep.URL)
+		}
+		if ep.PodName != expectedPods[i] {
+			t.Errorf("endpoint %d: expected PodName %s, got %s", i, expectedPods[i], ep.PodName)
 		}
 	}
 }
@@ -349,6 +353,212 @@ func TestGetAllHealthyEndpoints_NoHealthy(t *testing.T) {
 	_, err := resolver.GetAllHealthyEndpoints()
 	if err == nil {
 		t.Fatal("expected error when no healthy endpoints")
+	}
+}
+
+func TestGetAllEndpointsForStatefulSet_ResolvedEndpoint(t *testing.T) {
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-sts",
+			Namespace: "default",
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(3),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "target-app"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-sts-0",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-sts-1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(sts, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+			DiscoveryMode: PodIPMode,
+			BasePath:      "/api",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForStatefulSet(context.Background(), "target-sts", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if ep.PodName == "" {
+			t.Errorf("expected PodName to be set, got empty for URL %s", ep.URL)
+		}
+		if ep.URL == "" {
+			t.Errorf("expected URL to be set, got empty for pod %s", ep.PodName)
+		}
+	}
+}
+
+func TestGetAllEndpointsForDeployment_ResolvedEndpoint(t *testing.T) {
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-deploy",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(2),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "target-app"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-deploy-abc",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-deploy-def",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(deploy, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForDeployment(context.Background(), "target-deploy", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if ep.PodName == "" {
+			t.Errorf("expected PodName to be set, got empty for URL %s", ep.URL)
+		}
+		if ep.URL == "" {
+			t.Errorf("expected URL to be set, got empty for pod %s", ep.PodName)
+		}
+	}
+}
+
+func TestGetAllEndpointsForDaemonSet_ResolvedEndpoint(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds",
+			Namespace: "default",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(ds, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+			BasePath:  "/api",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForDaemonSet(context.Background(), "target-ds", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if ep.PodName == "" {
+			t.Errorf("expected PodName to be set, got empty for URL %s", ep.URL)
+		}
+		if ep.URL == "" {
+			t.Errorf("expected URL to be set, got empty for pod %s", ep.PodName)
+		}
 	}
 }
 
@@ -1538,13 +1748,13 @@ func TestGetAllEndpointsForStatefulSet(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllEndpointsForStatefulSet(context.Background(), "target-sts", "default")
+	eps, err := resolver.GetAllEndpointsForStatefulSet(context.Background(), "target-sts", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 2 {
-		t.Errorf("expected 2 URLs, got %d", len(urls))
+	if len(eps) != 2 {
+		t.Errorf("expected 2 endpoints, got %d", len(eps))
 	}
 }
 
@@ -1597,13 +1807,13 @@ func TestGetAllEndpointsForDeployment(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllEndpointsForDeployment(context.Background(), "target-deploy", "default")
+	eps, err := resolver.GetAllEndpointsForDeployment(context.Background(), "target-deploy", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 2 {
-		t.Errorf("expected 2 URLs, got %d", len(urls))
+	if len(eps) != 2 {
+		t.Errorf("expected 2 endpoints, got %d", len(eps))
 	}
 }
 
@@ -2730,18 +2940,18 @@ func TestGetAllEndpointsForDaemonSet(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllEndpointsForDaemonSet(context.Background(), "target-ds", "")
+	eps, err := resolver.GetAllEndpointsForDaemonSet(context.Background(), "target-ds", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 3 {
-		t.Errorf("expected 3 URLs, got %d", len(urls))
+	if len(eps) != 3 {
+		t.Errorf("expected 3 endpoints, got %d", len(eps))
 	}
 
-	for _, u := range urls {
-		if len(u) < 4 || u[len(u)-4:] != "/api" {
-			t.Errorf("expected URL to end with /api, got %s", u)
+	for _, ep := range eps {
+		if len(ep.URL) < 4 || ep.URL[len(ep.URL)-4:] != "/api" {
+			t.Errorf("expected URL to end with /api, got %s", ep.URL)
 		}
 	}
 }

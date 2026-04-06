@@ -118,6 +118,15 @@ type Endpoint struct {
 	PodIP   string
 }
 
+// ResolvedEndpoint is returned by fan-out methods and carries both the URL
+// (needed for HTTP calls) and the PodName (used as the human-friendly key
+// in status.responses maps). When PodName is empty (e.g., static base URLs),
+// callers should fall back to using the URL as the key.
+type ResolvedEndpoint struct {
+	URL     string
+	PodName string
+}
+
 // Resolver discovers and manages REST API endpoints from StatefulSet or Deployment pods
 type Resolver struct {
 	client               client.Client
@@ -274,9 +283,9 @@ func (r *Resolver) GetEndpoint() (string, error) {
 	return endpoint.URL + r.config.BasePath, nil
 }
 
-// GetAllHealthyEndpoints returns URLs for all healthy endpoints.
+// GetAllHealthyEndpoints returns ResolvedEndpoints (URL + PodName) for all healthy endpoints.
 // Use this with AllHealthy strategy for fan-out/broadcast operations.
-func (r *Resolver) GetAllHealthyEndpoints() ([]string, error) {
+func (r *Resolver) GetAllHealthyEndpoints() ([]ResolvedEndpoint, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -285,11 +294,14 @@ func (r *Resolver) GetAllHealthyEndpoints() ([]string, error) {
 		return nil, fmt.Errorf("no healthy endpoints available")
 	}
 
-	urls := make([]string, 0, len(healthyEndpoints))
+	resolved := make([]ResolvedEndpoint, 0, len(healthyEndpoints))
 	for _, ep := range healthyEndpoints {
-		urls = append(urls, ep.URL+r.config.BasePath)
+		resolved = append(resolved, ResolvedEndpoint{
+			URL:     ep.URL + r.config.BasePath,
+			PodName: ep.PodName,
+		})
 	}
-	return urls, nil
+	return resolved, nil
 }
 
 // IsAllHealthyStrategy returns true if the resolver is configured for all-healthy strategy
@@ -1373,10 +1385,10 @@ func (r *Resolver) GetEndpointForHelmRelease(ctx context.Context, helmRelease, n
 	return r.selectEndpoint(result.Endpoints, result.StatefulSetName, ordinal)
 }
 
-// GetAllEndpointsForHelmRelease returns all endpoint URLs for a specific Helm release.
+// GetAllEndpointsForHelmRelease returns ResolvedEndpoints (URL + PodName) for a specific Helm release.
 // Use this with AllHealthy strategy for fan-out/broadcast operations.
 // Pass nil for opts to discover without narrowing.
-func (r *Resolver) GetAllEndpointsForHelmRelease(ctx context.Context, helmRelease, namespace string, opts *HelmReleaseDiscoveryOptions) ([]string, error) {
+func (r *Resolver) GetAllEndpointsForHelmRelease(ctx context.Context, helmRelease, namespace string, opts *HelmReleaseDiscoveryOptions) ([]ResolvedEndpoint, error) {
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
@@ -1386,16 +1398,19 @@ func (r *Resolver) GetAllEndpointsForHelmRelease(ctx context.Context, helmReleas
 		return nil, err
 	}
 
-	urls := make([]string, 0, len(result.Endpoints))
+	resolved := make([]ResolvedEndpoint, 0, len(result.Endpoints))
 	for _, ep := range result.Endpoints {
 		if ep.Healthy {
-			urls = append(urls, ep.URL+r.config.BasePath)
+			resolved = append(resolved, ResolvedEndpoint{
+				URL:     ep.URL + r.config.BasePath,
+				PodName: ep.PodName,
+			})
 		}
 	}
-	if len(urls) == 0 {
+	if len(resolved) == 0 {
 		return nil, fmt.Errorf("no healthy endpoints available for Helm release %s", helmRelease)
 	}
-	return urls, nil
+	return resolved, nil
 }
 
 // selectEndpoint selects an endpoint based on the configured strategy
@@ -1491,9 +1506,9 @@ func (r *Resolver) GetEndpointForStatefulSet(ctx context.Context, stsName, names
 	return r.selectEndpoint(endpoints, stsName, ordinal)
 }
 
-// GetAllEndpointsForStatefulSet returns all endpoint URLs for a specific StatefulSet.
+// GetAllEndpointsForStatefulSet returns ResolvedEndpoints (URL + PodName) for a specific StatefulSet.
 // Use this with AllHealthy strategy for fan-out/broadcast operations.
-func (r *Resolver) GetAllEndpointsForStatefulSet(ctx context.Context, stsName, namespace string) ([]string, error) {
+func (r *Resolver) GetAllEndpointsForStatefulSet(ctx context.Context, stsName, namespace string) ([]ResolvedEndpoint, error) {
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
@@ -1503,16 +1518,19 @@ func (r *Resolver) GetAllEndpointsForStatefulSet(ctx context.Context, stsName, n
 		return nil, err
 	}
 
-	urls := make([]string, 0, len(endpoints))
+	resolved := make([]ResolvedEndpoint, 0, len(endpoints))
 	for _, ep := range endpoints {
 		if ep.Healthy {
-			urls = append(urls, ep.URL+r.config.BasePath)
+			resolved = append(resolved, ResolvedEndpoint{
+				URL:     ep.URL + r.config.BasePath,
+				PodName: ep.PodName,
+			})
 		}
 	}
-	if len(urls) == 0 {
+	if len(resolved) == 0 {
 		return nil, fmt.Errorf("no healthy endpoints available for StatefulSet %s", stsName)
 	}
-	return urls, nil
+	return resolved, nil
 }
 
 // discoverStatefulSetEndpoints discovers all endpoints for a StatefulSet
@@ -1617,9 +1635,9 @@ func (r *Resolver) GetEndpointForDeployment(ctx context.Context, deployName, nam
 	return r.selectEndpoint(endpoints, "", nil)
 }
 
-// GetAllEndpointsForDeployment returns all endpoint URLs for a specific Deployment.
+// GetAllEndpointsForDeployment returns ResolvedEndpoints (URL + PodName) for a specific Deployment.
 // Use this with AllHealthy strategy for fan-out/broadcast operations.
-func (r *Resolver) GetAllEndpointsForDeployment(ctx context.Context, deployName, namespace string) ([]string, error) {
+func (r *Resolver) GetAllEndpointsForDeployment(ctx context.Context, deployName, namespace string) ([]ResolvedEndpoint, error) {
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
@@ -1629,16 +1647,19 @@ func (r *Resolver) GetAllEndpointsForDeployment(ctx context.Context, deployName,
 		return nil, err
 	}
 
-	urls := make([]string, 0, len(endpoints))
+	resolved := make([]ResolvedEndpoint, 0, len(endpoints))
 	for _, ep := range endpoints {
 		if ep.Healthy {
-			urls = append(urls, ep.URL+r.config.BasePath)
+			resolved = append(resolved, ResolvedEndpoint{
+				URL:     ep.URL + r.config.BasePath,
+				PodName: ep.PodName,
+			})
 		}
 	}
-	if len(urls) == 0 {
+	if len(resolved) == 0 {
 		return nil, fmt.Errorf("no healthy endpoints available for Deployment %s", deployName)
 	}
-	return urls, nil
+	return resolved, nil
 }
 
 // discoverDeploymentEndpoints discovers all endpoints for a Deployment
@@ -1727,9 +1748,9 @@ func (r *Resolver) GetEndpointForDaemonSet(ctx context.Context, dsName, namespac
 	return r.selectEndpoint(endpoints, "", nil)
 }
 
-// GetAllEndpointsForDaemonSet returns all endpoint URLs for a specific DaemonSet.
+// GetAllEndpointsForDaemonSet returns ResolvedEndpoints (URL + PodName) for a specific DaemonSet.
 // Use this with AllHealthy strategy for fan-out/broadcast operations (e.g., run on every node).
-func (r *Resolver) GetAllEndpointsForDaemonSet(ctx context.Context, dsName, namespace string) ([]string, error) {
+func (r *Resolver) GetAllEndpointsForDaemonSet(ctx context.Context, dsName, namespace string) ([]ResolvedEndpoint, error) {
 	if namespace == "" {
 		namespace = r.GetNamespace()
 	}
@@ -1739,16 +1760,19 @@ func (r *Resolver) GetAllEndpointsForDaemonSet(ctx context.Context, dsName, name
 		return nil, err
 	}
 
-	urls := make([]string, 0, len(endpoints))
+	resolved := make([]ResolvedEndpoint, 0, len(endpoints))
 	for _, ep := range endpoints {
 		if ep.Healthy {
-			urls = append(urls, ep.URL+r.config.BasePath)
+			resolved = append(resolved, ResolvedEndpoint{
+				URL:     ep.URL + r.config.BasePath,
+				PodName: ep.PodName,
+			})
 		}
 	}
-	if len(urls) == 0 {
+	if len(resolved) == 0 {
 		return nil, fmt.Errorf("no healthy endpoints available for DaemonSet %s", dsName)
 	}
-	return urls, nil
+	return resolved, nil
 }
 
 // discoverDaemonSetEndpoints discovers all endpoints for a DaemonSet
