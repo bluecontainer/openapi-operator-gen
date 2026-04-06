@@ -360,6 +360,13 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	for _, crd := range crds {
 		fmt.Printf("    - %s (%s)\n", crd.Kind, crd.Plural)
 	}
+	if len(m.Warnings) > 0 {
+		fmt.Println()
+		fmt.Printf("  ⚠ %d warning(s):\n", len(m.Warnings))
+		for _, w := range m.Warnings {
+			fmt.Printf("    WARNING: %s\n", w)
+		}
+	}
 	fmt.Println()
 
 	// Generate types

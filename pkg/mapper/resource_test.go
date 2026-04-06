@@ -1015,3 +1015,187 @@ func TestMapOperations_MultipleOperationsSamePath(t *testing.T) {
 		t.Errorf("expected Get, Update, Delete actions, got %v", actions)
 	}
 }
+
+// =============================================================================
+// checkSchemaOverlap Tests
+// =============================================================================
+
+func TestCheckSchemaOverlap_NoWarningWhenFieldsOverlap(t *testing.T) {
+	m := &Mapper{config: &config.Config{APIGroup: "test.example.com", APIVersion: "v1"}}
+
+	resource := &parser.Resource{
+		Name: "Item",
+		Schema: &parser.Schema{
+			Properties: map[string]*parser.Schema{
+				"name":  {Type: "string"},
+				"color": {Type: "string"},
+			},
+		},
+		Operations: []parser.Operation{
+			{
+				Method: "GET",
+				ResponseBody: &parser.Schema{
+					Properties: map[string]*parser.Schema{
+						"name":  {Type: "string"},
+						"color": {Type: "string"},
+						"id":    {Type: "integer"},
+					},
+				},
+			},
+		},
+	}
+
+	crd := &CRDDefinition{Kind: "Item"}
+	m.checkSchemaOverlap(resource, crd)
+
+	if len(m.Warnings) != 0 {
+		t.Errorf("expected no warnings when fields overlap, got %d: %v", len(m.Warnings), m.Warnings)
+	}
+}
+
+func TestCheckSchemaOverlap_WarningWhenNoOverlap(t *testing.T) {
+	m := &Mapper{config: &config.Config{APIGroup: "test.example.com", APIVersion: "v1"}}
+
+	resource := &parser.Resource{
+		Name: "Item",
+		Schema: &parser.Schema{
+			Properties: map[string]*parser.Schema{
+				"title":       {Type: "string"},
+				"description": {Type: "string"},
+			},
+		},
+		Operations: []parser.Operation{
+			{
+				Method: "GET",
+				ResponseBody: &parser.Schema{
+					Properties: map[string]*parser.Schema{
+						"id":        {Type: "integer"},
+						"createdAt": {Type: "string"},
+						"updatedAt": {Type: "string"},
+					},
+				},
+			},
+		},
+	}
+
+	crd := &CRDDefinition{Kind: "Item"}
+	m.checkSchemaOverlap(resource, crd)
+
+	if len(m.Warnings) != 1 {
+		t.Fatalf("expected 1 warning for no overlap, got %d", len(m.Warnings))
+	}
+	w := m.Warnings[0]
+	if !contains(w, "no overlap") {
+		t.Errorf("expected warning to mention 'no overlap', got: %s", w)
+	}
+	if !contains(w, "drift will never be detected") {
+		t.Errorf("expected warning to mention drift consequence, got: %s", w)
+	}
+	if !contains(w, "Item") {
+		t.Errorf("expected warning to name the resource, got: %s", w)
+	}
+}
+
+func TestCheckSchemaOverlap_WarningWhenLowOverlap(t *testing.T) {
+	m := &Mapper{config: &config.Config{APIGroup: "test.example.com", APIVersion: "v1"}}
+
+	resource := &parser.Resource{
+		Name: "Widget",
+		Schema: &parser.Schema{
+			Properties: map[string]*parser.Schema{
+				"name":     {Type: "string"},
+				"category": {Type: "string"},
+				"weight":   {Type: "number"},
+				"material": {Type: "string"},
+				"color":    {Type: "string"},
+				"size":     {Type: "string"},
+			},
+		},
+		Operations: []parser.Operation{
+			{
+				Method: "GET",
+				ResponseBody: &parser.Schema{
+					Properties: map[string]*parser.Schema{
+						"id":        {Type: "integer"},
+						"name":      {Type: "string"},
+						"status":    {Type: "string"},
+						"createdAt": {Type: "string"},
+					},
+				},
+			},
+		},
+	}
+
+	crd := &CRDDefinition{Kind: "Widget"}
+	m.checkSchemaOverlap(resource, crd)
+
+	if len(m.Warnings) != 1 {
+		t.Fatalf("expected 1 warning for low overlap, got %d", len(m.Warnings))
+	}
+	w := m.Warnings[0]
+	if !contains(w, "only 1 of 6") {
+		t.Errorf("expected warning to mention overlap ratio, got: %s", w)
+	}
+}
+
+func TestCheckSchemaOverlap_NoWarningWhenNoGETResponse(t *testing.T) {
+	m := &Mapper{config: &config.Config{APIGroup: "test.example.com", APIVersion: "v1"}}
+
+	resource := &parser.Resource{
+		Name: "Item",
+		Schema: &parser.Schema{
+			Properties: map[string]*parser.Schema{
+				"name": {Type: "string"},
+			},
+		},
+		Operations: []parser.Operation{
+			{Method: "POST"},
+		},
+	}
+
+	crd := &CRDDefinition{Kind: "Item"}
+	m.checkSchemaOverlap(resource, crd)
+
+	if len(m.Warnings) != 0 {
+		t.Errorf("expected no warnings when GET has no response schema, got %d", len(m.Warnings))
+	}
+}
+
+func TestCheckSchemaOverlap_NoWarningWhenNoRequestSchema(t *testing.T) {
+	m := &Mapper{config: &config.Config{APIGroup: "test.example.com", APIVersion: "v1"}}
+
+	resource := &parser.Resource{
+		Name:   "Item",
+		Schema: nil,
+		Operations: []parser.Operation{
+			{
+				Method: "GET",
+				ResponseBody: &parser.Schema{
+					Properties: map[string]*parser.Schema{
+						"id": {Type: "integer"},
+					},
+				},
+			},
+		},
+	}
+
+	crd := &CRDDefinition{Kind: "Item"}
+	m.checkSchemaOverlap(resource, crd)
+
+	if len(m.Warnings) != 0 {
+		t.Errorf("expected no warnings when request schema is nil, got %d", len(m.Warnings))
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

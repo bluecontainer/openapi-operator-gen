@@ -1,6 +1,7 @@
 package mapper
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -259,7 +260,8 @@ type ValidationRules struct {
 
 // Mapper maps REST resources to Kubernetes CRD definitions
 type Mapper struct {
-	config *config.Config
+	config   *config.Config
+	Warnings []string
 }
 
 // NewMapper creates a new resource mapper
@@ -1074,10 +1076,72 @@ func (m *Mapper) mapPerResource(spec *parser.ParsedSpec) ([]*CRDDefinition, erro
 		// Generate status fields
 		crd.Status = m.createStatusDefinition()
 
+		// Check for schema overlap between request body (CRD spec) and GET response
+		m.checkSchemaOverlap(resource, crd)
+
 		crds = append(crds, crd)
 	}
 
 	return crds, nil
+}
+
+// checkSchemaOverlap warns when the CRD spec (derived from POST/PUT/PATCH request body)
+// shares no fields with the GET response body. Without overlapping fields, drift detection
+// in the generated controller cannot compare spec values against the API's current state,
+// meaning drift will never be detected.
+func (m *Mapper) checkSchemaOverlap(resource *parser.Resource, crd *CRDDefinition) {
+	if resource.Schema == nil || len(resource.Schema.Properties) == 0 {
+		return
+	}
+
+	// Find the GET operation's response schema
+	var getResponseSchema *parser.Schema
+	for _, op := range resource.Operations {
+		if op.Method == "GET" && op.ResponseBody != nil {
+			getResponseSchema = op.ResponseBody
+			break
+		}
+	}
+
+	if getResponseSchema == nil || len(getResponseSchema.Properties) == 0 {
+		return
+	}
+
+	// Compute field overlap
+	specFields := resource.Schema.Properties
+	responseFields := getResponseSchema.Properties
+	var overlap []string
+	for name := range specFields {
+		if _, ok := responseFields[name]; ok {
+			overlap = append(overlap, name)
+		}
+	}
+
+	if len(overlap) == 0 {
+		specNames := make([]string, 0, len(specFields))
+		for name := range specFields {
+			specNames = append(specNames, name)
+		}
+		sort.Strings(specNames)
+		responseNames := make([]string, 0, len(responseFields))
+		for name := range responseFields {
+			responseNames = append(responseNames, name)
+		}
+		sort.Strings(responseNames)
+		m.Warnings = append(m.Warnings, fmt.Sprintf(
+			"Resource %q: CRD spec fields %v (from request body) have no overlap with GET response fields %v. "+
+				"Drift detection compares spec values against the GET response — with no shared fields, drift will never be detected. "+
+				"Consider aligning your OpenAPI request and response schemas, or disabling drift detection for this resource.",
+			crd.Kind, specNames, responseNames,
+		))
+	} else if len(overlap) < len(specFields)/2 && len(specFields) > 2 {
+		sort.Strings(overlap)
+		m.Warnings = append(m.Warnings, fmt.Sprintf(
+			"Resource %q: only %d of %d CRD spec fields overlap with the GET response: %v. "+
+				"Drift detection will only work for these overlapping fields.",
+			crd.Kind, len(overlap), len(specFields), overlap,
+		))
+	}
 }
 
 // addOperationParamsToSpec adds path and query parameters from operations to the spec.

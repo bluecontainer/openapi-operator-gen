@@ -2060,6 +2060,267 @@ paths:
 	}
 }
 
+// =============================================================================
+// extractResourceSchema Tests - PATCH fallback
+// =============================================================================
+
+func TestExtractResourceSchema_PostOnly(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Test API"
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        "200":
+          description: OK
+    post:
+      operationId: createItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Item'
+      responses:
+        "201":
+          description: Created
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        name:
+          type: string
+`
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) == 0 {
+		t.Fatal("expected at least one resource")
+	}
+	res := spec.Resources[0]
+	if res.Schema == nil {
+		t.Fatal("expected resource schema to be extracted from POST")
+	}
+	if _, ok := res.Schema.Properties["name"]; !ok {
+		t.Error("expected schema to have 'name' property")
+	}
+}
+
+func TestExtractResourceSchema_PutFallback(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Test API"
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        "200":
+          description: OK
+    put:
+      operationId: replaceItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Item'
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        color:
+          type: string
+`
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) == 0 {
+		t.Fatal("expected at least one resource")
+	}
+	res := spec.Resources[0]
+	if res.Schema == nil {
+		t.Fatal("expected resource schema to be extracted from PUT")
+	}
+	if _, ok := res.Schema.Properties["color"]; !ok {
+		t.Error("expected schema to have 'color' property")
+	}
+}
+
+func TestExtractResourceSchema_PatchFallback(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Test API"
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        "200":
+          description: OK
+    patch:
+      operationId: updateItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemPatch'
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    ItemPatch:
+      type: object
+      properties:
+        description:
+          type: string
+`
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) == 0 {
+		t.Fatal("expected at least one resource")
+	}
+	res := spec.Resources[0]
+	if res.Schema == nil {
+		t.Fatal("expected resource schema to be extracted from PATCH when POST and PUT are absent")
+	}
+	if _, ok := res.Schema.Properties["description"]; !ok {
+		t.Error("expected schema to have 'description' property")
+	}
+}
+
+func TestExtractResourceSchema_PostPreferredOverPatchAndPut(t *testing.T) {
+	specContent := `
+openapi: "3.0.0"
+info:
+  title: "Test API"
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        "200":
+          description: OK
+    post:
+      operationId: createItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemCreate'
+      responses:
+        "201":
+          description: Created
+    put:
+      operationId: replaceItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemReplace'
+      responses:
+        "200":
+          description: OK
+    patch:
+      operationId: patchItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemPatch'
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    ItemCreate:
+      type: object
+      properties:
+        fromPost:
+          type: string
+    ItemReplace:
+      type: object
+      properties:
+        fromPut:
+          type: string
+    ItemPatch:
+      type: object
+      properties:
+        fromPatch:
+          type: string
+`
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "openapi.yaml")
+	if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	p := NewParser()
+	spec, err := p.Parse(specPath)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(spec.Resources) == 0 {
+		t.Fatal("expected at least one resource")
+	}
+	res := spec.Resources[0]
+	if res.Schema == nil {
+		t.Fatal("expected resource schema to be set")
+	}
+	// POST schema should be preferred
+	if _, ok := res.Schema.Properties["fromPost"]; !ok {
+		t.Error("expected POST schema to be preferred; should have 'fromPost' property")
+	}
+	if _, ok := res.Schema.Properties["fromPut"]; ok {
+		t.Error("did not expect PUT schema properties when POST is available")
+	}
+	if _, ok := res.Schema.Properties["fromPatch"]; ok {
+		t.Error("did not expect PATCH schema properties when POST is available")
+	}
+}
+
 func TestParse_Swagger2FromURL(t *testing.T) {
 	// Skip this test if running in short mode (no network)
 	if testing.Short() {
