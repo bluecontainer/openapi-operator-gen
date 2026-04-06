@@ -75,6 +75,15 @@ API Version: `{{ .APIVersion }}`
 - `config/default/` — Kustomize overlays for deployment
 - `hack/` — Build scripts and boilerplate
 
+## Pre-Commit Checklist
+
+Before committing changes, always:
+
+1. Run `make generate` to regenerate DeepCopy methods
+2. Run `make manifests` to regenerate CRD and RBAC manifests
+3. Run `make build` to ensure code compiles cleanly
+4. Run `make test` to verify all tests pass
+
 ## Architecture
 
 Each CRD controller follows a GET-first reconciliation pattern:

@@ -933,6 +933,199 @@ func TestCRDGenerator_Generate_EmptySpecFields(t *testing.T) {
 	}
 }
 
+func TestCRDGenerator_Generate_ValidationRules(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		OutputDir:  tmpDir,
+		APIGroup:   "test.example.com",
+		APIVersion: "v1",
+	}
+	g := NewCRDGenerator(cfg)
+
+	minLen := int64(1)
+	maxLen := int64(255)
+	minVal := float64(0)
+	maxVal := float64(100)
+	minItems := int64(1)
+	maxItems := int64(10)
+
+	crds := []*mapper.CRDDefinition{
+		{
+			APIGroup:   "test.example.com",
+			APIVersion: "v1",
+			Kind:       "Widget",
+			Plural:     "widgets",
+			Scope:      "Namespaced",
+			Spec: &mapper.FieldDefinition{
+				Fields: []*mapper.FieldDefinition{
+					{
+						Name:     "Name",
+						JSONName: "name",
+						GoType:   "string",
+						Required: true,
+						Validation: &mapper.ValidationRules{
+							MinLength: &minLen,
+							MaxLength: &maxLen,
+							Pattern:   "^[a-zA-Z]+$",
+						},
+					},
+					{
+						Name:     "Priority",
+						JSONName: "priority",
+						GoType:   "int32",
+						Validation: &mapper.ValidationRules{
+							Minimum: &minVal,
+							Maximum: &maxVal,
+						},
+					},
+					{
+						Name:     "Status",
+						JSONName: "status",
+						GoType:   "string",
+						Enum:     []string{"active", "inactive", "archived"},
+					},
+					{
+						Name:     "Tags",
+						JSONName: "tags",
+						GoType:   "[]string",
+						Validation: &mapper.ValidationRules{
+							MinItems: &minItems,
+							MaxItems: &maxItems,
+						},
+						ItemType: &mapper.FieldDefinition{
+							GoType: "string",
+						},
+					},
+					{
+						Name:     "Config",
+						JSONName: "config",
+						GoType:   "WidgetConfig",
+						Fields: []*mapper.FieldDefinition{
+							{
+								Name:     "RetryCount",
+								JSONName: "retryCount",
+								GoType:   "int32",
+								Validation: &mapper.ValidationRules{
+									Minimum: &minVal,
+									Maximum: &maxVal,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := g.Generate(crds)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "config", "crd", "bases", "test.example.com_widgets.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read generated CRD: %v", err)
+	}
+	yaml := string(content)
+
+	// Verify validation attributes
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"minLength", "minLength: 1"},
+		{"maxLength", "maxLength: 255"},
+		{"pattern", "pattern: ^[a-zA-Z]+$"},
+		{"minimum", "minimum: 0"},
+		{"maximum", "maximum: 100"},
+		{"enum active", "- active"},
+		{"enum inactive", "- inactive"},
+		{"enum archived", "- archived"},
+		{"minItems", "minItems: 1"},
+		{"maxItems", "maxItems: 10"},
+		{"format int32", "format: int32"},
+		{"nested retryCount", "retryCount:"},
+		{"array items", "items:"},
+	}
+
+	for _, c := range checks {
+		if !strings.Contains(yaml, c.substr) {
+			t.Errorf("expected CRD YAML to contain %s (%q), but it was missing.\nContent:\n%s", c.name, c.substr, yaml)
+		}
+	}
+}
+
+func TestCRDGenerator_ConvertFields_WithValidation(t *testing.T) {
+	g := &CRDGenerator{config: &config.Config{}}
+
+	minLen := int64(3)
+	maxVal := float64(99.5)
+
+	fields := []*mapper.FieldDefinition{
+		{
+			JSONName: "title",
+			GoType:   "string",
+			Validation: &mapper.ValidationRules{
+				MinLength: &minLen,
+				Pattern:   "^[A-Z]",
+			},
+		},
+		{
+			JSONName: "score",
+			GoType:   "float64",
+			Validation: &mapper.ValidationRules{
+				Maximum: &maxVal,
+			},
+		},
+		{
+			JSONName: "nested",
+			GoType:   "SomeStruct",
+			Fields: []*mapper.FieldDefinition{
+				{JSONName: "inner", GoType: "string"},
+			},
+		},
+		{
+			JSONName: "items",
+			GoType:   "[]string",
+			ItemType: &mapper.FieldDefinition{GoType: "string"},
+		},
+	}
+
+	result := g.convertFields(fields)
+
+	// Validation carried through
+	if result[0].MinLength == nil || *result[0].MinLength != 3 {
+		t.Error("expected MinLength 3 on title field")
+	}
+	if result[0].Pattern != "^[A-Z]" {
+		t.Errorf("expected Pattern '^[A-Z]', got %q", result[0].Pattern)
+	}
+	if result[1].Maximum == nil || *result[1].Maximum != 99.5 {
+		t.Error("expected Maximum 99.5 on score field")
+	}
+
+	// Format derived from Go type
+	if result[1].Format != "double" {
+		t.Errorf("expected format 'double' for float64, got %q", result[1].Format)
+	}
+
+	// Nested fields
+	if len(result[2].Fields) != 1 {
+		t.Fatalf("expected 1 nested field, got %d", len(result[2].Fields))
+	}
+	if result[2].Fields[0].JSONName != "inner" {
+		t.Error("expected nested field 'inner'")
+	}
+
+	// Array item type
+	if result[3].ItemType == nil {
+		t.Fatal("expected ItemType for array field")
+	}
+	if result[3].ItemType.SchemaType != "string" {
+		t.Errorf("expected item type 'string', got %q", result[3].ItemType.SchemaType)
+	}
+}
+
 func TestTypesGenerator_Generate_EmptyCRDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{

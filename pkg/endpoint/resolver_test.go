@@ -321,19 +321,23 @@ func TestGetAllHealthyEndpoints(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllHealthyEndpoints()
+	eps, err := resolver.GetAllHealthyEndpoints()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 2 {
-		t.Errorf("expected 2 healthy endpoints, got %d", len(urls))
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 healthy endpoints, got %d", len(eps))
 	}
 
-	expected := []string{"http://pod-0:8080/api", "http://pod-2:8080/api"}
-	for i, url := range urls {
-		if url != expected[i] {
-			t.Errorf("expected %s, got %s", expected[i], url)
+	expectedURLs := []string{"http://pod-0:8080/api", "http://pod-2:8080/api"}
+	expectedPods := []string{"sts-0", "sts-2"}
+	for i, ep := range eps {
+		if ep.URL != expectedURLs[i] {
+			t.Errorf("endpoint %d: expected URL %s, got %s", i, expectedURLs[i], ep.URL)
+		}
+		if ep.PodName != expectedPods[i] {
+			t.Errorf("endpoint %d: expected PodName %s, got %s", i, expectedPods[i], ep.PodName)
 		}
 	}
 }
@@ -349,6 +353,212 @@ func TestGetAllHealthyEndpoints_NoHealthy(t *testing.T) {
 	_, err := resolver.GetAllHealthyEndpoints()
 	if err == nil {
 		t.Fatal("expected error when no healthy endpoints")
+	}
+}
+
+func TestGetAllEndpointsForStatefulSet_ResolvedEndpoint(t *testing.T) {
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-sts",
+			Namespace: "default",
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: int32Ptr(3),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "target-app"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-sts-0",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-sts-1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(sts, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+			DiscoveryMode: PodIPMode,
+			BasePath:      "/api",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForStatefulSet(context.Background(), "target-sts", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if ep.PodName == "" {
+			t.Errorf("expected PodName to be set, got empty for URL %s", ep.URL)
+		}
+		if ep.URL == "" {
+			t.Errorf("expected URL to be set, got empty for pod %s", ep.PodName)
+		}
+	}
+}
+
+func TestGetAllEndpointsForDeployment_ResolvedEndpoint(t *testing.T) {
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-deploy",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(2),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "target-app"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-deploy-abc",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-deploy-def",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "target-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(deploy, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForDeployment(context.Background(), "target-deploy", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if ep.PodName == "" {
+			t.Errorf("expected PodName to be set, got empty for URL %s", ep.URL)
+		}
+		if ep.URL == "" {
+			t.Errorf("expected URL to be set, got empty for pod %s", ep.PodName)
+		}
+	}
+}
+
+func TestGetAllEndpointsForDaemonSet_ResolvedEndpoint(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds",
+			Namespace: "default",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(ds, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+			BasePath:  "/api",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForDaemonSet(context.Background(), "target-ds", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if ep.PodName == "" {
+			t.Errorf("expected PodName to be set, got empty for URL %s", ep.URL)
+		}
+		if ep.URL == "" {
+			t.Errorf("expected URL to be set, got empty for pod %s", ep.PodName)
+		}
 	}
 }
 
@@ -1538,13 +1748,13 @@ func TestGetAllEndpointsForStatefulSet(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllEndpointsForStatefulSet(context.Background(), "target-sts", "default")
+	eps, err := resolver.GetAllEndpointsForStatefulSet(context.Background(), "target-sts", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 2 {
-		t.Errorf("expected 2 URLs, got %d", len(urls))
+	if len(eps) != 2 {
+		t.Errorf("expected 2 endpoints, got %d", len(eps))
 	}
 }
 
@@ -1597,13 +1807,13 @@ func TestGetAllEndpointsForDeployment(t *testing.T) {
 		},
 	}
 
-	urls, err := resolver.GetAllEndpointsForDeployment(context.Background(), "target-deploy", "default")
+	eps, err := resolver.GetAllEndpointsForDeployment(context.Background(), "target-deploy", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(urls) != 2 {
-		t.Errorf("expected 2 URLs, got %d", len(urls))
+	if len(eps) != 2 {
+		t.Errorf("expected 2 endpoints, got %d", len(eps))
 	}
 }
 
@@ -2004,4 +2214,1019 @@ func TestGetAllEndpoints_ReturnsCopy(t *testing.T) {
 	if resolver.endpoints[0].URL == "modified" {
 		t.Error("GetAllEndpoints should return a copy")
 	}
+}
+
+// =============================================================================
+// DaemonSet Tests
+// =============================================================================
+
+func TestNewResolver_DaemonSetDefaults(t *testing.T) {
+	cfg := Config{
+		DaemonSetName: "my-ds",
+		Namespace:     "default",
+		Port:          8080,
+	}
+
+	resolver := NewResolver(nil, cfg)
+
+	if resolver.config.DiscoveryMode != PodIPMode {
+		t.Errorf("expected DiscoveryMode PodIPMode for DaemonSet, got %s", resolver.config.DiscoveryMode)
+	}
+}
+
+func TestNewResolver_DaemonSetStrategyFallback(t *testing.T) {
+	tests := []struct {
+		name             string
+		inputStrategy    Strategy
+		expectedStrategy Strategy
+	}{
+		{"LeaderOnly falls back to RoundRobin", LeaderOnly, RoundRobin},
+		{"ByOrdinal falls back to RoundRobin", ByOrdinal, RoundRobin},
+		{"RoundRobin stays RoundRobin", RoundRobin, RoundRobin},
+		{"AnyHealthy stays AnyHealthy", AnyHealthy, AnyHealthy},
+		{"AllHealthy stays AllHealthy", AllHealthy, AllHealthy},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				DaemonSetName: "my-ds",
+				Namespace:     "default",
+				Port:          8080,
+				Strategy:      tt.inputStrategy,
+			}
+
+			resolver := NewResolver(nil, cfg)
+
+			if resolver.config.Strategy != tt.expectedStrategy {
+				t.Errorf("expected Strategy %s, got %s", tt.expectedStrategy, resolver.config.Strategy)
+			}
+		})
+	}
+}
+
+func TestIsUsingDaemonSet(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "DaemonSetName configured",
+			config:   Config{DaemonSetName: "my-ds"},
+			expected: true,
+		},
+		{
+			name:     "WorkloadKind DaemonSet",
+			config:   Config{WorkloadKind: DaemonSetKind},
+			expected: true,
+		},
+		{
+			name:     "DeploymentName configured",
+			config:   Config{DeploymentName: "my-deploy"},
+			expected: false,
+		},
+		{
+			name:     "StatefulSetName configured",
+			config:   Config{StatefulSetName: "my-sts"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &Resolver{config: tt.config}
+			if got := resolver.isUsingDaemonSet(); got != tt.expected {
+				t.Errorf("isUsingDaemonSet() = %v, expected %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsUsingDaemonSet_DiscoveredDaemonSet(t *testing.T) {
+	resolver := &Resolver{
+		config:           Config{},
+		discoveredDSName: "discovered-ds",
+	}
+
+	if !resolver.isUsingDaemonSet() {
+		t.Error("isUsingDaemonSet should return true when discoveredDSName is set")
+	}
+}
+
+func TestGetWorkloadKind_DaemonSet(t *testing.T) {
+	resolver := &Resolver{config: Config{DaemonSetName: "my-ds"}}
+	if kind := resolver.getWorkloadKind(); kind != DaemonSetKind {
+		t.Errorf("expected DaemonSetKind, got %s", kind)
+	}
+}
+
+func TestGetDaemonSetName(t *testing.T) {
+	tests := []struct {
+		name     string
+		resolver *Resolver
+		expected string
+	}{
+		{
+			name: "configured name",
+			resolver: &Resolver{
+				config:           Config{DaemonSetName: "configured-ds"},
+				discoveredDSName: "discovered-ds",
+			},
+			expected: "configured-ds",
+		},
+		{
+			name: "discovered name",
+			resolver: &Resolver{
+				config:           Config{},
+				discoveredDSName: "discovered-ds",
+			},
+			expected: "discovered-ds",
+		},
+		{
+			name:     "empty",
+			resolver: &Resolver{config: Config{}},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.resolver.getDaemonSetName(); got != tt.expected {
+				t.Errorf("getDaemonSetName() = %q, expected %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDiscoverDaemonSetPods(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds",
+			Namespace: "default",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	pod2 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-node3",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.3",
+		},
+	}
+
+	client := newFakeClient(ds, pod0, pod1, pod2).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			DaemonSetName: "my-ds",
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+		},
+	}
+
+	endpoints, err := resolver.discoverDaemonSetPods(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(endpoints) != 3 {
+		t.Errorf("expected 3 endpoints, got %d", len(endpoints))
+	}
+}
+
+func TestDiscoverDaemonSetPods_SkipsDeletingPods(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds",
+			Namespace: "default",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+	}
+
+	now := metav1.Now()
+	deletingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "my-ds-deleting",
+			Namespace:         "default",
+			Labels:            map[string]string{"app": "my-ds"},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test-finalizer"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	runningPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-running",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(ds, deletingPod, runningPod).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			DaemonSetName: "my-ds",
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+		},
+	}
+
+	endpoints, err := resolver.discoverDaemonSetPods(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(endpoints) != 1 {
+		t.Errorf("expected 1 endpoint (skipping deleting pod), got %d", len(endpoints))
+	}
+}
+
+func TestDiscoverByServiceDNS(t *testing.T) {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-svc",
+			Namespace: "default",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+			Selector:  map[string]string{"app": "my-app"},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-app-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-app-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(svc, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			ServiceName: "my-svc",
+			Namespace:   "default",
+			Port:        8080,
+			Scheme:      "http",
+		},
+	}
+
+	endpoints, err := resolver.discoverByServiceDNS(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(endpoints) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(endpoints))
+	}
+
+	// Verify endpoints are pod IPs, not Service DNS
+	for _, ep := range endpoints {
+		if ep.PodIP == "" {
+			t.Errorf("expected PodIP to be set, got empty for %s", ep.PodName)
+		}
+	}
+}
+
+func TestDiscoverByServiceDNS_DiscoveredDSSvc(t *testing.T) {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "discovered-svc",
+			Namespace: "prod",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.20",
+			Selector:  map[string]string{"app": "discovered"},
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "discovered-pod",
+			Namespace: "prod",
+			Labels:    map[string]string{"app": "discovered"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.1.1",
+		},
+	}
+
+	client := newFakeClient(svc, pod).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "prod",
+			Port:      9090,
+			Scheme:    "https",
+		},
+		discoveredDSSvcName: "discovered-svc",
+	}
+
+	endpoints, err := resolver.discoverByServiceDNS(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+
+	expectedURL := "https://10.0.1.1:9090"
+	if endpoints[0].URL != expectedURL {
+		t.Errorf("expected URL %q, got %q", expectedURL, endpoints[0].URL)
+	}
+}
+
+func TestDiscoverByServiceDNS_NoService(t *testing.T) {
+	resolver := &Resolver{
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+		},
+	}
+
+	_, err := resolver.discoverByServiceDNS(context.Background())
+	if err == nil {
+		t.Fatal("expected error when no ServiceName is configured")
+	}
+}
+
+func TestDiscoverServiceEndpoints_NoSelector(t *testing.T) {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-selector-svc",
+			Namespace: "default",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+		},
+	}
+
+	client := newFakeClient(svc).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+		},
+	}
+
+	_, err := resolver.discoverServiceEndpoints(context.Background(), "no-selector-svc", "default")
+	if err == nil {
+		t.Fatal("expected error when Service has no selector")
+	}
+}
+
+func TestDiscoverFromHelmRelease_DaemonSet(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			NumberReady: 3,
+		},
+	}
+
+	client := newFakeClient(ds).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			HelmRelease: "my-release",
+			Namespace:   "default",
+		},
+	}
+
+	err := resolver.discoverFromHelmRelease(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resolver.discoveredDSName != "my-release-ds" {
+		t.Errorf("expected discoveredDSName 'my-release-ds', got %s", resolver.discoveredDSName)
+	}
+
+	if resolver.discoveredKind != DaemonSetKind {
+		t.Errorf("expected discoveredKind DaemonSetKind, got %s", resolver.discoveredKind)
+	}
+}
+
+func TestDiscoverFromHelmRelease_DaemonSet_WithService(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			NumberReady: 3,
+		},
+	}
+
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-svc",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+		},
+	}
+
+	client := newFakeClient(ds, svc).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			HelmRelease: "my-release",
+			Namespace:   "default",
+		},
+	}
+
+	err := resolver.discoverFromHelmRelease(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resolver.discoveredDSName != "my-release-ds" {
+		t.Errorf("expected discoveredDSName 'my-release-ds', got %s", resolver.discoveredDSName)
+	}
+
+	if resolver.discoveredDSSvcName != "my-release-svc" {
+		t.Errorf("expected discoveredDSSvcName 'my-release-svc', got %s", resolver.discoveredDSSvcName)
+	}
+}
+
+func TestGetEndpointForDaemonSet(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds",
+			Namespace: "default",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(ds, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+			Strategy:  RoundRobin,
+			BasePath:  "/api",
+		},
+	}
+
+	url, err := resolver.GetEndpointForDaemonSet(context.Background(), "target-ds", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if url == "" {
+		t.Fatal("expected non-empty URL")
+	}
+
+	// Verify it includes the base path
+	if len(url) < 4 || url[len(url)-4:] != "/api" {
+		t.Errorf("expected URL to end with /api, got %s", url)
+	}
+}
+
+func TestGetEndpointForDaemonSet_WithService(t *testing.T) {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-svc",
+			Namespace: "default",
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+			Selector:  map[string]string{"app": "my-ds"},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(svc, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+			BasePath:  "/api",
+			Strategy:  RoundRobin,
+		},
+	}
+
+	url, err := resolver.GetEndpointForDaemonSet(context.Background(), "my-ds", "", "my-ds-svc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if url == "" {
+		t.Fatal("expected non-empty URL")
+	}
+
+	// Verify it includes the base path and uses a pod IP (not Service DNS)
+	if len(url) < 4 || url[len(url)-4:] != "/api" {
+		t.Errorf("expected URL to end with /api, got %s", url)
+	}
+}
+
+func TestGetAllEndpointsForDaemonSet(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds",
+			Namespace: "default",
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	pod2 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-ds-node3",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.3",
+		},
+	}
+
+	client := newFakeClient(ds, pod0, pod1, pod2).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+			BasePath:  "/api",
+		},
+	}
+
+	eps, err := resolver.GetAllEndpointsForDaemonSet(context.Background(), "target-ds", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(eps) != 3 {
+		t.Errorf("expected 3 endpoints, got %d", len(eps))
+	}
+
+	for _, ep := range eps {
+		if len(ep.URL) < 4 || ep.URL[len(ep.URL)-4:] != "/api" {
+			t.Errorf("expected URL to end with /api, got %s", ep.URL)
+		}
+	}
+}
+
+func TestDiscoverHelmReleaseEndpoint_DaemonSet(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			NumberReady: 2,
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(ds, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+		},
+	}
+
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.DaemonSetName != "my-release-ds" {
+		t.Errorf("expected DaemonSetName 'my-release-ds', got %s", result.DaemonSetName)
+	}
+
+	if result.WorkloadKind != DaemonSetKind {
+		t.Errorf("expected WorkloadKind DaemonSetKind, got %s", result.WorkloadKind)
+	}
+
+	if len(result.Endpoints) != 2 {
+		t.Errorf("expected 2 endpoints, got %d", len(result.Endpoints))
+	}
+}
+
+func TestDiscoverHelmReleaseEndpoint_DaemonSet_ServiceDNS(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "my-ds"},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			NumberReady: 2,
+		},
+	}
+
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-svc",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+			Selector:  map[string]string{"app": "my-ds"},
+		},
+	}
+
+	pod0 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-node2",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-ds"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.2",
+		},
+	}
+
+	client := newFakeClient(ds, svc, pod0, pod1).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace:     "default",
+			Port:          8080,
+			Scheme:        "http",
+			DiscoveryMode: ServiceDNSMode,
+		},
+	}
+
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.DaemonSetName != "my-release-ds" {
+		t.Errorf("expected DaemonSetName 'my-release-ds', got %s", result.DaemonSetName)
+	}
+
+	if result.ServiceName != "my-release-svc" {
+		t.Errorf("expected ServiceName 'my-release-svc', got %s", result.ServiceName)
+	}
+
+	// ServiceDNS now discovers individual pods behind the Service
+	if len(result.Endpoints) != 2 {
+		t.Fatalf("expected 2 endpoints (pods behind service), got %d", len(result.Endpoints))
+	}
+
+	// Verify endpoints use pod IPs
+	for _, ep := range result.Endpoints {
+		if ep.PodIP == "" {
+			t.Errorf("expected PodIP to be set for endpoint %s", ep.PodName)
+		}
+	}
+}
+
+func TestDiscoverHelmReleaseEndpoint_NarrowByDaemonSetName(t *testing.T) {
+	ds1 := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-agent",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "agent"},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			NumberReady: 5,
+		},
+	}
+
+	ds2 := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-collector",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "my-release",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "collector"},
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			NumberReady: 3,
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-release-ds-collector-node1",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "collector"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.1",
+		},
+	}
+
+	client := newFakeClient(ds1, ds2, pod).Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			Namespace: "default",
+			Port:      8080,
+			Scheme:    "http",
+		},
+	}
+
+	// Narrow to the collector DaemonSet
+	result, err := resolver.DiscoverHelmReleaseEndpoint(context.Background(), "my-release", "", &HelmReleaseDiscoveryOptions{
+		DaemonSetName: "my-release-ds-collector",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.DaemonSetName != "my-release-ds-collector" {
+		t.Errorf("expected DaemonSetName 'my-release-ds-collector', got %s", result.DaemonSetName)
+	}
+}
+
+func TestDiscoverHelmRelease_NotFound_IncludesDaemonSet(t *testing.T) {
+	client := newFakeClient().Build()
+
+	resolver := &Resolver{
+		client: client,
+		config: Config{
+			HelmRelease: "non-existent",
+			Namespace:   "default",
+		},
+	}
+
+	err := resolver.discoverFromHelmRelease(context.Background())
+	if err == nil {
+		t.Fatal("expected error when no workload found")
+	}
+
+	// Error message should mention DaemonSet
+	if got := err.Error(); !contains(got, "DaemonSet") {
+		t.Errorf("error message should mention DaemonSet, got: %s", got)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

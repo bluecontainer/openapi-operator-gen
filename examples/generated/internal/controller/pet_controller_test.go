@@ -842,6 +842,8 @@ func TestPetReconciler_URLAndResponseConsistency(t *testing.T) {
 
 	// === Validation 3: Correct path was used ===
 	expectedPath := "/pet"
+	// Replace path parameter placeholder with actual value
+	expectedPath = strings.Replace(expectedPath, "{petId}", testResourceID, 1)
 
 	foundCorrectPath := false
 	for _, req := range receivedRequests {

@@ -77,6 +77,11 @@ type TargetSpec struct {
 	// +optional
 	Deployment string `json:"deployment,omitempty"`
 
+	// DaemonSet specifies a DaemonSet name to route requests to.
+	// When combined with HelmRelease, narrows discovery to only this DaemonSet within the release.
+	// +optional
+	DaemonSet string `json:"daemonSet,omitempty"`
+
 	// Pod specifies a pod name to route requests to directly.
 	// +optional
 	Pod string `json:"pod,omitempty"`

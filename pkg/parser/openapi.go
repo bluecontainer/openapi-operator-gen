@@ -1367,8 +1367,8 @@ func (p *Parser) parseStatusCode(code string) int {
 }
 
 func (p *Parser) extractResourceSchema(pathItem *openapi3.PathItem, doc *openapi3.T) *Schema {
-	// Try POST first, then PUT
-	for _, op := range []*openapi3.Operation{pathItem.Post, pathItem.Put} {
+	// Try POST first, then PUT, then PATCH
+	for _, op := range []*openapi3.Operation{pathItem.Post, pathItem.Put, pathItem.Patch} {
 		if op == nil || op.RequestBody == nil || op.RequestBody.Value == nil {
 			continue
 		}

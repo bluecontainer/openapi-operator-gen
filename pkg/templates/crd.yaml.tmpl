@@ -47,17 +47,7 @@ spec:
             type: object
             properties:
 {{- range .Spec.Fields }}
-              {{ .JSONName }}:
-                {{- if .Description }}
-                description: {{ .Description }}
-                {{- end }}
-                type: {{ .SchemaType }}
-                {{- if .Enum }}
-                enum:
-                {{- range .Enum }}
-                - {{ . }}
-                {{- end }}
-                {{- end }}
+{{ fieldSchema . 14 }}
 {{- end }}
           status:
             description: {{ .Kind }}Status defines the observed state of {{ .Kind }}

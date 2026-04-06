@@ -14,6 +14,15 @@ var controllerFuncMap = template.FuncMap{
 	},
 }
 
+// crdFuncMap provides the template functions needed by the CRD YAML template.
+// The real fieldSchema implementation lives in pkg/generator; this stub is used
+// only for template parse/execute validation in the templates package tests.
+var crdFuncMap = template.FuncMap{
+	"fieldSchema": func(field interface{}, indent int) string {
+		return ""
+	},
+}
+
 // =============================================================================
 // Template Loading Tests - Verify templates are embedded correctly
 // =============================================================================
@@ -139,7 +148,7 @@ func TestActionControllerTemplateParseable(t *testing.T) {
 }
 
 func TestCRDYAMLTemplateParseable(t *testing.T) {
-	_, err := template.New("crdyaml").Parse(CRDYAMLTemplate)
+	_, err := template.New("crdyaml").Funcs(crdFuncMap).Parse(CRDYAMLTemplate)
 	if err != nil {
 		t.Errorf("Failed to parse CRDYAMLTemplate: %v", err)
 	}
@@ -940,7 +949,7 @@ type CRDYAMLData struct {
 }
 
 func TestCRDYAMLTemplateExecution(t *testing.T) {
-	tmpl, err := template.New("crdyaml").Parse(CRDYAMLTemplate)
+	tmpl, err := template.New("crdyaml").Funcs(crdFuncMap).Parse(CRDYAMLTemplate)
 	if err != nil {
 		t.Fatalf("Failed to parse CRDYAMLTemplate: %v", err)
 	}

@@ -842,6 +842,8 @@ func TestUserReconciler_URLAndResponseConsistency(t *testing.T) {
 
 	// === Validation 3: Correct path was used ===
 	expectedPath := "/user"
+	// Replace path parameter placeholder with actual value
+	expectedPath = strings.Replace(expectedPath, "{username}", testResourceID, 1)
 
 	foundCorrectPath := false
 	for _, req := range receivedRequests {

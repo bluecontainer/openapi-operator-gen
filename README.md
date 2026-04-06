@@ -77,7 +77,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [1. Static URL Mode](#1-static-url-mode)
   - [2. StatefulSet Discovery Mode](#2-statefulset-discovery-mode)
   - [3. Deployment Discovery Mode](#3-deployment-discovery-mode)
-  - [4. Helm Release Discovery Mode](#4-helm-release-discovery-mode)
+  - [4. DaemonSet Discovery Mode](#4-daemonset-discovery-mode)
+  - [5. Helm Release Discovery Mode](#5-helm-release-discovery-mode)
 - [Operator Configuration Flags](#operator-configuration-flags)
   - [Leader Election](#leader-election)
 - [Endpoint Selection Strategies](#endpoint-selection-strategies)
@@ -86,7 +87,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - [Spec Fields Reference](#spec-fields-reference)
 - [Discovery Modes](#discovery-modes)
   - [DNS Mode (default for StatefulSet)](#dns-mode-default-for-statefulset)
-  - [Pod IP Mode (default for Deployment)](#pod-ip-mode-default-for-deployment)
+  - [Pod IP Mode (default for Deployment and DaemonSet)](#pod-ip-mode-default-for-deployment-and-daemonset)
+  - [Service DNS Mode](#service-dns-mode)
 - [How Reconciliation Works](#how-reconciliation-works)
   - [Importing Existing Resources](#importing-existing-resources)
   - [Read-Only Mode](#read-only-mode)
@@ -151,7 +153,8 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
   - Static base URL
   - StatefulSet pod discovery (DNS or Pod IP)
   - Deployment pod discovery (Pod IP)
-  - Helm release discovery (auto-detects StatefulSet or Deployment)
+  - DaemonSet pod discovery (Pod IP or Service DNS)
+  - Helm release discovery (auto-detects StatefulSet, Deployment, or DaemonSet)
 - Multiple endpoint selection strategies
 - Per-CR workload targeting for multi-tenant scenarios
 - Helm chart generation via [helmify](https://github.com/arttor/helmify)
@@ -234,6 +237,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 │                    │                                      │                        │
 │                    │  • StatefulSet discovery             │                        │
 │                    │  • Deployment discovery              │                        │
+│                    │  • DaemonSet discovery               │                        │
 │                    │  • Helm release discovery            │                        │
 │                    │  • Strategy selection                │                        │
 │                    │  • Health checking                   │                        │
@@ -265,7 +269,7 @@ A code generator that creates Kubernetes operators from OpenAPI specifications. 
 │  ┌─────────────────────────────────────────────────────────────────────────────┐   │
 │  │                    REST API Workload                                        │   │
 │  │                                                                             │   │
-│  │   StatefulSet / Deployment / Helm Release                                   │   │
+│  │   StatefulSet / Deployment / DaemonSet / Helm Release                       │   │
 │  │   ┌─────────┐  ┌─────────┐  ┌─────────┐                                    │   │
 │  │   │  Pod 0  │  │  Pod 1  │  │  Pod 2  │                                    │   │
 │  │   │ :8080   │  │ :8080   │  │ :8080   │                                    │   │
@@ -1889,6 +1893,7 @@ In this mode, every CR must specify where to send requests using the `target` fi
 - `target.helmRelease` - Target a Helm release
 - `target.statefulSet` - Target a StatefulSet by name
 - `target.deployment` - Target a Deployment by name
+- `target.daemonSet` - Target a DaemonSet by name
 
 Example CR with per-CR targeting:
 ```yaml
@@ -1906,8 +1911,8 @@ spec:
 If a CR doesn't specify a target and no global configuration exists, reconciliation will fail with:
 ```
 no endpoint configured: set global endpoint (--base-url, --pod-name, --statefulset-name,
---deployment-name, or --helm-release) or specify per-CR targeting
-(target.baseURL, target.pod, target.helmRelease, target.statefulSet, or target.deployment)
+--deployment-name, --daemonset-name, or --helm-release) or specify per-CR targeting
+(target.baseURL, target.pod, target.helmRelease, target.statefulSet, target.deployment, or target.daemonSet)
 ```
 
 ### 1. Static URL Mode
@@ -1967,9 +1972,35 @@ Environment variable: `DEPLOYMENT_NAME`
 
 Note: Deployments always use pod-ip discovery mode (no stable DNS names). The `leader-only` and `by-ordinal` strategies are not available for Deployments.
 
-### 4. Helm Release Discovery Mode
+### 4. DaemonSet Discovery Mode
 
-Discover workload (StatefulSet or Deployment) from a Helm release by looking up resources with the `app.kubernetes.io/instance` label:
+Discover endpoints from pods of a DaemonSet:
+
+```bash
+./bin/manager \
+  --daemonset-name my-agent \
+  --namespace default \
+  --port 8080
+```
+
+Environment variable: `DAEMONSET_NAME`
+
+DaemonSets default to pod-ip discovery mode. The `leader-only` and `by-ordinal` strategies are not available for DaemonSets (they fall back to `round-robin`).
+
+If the DaemonSet has an associated Service, you can use Service DNS mode to discover pods via the Service's selector:
+
+```bash
+./bin/manager \
+  --daemonset-name my-agent \
+  --service my-agent-svc \
+  --discovery-mode service-dns \
+  --namespace default \
+  --port 8080
+```
+
+### 5. Helm Release Discovery Mode
+
+Discover workload (StatefulSet, Deployment, or DaemonSet) from a Helm release by looking up resources with the `app.kubernetes.io/instance` label:
 
 ```bash
 ./bin/manager \
@@ -1978,13 +2009,13 @@ Discover workload (StatefulSet or Deployment) from a Helm release by looking up 
   --port 8080
 ```
 
-The operator will automatically detect whether the Helm release contains a StatefulSet or Deployment and use the appropriate discovery method.
+The operator will automatically detect whether the Helm release contains a StatefulSet, Deployment, or DaemonSet and use the appropriate discovery method.
 
 Environment variable: `HELM_RELEASE`
 
 ## Operator Configuration Flags
 
-All endpoint flags are optional. If no global endpoint is configured, each CR must specify its target using the `target` sub-object (`target.helmRelease`, `target.statefulSet`, or `target.deployment`).
+All endpoint flags are optional. If no global endpoint is configured, each CR must specify its target using the `target` sub-object (`target.helmRelease`, `target.statefulSet`, `target.deployment`, or `target.daemonSet`).
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -1993,15 +2024,16 @@ All endpoint flags are optional. If no global endpoint is configured, each CR mu
 | `--pod-name` | Pod name for direct endpoint targeting | (optional) |
 | `--statefulset-name` | StatefulSet name for endpoint discovery | (optional) |
 | `--deployment-name` | Deployment name for endpoint discovery | (optional) |
+| `--daemonset-name` | DaemonSet name for endpoint discovery | (optional) |
 | `--helm-release` | Helm release name for endpoint discovery | (optional) |
 | `--namespace` | Namespace of the workload | Operator namespace |
 | `--service` | Headless service name (for DNS mode, StatefulSet only) | StatefulSet name |
 | `--port` | REST API port on pods | `8080` |
 | `--scheme` | URL scheme (`http` or `https`) | `http` |
 | `--strategy` | Endpoint selection strategy | `round-robin` |
-| `--discovery-mode` | Discovery mode (`dns` or `pod-ip`) | `dns` for StatefulSet, `pod-ip` for Deployment |
+| `--discovery-mode` | Discovery mode (`dns`, `pod-ip`, or `service-dns`) | `dns` for StatefulSet, `pod-ip` for Deployment/DaemonSet |
 | `--health-path` | Health check path (empty to disable) | `/health` |
-| `--workload-kind` | Workload type (`statefulset`, `deployment`, or `auto`) | `auto` |
+| `--workload-kind` | Workload type (`statefulset`, `deployment`, `daemonset`, or `auto`) | `auto` |
 | `--metrics-bind-address` | Metrics endpoint address | `:8080` |
 | `--health-probe-bind-address` | Health probe address | `:8081` |
 | `--watch-labels` | Only watch CRs matching these labels (format: `key1=value1,key2=value2`) | All labels |
@@ -2148,7 +2180,7 @@ spec:
     podOrdinal: 0                # Optional: specific pod ordinal (StatefulSet only)
 ```
 
-The controller auto-detects whether the Helm release contains a StatefulSet or Deployment.
+The controller auto-detects whether the Helm release contains a StatefulSet, Deployment, or DaemonSet.
 
 #### Target by StatefulSet Name
 
@@ -2180,6 +2212,23 @@ spec:
 ```
 
 Note: `target.podOrdinal` is ignored when targeting a Deployment.
+
+#### Target by DaemonSet Name
+
+```yaml
+apiVersion: petstore.example.com/v1alpha1
+kind: Pet
+metadata:
+  name: my-pet
+spec:
+  name: Fluffy
+  target:
+    daemonSet: my-agent           # Routes to this DaemonSet
+    namespace: production          # Optional: namespace
+    serviceName: my-agent-svc      # Optional: discover pods via Service selector
+```
+
+Note: `target.podOrdinal` is ignored when targeting a DaemonSet.
 
 #### Target by Base URL
 
@@ -2261,6 +2310,7 @@ Every generated CR includes these controller-specific fields in the spec:
 | `target.helmRelease` | Helm release name for per-CR workload discovery |
 | `target.statefulSet` | StatefulSet name for per-CR workload discovery |
 | `target.deployment` | Deployment name for per-CR workload discovery |
+| `target.daemonSet` | DaemonSet name for per-CR workload discovery |
 | `target.namespace` | Namespace for target workload (defaults to CR namespace) |
 | `externalIDRef` | Reference an existing external resource by ID (only for CRDs without path parameters) |
 | `readOnly` | If true, only observe the resource (no create/update/delete) |
@@ -2292,15 +2342,28 @@ Uses Kubernetes DNS to resolve pod addresses:
 
 Requires a headless Service (`clusterIP: None`).
 
-### Pod IP Mode (default for Deployment)
+### Pod IP Mode (default for Deployment and DaemonSet)
 
-Queries the Kubernetes API for pod IPs directly. Useful when DNS is not available or for faster discovery.
+Queries the Kubernetes API for pod IPs directly. Useful when DNS is not available or for faster discovery. This is the default mode for Deployments and DaemonSets.
 
 ```bash
 ./bin/manager \
   --statefulset-name my-api \
   --discovery-mode pod-ip
 ```
+
+### Service DNS Mode
+
+Discovers all pods behind a Kubernetes Service by looking up the Service's selector labels and listing matching pods. This works with any workload type but is especially useful for DaemonSets where you may know the Service name but not the DaemonSet name.
+
+```bash
+./bin/manager \
+  --daemonset-name my-agent \
+  --service my-agent-svc \
+  --discovery-mode service-dns
+```
+
+Unlike DNS mode (which uses per-pod DNS names), Service DNS mode queries the Service object to find its selector, then lists all matching pods by their IPs.
 
 ## How Reconciliation Works
 
