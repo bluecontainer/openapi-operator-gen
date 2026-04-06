@@ -47,6 +47,11 @@ const (
 	DNSMode DiscoveryMode = "dns"
 	// PodIPMode queries pods and uses their IP addresses
 	PodIPMode DiscoveryMode = "pod-ip"
+	// ServiceDNSMode discovers all pods behind a Kubernetes Service by looking up
+	// the Service's selector labels and listing matching pods. Works with any workload
+	// type but is especially useful for DaemonSets with an associated Service, where
+	// you may not know the DaemonSet name but know the Service name.
+	ServiceDNSMode DiscoveryMode = "service-dns"
 )
 
 // WorkloadKind defines the type of workload to discover
@@ -57,7 +62,9 @@ const (
 	StatefulSetKind WorkloadKind = "statefulset"
 	// DeploymentKind discovers endpoints from a Deployment
 	DeploymentKind WorkloadKind = "deployment"
-	// AutoKind automatically detects the workload kind (tries StatefulSet first, then Deployment)
+	// DaemonSetKind discovers endpoints from a DaemonSet
+	DaemonSetKind WorkloadKind = "daemonset"
+	// AutoKind automatically detects the workload kind (tries StatefulSet first, then Deployment, then DaemonSet)
 	AutoKind WorkloadKind = "auto"
 )
 
@@ -67,8 +74,11 @@ type Config struct {
 	// Either StatefulSetName, DeploymentName, PodName, or HelmRelease must be specified.
 	StatefulSetName string
 	// DeploymentName is the name of the Deployment to discover pods from.
-	// Either StatefulSetName, DeploymentName, PodName, or HelmRelease must be specified.
+	// Either StatefulSetName, DeploymentName, DaemonSetName, PodName, or HelmRelease must be specified.
 	DeploymentName string
+	// DaemonSetName is the name of the DaemonSet to discover pods from.
+	// Either StatefulSetName, DeploymentName, DaemonSetName, PodName, or HelmRelease must be specified.
+	DaemonSetName string
 	// PodName is the name of a specific pod to target directly.
 	// Either StatefulSetName, DeploymentName, PodName, or HelmRelease must be specified.
 	PodName string
@@ -118,7 +128,9 @@ type Resolver struct {
 	stopCh               chan struct{}
 	discoveredStsName    string       // StatefulSet name when discovered via Helm release
 	discoveredDeployName string       // Deployment name when discovered via Helm release
+	discoveredDSName     string       // DaemonSet name when discovered via Helm release
 	discoveredSvcName    string       // Service name when discovered via Helm release
+	discoveredDSSvcName  string       // Service name for DaemonSet when discovered via Helm release
 	discoveredKind       WorkloadKind // discovered workload kind
 }
 
@@ -142,7 +154,10 @@ func NewResolver(c client.Client, cfg Config) *Resolver {
 
 	// Determine default discovery mode based on workload kind
 	if cfg.DiscoveryMode == "" {
-		if cfg.DeploymentName != "" || cfg.WorkloadKind == DeploymentKind {
+		if cfg.DaemonSetName != "" || cfg.WorkloadKind == DaemonSetKind {
+			// DaemonSets default to pod-ip mode (no stable DNS names)
+			cfg.DiscoveryMode = PodIPMode
+		} else if cfg.DeploymentName != "" || cfg.WorkloadKind == DeploymentKind {
 			// Deployments must use pod-ip mode (no stable DNS names)
 			cfg.DiscoveryMode = PodIPMode
 		} else {
@@ -154,6 +169,14 @@ func NewResolver(c client.Client, cfg Config) *Resolver {
 	if cfg.DeploymentName != "" || cfg.WorkloadKind == DeploymentKind {
 		if cfg.Strategy == LeaderOnly || cfg.Strategy == ByOrdinal {
 			// Fall back to round-robin for Deployments
+			cfg.Strategy = RoundRobin
+		}
+	}
+
+	// Validate strategy for DaemonSet (ordinal-based strategies don't apply)
+	if cfg.DaemonSetName != "" || cfg.WorkloadKind == DaemonSetKind {
+		if cfg.Strategy == LeaderOnly || cfg.Strategy == ByOrdinal {
+			// Fall back to round-robin for DaemonSets
 			cfg.Strategy = RoundRobin
 		}
 	}
@@ -328,7 +351,7 @@ func (r *Resolver) refresh(ctx context.Context) error {
 	logger := log.FromContext(ctx)
 
 	// If using Helm release discovery, find the workload first
-	if r.config.HelmRelease != "" && r.discoveredStsName == "" && r.discoveredDeployName == "" {
+	if r.config.HelmRelease != "" && r.discoveredStsName == "" && r.discoveredDeployName == "" && r.discoveredDSName == "" {
 		if err := r.discoverFromHelmRelease(ctx); err != nil {
 			return err
 		}
@@ -337,10 +360,13 @@ func (r *Resolver) refresh(ctx context.Context) error {
 	var endpoints []Endpoint
 	var err error
 
-	// Determine which workload type to discover from
-	useDeployment := r.isUsingDeployment()
-
-	if useDeployment {
+	// ServiceDNS mode works for any workload type - use service DNS as single endpoint
+	if r.config.DiscoveryMode == ServiceDNSMode {
+		endpoints, err = r.discoverByServiceDNS(ctx)
+	} else if r.isUsingDaemonSet() {
+		// DaemonSet discovery via pod IPs
+		endpoints, err = r.discoverDaemonSetPods(ctx)
+	} else if r.isUsingDeployment() {
 		// Deployments always use pod-ip mode
 		endpoints, err = r.discoverDeploymentPods(ctx)
 	} else {
@@ -367,6 +393,20 @@ func (r *Resolver) refresh(ctx context.Context) error {
 	return nil
 }
 
+// isUsingDaemonSet returns true if we're discovering from a DaemonSet
+func (r *Resolver) isUsingDaemonSet() bool {
+	if r.config.DaemonSetName != "" {
+		return true
+	}
+	if r.discoveredDSName != "" {
+		return true
+	}
+	if r.config.WorkloadKind == DaemonSetKind {
+		return true
+	}
+	return false
+}
+
 // isUsingDeployment returns true if we're discovering from a Deployment
 func (r *Resolver) isUsingDeployment() bool {
 	if r.config.DeploymentName != "" {
@@ -383,6 +423,9 @@ func (r *Resolver) isUsingDeployment() bool {
 
 // getWorkloadKind returns the current workload kind being used
 func (r *Resolver) getWorkloadKind() WorkloadKind {
+	if r.isUsingDaemonSet() {
+		return DaemonSetKind
+	}
 	if r.isUsingDeployment() {
 		return DeploymentKind
 	}
@@ -599,7 +642,42 @@ func (r *Resolver) discoverFromHelmRelease(ctx context.Context) error {
 		}
 	}
 
-	return fmt.Errorf("no StatefulSet or Deployment found for Helm release %s in namespace %s",
+	// Try to find DaemonSet (if no StatefulSet or Deployment found, or explicitly requesting DaemonSet)
+	if r.config.WorkloadKind != StatefulSetKind && r.config.WorkloadKind != DeploymentKind {
+		dsList := &appsv1.DaemonSetList{}
+		err := r.client.List(ctx, dsList,
+			client.InNamespace(namespace),
+			client.MatchingLabels{
+				"app.kubernetes.io/instance": r.config.HelmRelease,
+			},
+		)
+		if err != nil {
+			logger.Error(err, "Failed to list DaemonSets for Helm release")
+		} else if len(dsList.Items) > 0 {
+			// Use the first DaemonSet found (or the one with most ready pods if multiple)
+			var selectedDS *appsv1.DaemonSet
+			for i := range dsList.Items {
+				ds := &dsList.Items[i]
+				if selectedDS == nil {
+					selectedDS = ds
+				} else if ds.Status.NumberReady > selectedDS.Status.NumberReady {
+					selectedDS = ds
+				}
+			}
+
+			r.discoveredDSName = selectedDS.Name
+			r.discoveredKind = DaemonSetKind
+			logger.Info("Discovered DaemonSet from Helm release",
+				"helmRelease", r.config.HelmRelease,
+				"daemonset", r.discoveredDSName)
+
+			// Try to find a Service for this DaemonSet
+			r.discoverServiceForDaemonSet(ctx, namespace)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no StatefulSet, Deployment, or DaemonSet found for Helm release %s in namespace %s",
 		r.config.HelmRelease, namespace)
 }
 
@@ -633,6 +711,43 @@ func (r *Resolver) discoverServiceFromHelmRelease(ctx context.Context, namespace
 		r.discoveredSvcName = r.discoveredStsName
 		logger.Info("No headless service found, using StatefulSet name as service name",
 			"service", r.discoveredSvcName)
+	}
+}
+
+// discoverServiceForDaemonSet finds a Service for a DaemonSet discovered via Helm release
+func (r *Resolver) discoverServiceForDaemonSet(ctx context.Context, namespace string) {
+	logger := log.FromContext(ctx)
+
+	svcList := &corev1.ServiceList{}
+	err := r.client.List(ctx, svcList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/instance": r.config.HelmRelease,
+		},
+	)
+	if err != nil {
+		logger.Error(err, "Failed to list Services for DaemonSet Helm release")
+		return
+	}
+
+	// Prefer a ClusterIP service (not headless) for DaemonSets since kube-proxy handles load balancing
+	for i := range svcList.Items {
+		svc := &svcList.Items[i]
+		if svc.Spec.ClusterIP != "" && svc.Spec.ClusterIP != "None" {
+			r.discoveredDSSvcName = svc.Name
+			logger.Info("Discovered Service for DaemonSet from Helm release",
+				"helmRelease", r.config.HelmRelease,
+				"service", r.discoveredDSSvcName)
+			return
+		}
+	}
+
+	// Fall back to any service (including headless)
+	if len(svcList.Items) > 0 {
+		r.discoveredDSSvcName = svcList.Items[0].Name
+		logger.Info("Using first available Service for DaemonSet",
+			"helmRelease", r.config.HelmRelease,
+			"service", r.discoveredDSSvcName)
 	}
 }
 
@@ -688,12 +803,143 @@ func (r *Resolver) discoverDeploymentPods(ctx context.Context) ([]Endpoint, erro
 	return endpoints, nil
 }
 
+// discoverDaemonSetPods discovers pods from a DaemonSet using pod IPs
+func (r *Resolver) discoverDaemonSetPods(ctx context.Context) ([]Endpoint, error) {
+	dsName := r.getDaemonSetName()
+	if dsName == "" {
+		return nil, fmt.Errorf("no DaemonSet name configured or discovered")
+	}
+
+	// Get the DaemonSet
+	ds := &appsv1.DaemonSet{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      dsName,
+		Namespace: r.GetNamespace(),
+	}, ds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get DaemonSet %s: %w", dsName, err)
+	}
+
+	// List pods belonging to this DaemonSet
+	podList := &corev1.PodList{}
+	err = r.client.List(ctx, podList,
+		client.InNamespace(r.GetNamespace()),
+		client.MatchingLabels(ds.Spec.Selector.MatchLabels),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	endpoints := make([]Endpoint, 0, len(podList.Items))
+	for _, pod := range podList.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		if pod.Status.PodIP == "" {
+			continue
+		}
+		// Skip pods that are being deleted
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
+		endpoints = append(endpoints, Endpoint{
+			URL:     url,
+			Healthy: true, // Will be updated by health check
+			PodName: pod.Name,
+			PodIP:   pod.Status.PodIP,
+		})
+	}
+
+	return endpoints, nil
+}
+
+// discoverByServiceDNS discovers all pods behind a Kubernetes Service by looking up
+// the Service's selector and listing matching pods. This works with any workload type
+// (DaemonSet, Deployment, StatefulSet) — you only need to know the Service name.
+func (r *Resolver) discoverByServiceDNS(ctx context.Context) ([]Endpoint, error) {
+	svcName := r.getDaemonSetServiceName()
+	if svcName == "" {
+		svcName = r.getServiceName()
+	}
+	if svcName == "" {
+		return nil, fmt.Errorf("ServiceDNS mode requires a ServiceName to be configured or discovered")
+	}
+
+	return r.discoverServiceEndpoints(ctx, svcName, r.GetNamespace())
+}
+
+// discoverServiceEndpoints discovers all running pods behind a Kubernetes Service
+// by looking up the Service's selector labels and listing matching pods.
+func (r *Resolver) discoverServiceEndpoints(ctx context.Context, svcName, namespace string) ([]Endpoint, error) {
+	// Get the Service to find its selector
+	svc := &corev1.Service{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      svcName,
+		Namespace: namespace,
+	}, svc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Service %s: %w", svcName, err)
+	}
+
+	if len(svc.Spec.Selector) == 0 {
+		return nil, fmt.Errorf("Service %s has no selector — cannot discover pods", svcName)
+	}
+
+	// List pods matching the Service's selector
+	podList := &corev1.PodList{}
+	err = r.client.List(ctx, podList,
+		client.InNamespace(namespace),
+		client.MatchingLabels(svc.Spec.Selector),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods for Service %s: %w", svcName, err)
+	}
+
+	endpoints := make([]Endpoint, 0, len(podList.Items))
+	for _, pod := range podList.Items {
+		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+			continue
+		}
+		url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
+		endpoints = append(endpoints, Endpoint{
+			URL:     url,
+			Healthy: true,
+			PodName: pod.Name,
+			PodIP:   pod.Status.PodIP,
+		})
+	}
+
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("no running pods found behind Service %s", svcName)
+	}
+
+	return endpoints, nil
+}
+
+// getDaemonSetServiceName returns the Service name for DaemonSet discovery
+func (r *Resolver) getDaemonSetServiceName() string {
+	if r.discoveredDSSvcName != "" {
+		return r.discoveredDSSvcName
+	}
+	return ""
+}
+
 // getDeploymentName returns the Deployment name to use (configured or discovered)
 func (r *Resolver) getDeploymentName() string {
 	if r.config.DeploymentName != "" {
 		return r.config.DeploymentName
 	}
 	return r.discoveredDeployName
+}
+
+// getDaemonSetName returns the DaemonSet name to use (configured or discovered)
+func (r *Resolver) getDaemonSetName() string {
+	if r.config.DaemonSetName != "" {
+		return r.config.DaemonSetName
+	}
+	return r.discoveredDSName
 }
 
 // GetNamespace returns the namespace to use
@@ -727,6 +973,7 @@ func (r *Resolver) getServiceName() string {
 type HelmReleaseEndpoint struct {
 	StatefulSetName string
 	DeploymentName  string
+	DaemonSetName   string
 	ServiceName     string
 	Namespace       string
 	WorkloadKind    WorkloadKind
@@ -744,6 +991,10 @@ type HelmReleaseDiscoveryOptions struct {
 	// When set, skips the "try all Deployments" logic and only matches this name.
 	DeploymentName string
 
+	// DaemonSetName narrows discovery to only the DaemonSet with this name.
+	// When set, skips the "try all DaemonSets" logic and only matches this name.
+	DaemonSetName string
+
 	// Labels are additional labels that discovered workloads must match.
 	// These are ANDed with the Helm release instance label.
 	Labels map[string]string
@@ -751,7 +1002,7 @@ type HelmReleaseDiscoveryOptions struct {
 
 // DiscoverHelmReleaseEndpoint discovers all endpoints from a Helm release for per-CR targeting.
 // This is used when a CR specifies targetHelmRelease to override global endpoint config.
-// It tries StatefulSet first, then falls back to Deployment.
+// It tries StatefulSet first, then Deployment, then DaemonSet.
 // Returns all pod endpoints so the caller can apply the appropriate strategy.
 // Pass nil for opts to discover without narrowing (original behavior).
 func (r *Resolver) DiscoverHelmReleaseEndpoint(ctx context.Context, helmRelease, namespace string, opts *HelmReleaseDiscoveryOptions) (*HelmReleaseEndpoint, error) {
@@ -771,11 +1022,12 @@ func (r *Resolver) DiscoverHelmReleaseEndpoint(ctx context.Context, helmRelease,
 		}
 	}
 
-	// Determine whether to skip StatefulSet or Deployment search based on narrowing.
-	// If opts.DeploymentName is set (without StatefulSetName), skip StatefulSet search.
-	// If opts.StatefulSetName is set (without DeploymentName), skip Deployment search.
-	skipStatefulSets := opts != nil && opts.DeploymentName != "" && opts.StatefulSetName == ""
-	skipDeployments := opts != nil && opts.StatefulSetName != "" && opts.DeploymentName == ""
+	// Determine whether to skip workload searches based on narrowing.
+	// If a specific workload name is set, skip searching the other workload types.
+	hasNarrowing := opts != nil && (opts.StatefulSetName != "" || opts.DeploymentName != "" || opts.DaemonSetName != "")
+	skipStatefulSets := hasNarrowing && opts.StatefulSetName == ""
+	skipDeployments := hasNarrowing && opts.DeploymentName == ""
+	skipDaemonSets := hasNarrowing && opts.DaemonSetName == ""
 
 	// Try StatefulSet first (unless narrowed to Deployment only)
 	if !skipStatefulSets {
@@ -973,6 +1225,122 @@ func (r *Resolver) DiscoverHelmReleaseEndpoint(ctx context.Context, helmRelease,
 		}
 	}
 
+	// Try DaemonSet (unless narrowed to StatefulSet or Deployment only)
+	if !skipDaemonSets {
+		dsList := &appsv1.DaemonSetList{}
+		err := r.client.List(ctx, dsList,
+			client.InNamespace(namespace),
+			client.MatchingLabels(labels),
+		)
+		if err == nil && len(dsList.Items) > 0 {
+			// Filter by name if narrowing is requested
+			var candidates []appsv1.DaemonSet
+			if opts != nil && opts.DaemonSetName != "" {
+				for i := range dsList.Items {
+					if dsList.Items[i].Name == opts.DaemonSetName {
+						candidates = append(candidates, dsList.Items[i])
+					}
+				}
+			} else {
+				candidates = dsList.Items
+			}
+
+			if len(candidates) > 0 {
+				// Select the DaemonSet with most ready pods
+				var selectedDS *appsv1.DaemonSet
+				for i := range candidates {
+					ds := &candidates[i]
+					if selectedDS == nil {
+						selectedDS = ds
+					} else if ds.Status.NumberReady > selectedDS.Status.NumberReady {
+						selectedDS = ds
+					}
+				}
+
+				dsName := selectedDS.Name
+
+				// Check if we should use Service DNS mode (discover pods via Service selector)
+				if r.config.DiscoveryMode == ServiceDNSMode {
+					// Find a Service for this DaemonSet
+					svcList := &corev1.ServiceList{}
+					err = r.client.List(ctx, svcList,
+						client.InNamespace(namespace),
+						client.MatchingLabels{
+							"app.kubernetes.io/instance": helmRelease,
+						},
+					)
+					if err == nil {
+						for i := range svcList.Items {
+							svc := &svcList.Items[i]
+							if svc.Spec.ClusterIP != "" && svc.Spec.ClusterIP != "None" && len(svc.Spec.Selector) > 0 {
+								// Discover pods behind the Service
+								endpoints, epErr := r.discoverServiceEndpoints(ctx, svc.Name, namespace)
+								if epErr != nil {
+									logger.Error(epErr, "Failed to discover pods via Service, falling back to DaemonSet pod discovery")
+									break
+								}
+
+								logger.Info("Discovered DaemonSet endpoints via Service from Helm release",
+									"helmRelease", helmRelease,
+									"daemonset", dsName,
+									"service", svc.Name,
+									"endpointCount", len(endpoints))
+
+								return &HelmReleaseEndpoint{
+									DaemonSetName: dsName,
+									ServiceName:   svc.Name,
+									Namespace:     namespace,
+									WorkloadKind:  DaemonSetKind,
+									Endpoints:     endpoints,
+								}, nil
+							}
+						}
+					}
+				}
+
+				// Discover all pod endpoints via pod IPs
+				podList := &corev1.PodList{}
+				err = r.client.List(ctx, podList,
+					client.InNamespace(namespace),
+					client.MatchingLabels(selectedDS.Spec.Selector.MatchLabels),
+				)
+				if err != nil {
+					return nil, fmt.Errorf("failed to list pods for DaemonSet %s: %w", dsName, err)
+				}
+
+				var endpoints []Endpoint
+				for _, pod := range podList.Items {
+					if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+						continue
+					}
+					url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
+					endpoints = append(endpoints, Endpoint{
+						URL:     url,
+						Healthy: true,
+						PodName: pod.Name,
+						PodIP:   pod.Status.PodIP,
+					})
+				}
+
+				if len(endpoints) == 0 {
+					return nil, fmt.Errorf("no running pods found for DaemonSet %s", dsName)
+				}
+
+				logger.Info("Discovered DaemonSet endpoints from Helm release",
+					"helmRelease", helmRelease,
+					"daemonset", dsName,
+					"endpointCount", len(endpoints))
+
+				return &HelmReleaseEndpoint{
+					DaemonSetName: dsName,
+					Namespace:     namespace,
+					WorkloadKind:  DaemonSetKind,
+					Endpoints:     endpoints,
+				}, nil
+			}
+		}
+	}
+
 	// Build descriptive error message
 	if opts != nil && opts.StatefulSetName != "" {
 		return nil, fmt.Errorf("no StatefulSet %q found for Helm release %s in namespace %s", opts.StatefulSetName, helmRelease, namespace)
@@ -980,7 +1348,10 @@ func (r *Resolver) DiscoverHelmReleaseEndpoint(ctx context.Context, helmRelease,
 	if opts != nil && opts.DeploymentName != "" {
 		return nil, fmt.Errorf("no Deployment %q found for Helm release %s in namespace %s", opts.DeploymentName, helmRelease, namespace)
 	}
-	return nil, fmt.Errorf("no StatefulSet or Deployment found for Helm release %s in namespace %s", helmRelease, namespace)
+	if opts != nil && opts.DaemonSetName != "" {
+		return nil, fmt.Errorf("no DaemonSet %q found for Helm release %s in namespace %s", opts.DaemonSetName, helmRelease, namespace)
+	}
+	return nil, fmt.Errorf("no StatefulSet, Deployment, or DaemonSet found for Helm release %s in namespace %s", helmRelease, namespace)
 }
 
 // GetEndpointForHelmRelease returns an endpoint URL for a specific Helm release.
@@ -1308,6 +1679,116 @@ func (r *Resolver) discoverDeploymentEndpoints(ctx context.Context, deployName, 
 
 	if len(endpoints) == 0 {
 		return nil, fmt.Errorf("no running pods found for Deployment %s", deployName)
+	}
+
+	return endpoints, nil
+}
+
+// GetEndpointForDaemonSet returns an endpoint URL for a specific DaemonSet.
+// This supports per-CR targeting when targetDaemonSet is specified.
+// If a serviceName is provided, discovers pods via the Service's selector.
+// Otherwise it discovers all pods from the DaemonSet directly.
+func (r *Resolver) GetEndpointForDaemonSet(ctx context.Context, dsName, namespace, serviceName string) (string, error) {
+	logger := log.FromContext(ctx)
+
+	if namespace == "" {
+		namespace = r.GetNamespace()
+	}
+
+	var endpoints []Endpoint
+	var err error
+
+	// If a service name is provided, discover pods via Service selector
+	if serviceName != "" {
+		endpoints, err = r.discoverServiceEndpoints(ctx, serviceName, namespace)
+		if err != nil {
+			return "", err
+		}
+
+		logger.Info("Discovered DaemonSet endpoints via Service",
+			"daemonset", dsName,
+			"service", serviceName,
+			"namespace", namespace,
+			"endpointCount", len(endpoints))
+	} else {
+		// Discover all endpoints for this DaemonSet via pod IPs
+		endpoints, err = r.discoverDaemonSetEndpoints(ctx, dsName, namespace)
+		if err != nil {
+			return "", err
+		}
+
+		logger.Info("Discovered DaemonSet endpoints",
+			"daemonset", dsName,
+			"namespace", namespace,
+			"endpointCount", len(endpoints))
+	}
+
+	// Apply strategy to select endpoint (no ordinal for DaemonSets)
+	return r.selectEndpoint(endpoints, "", nil)
+}
+
+// GetAllEndpointsForDaemonSet returns all endpoint URLs for a specific DaemonSet.
+// Use this with AllHealthy strategy for fan-out/broadcast operations (e.g., run on every node).
+func (r *Resolver) GetAllEndpointsForDaemonSet(ctx context.Context, dsName, namespace string) ([]string, error) {
+	if namespace == "" {
+		namespace = r.GetNamespace()
+	}
+
+	endpoints, err := r.discoverDaemonSetEndpoints(ctx, dsName, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	urls := make([]string, 0, len(endpoints))
+	for _, ep := range endpoints {
+		if ep.Healthy {
+			urls = append(urls, ep.URL+r.config.BasePath)
+		}
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("no healthy endpoints available for DaemonSet %s", dsName)
+	}
+	return urls, nil
+}
+
+// discoverDaemonSetEndpoints discovers all endpoints for a DaemonSet
+func (r *Resolver) discoverDaemonSetEndpoints(ctx context.Context, dsName, namespace string) ([]Endpoint, error) {
+	// Get the DaemonSet
+	ds := &appsv1.DaemonSet{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      dsName,
+		Namespace: namespace,
+	}, ds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get DaemonSet %s: %w", dsName, err)
+	}
+
+	// Discover all pod endpoints
+	podList := &corev1.PodList{}
+	err = r.client.List(ctx, podList,
+		client.InNamespace(namespace),
+		client.MatchingLabels(ds.Spec.Selector.MatchLabels),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods for DaemonSet %s: %w", dsName, err)
+	}
+
+	var endpoints []Endpoint
+	for _, pod := range podList.Items {
+		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+			continue
+		}
+		url := fmt.Sprintf("%s://%s:%d", r.config.Scheme, pod.Status.PodIP, r.config.Port)
+		endpoints = append(endpoints, Endpoint{
+			URL:     url,
+			Healthy: true,
+			PodName: pod.Name,
+			PodIP:   pod.Status.PodIP,
+		})
+	}
+
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("no running pods found for DaemonSet %s", dsName)
 	}
 
 	return endpoints, nil
